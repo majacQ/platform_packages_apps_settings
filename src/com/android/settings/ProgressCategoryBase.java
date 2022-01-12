@@ -17,16 +17,31 @@
 package com.android.settings;
 
 import android.content.Context;
-import android.preference.PreferenceCategory;
 import android.util.AttributeSet;
 
+import androidx.preference.PreferenceCategory;
+
 public abstract class ProgressCategoryBase extends PreferenceCategory {
+    public ProgressCategoryBase(Context context) {
+        super(context);
+    }
+
     public ProgressCategoryBase(Context context, AttributeSet attrs) {
         super(context, attrs);
     }
 
+    public ProgressCategoryBase(Context context, AttributeSet attrs, int defStyleAttr) {
+        super(context, attrs, defStyleAttr);
+    }
+
+    public ProgressCategoryBase(Context context, AttributeSet attrs, int defStyleAttr,
+            int defStyleRes) {
+        super(context, attrs, defStyleAttr, defStyleRes);
+    }
+
     /**
      * Turn on/off the progress indicator and text on the right.
+     *
      * @param progressOn whether or not the progress should be displayed
      */
     public abstract void setProgress(boolean progressOn);

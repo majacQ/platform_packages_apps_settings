@@ -16,21 +16,16 @@
 
 package com.android.settings;
 
-import com.android.settings.SettingsPreferenceFragment.SettingsDialogFragment;
-
 import android.app.Activity;
-import android.app.AlertDialog;
 import android.app.Dialog;
-import android.app.Fragment;
 import android.app.admin.DevicePolicyManager;
-import android.content.ContentResolver;
+import android.app.settings.SettingsEnums;
 import android.content.Context;
 import android.content.Intent;
 import android.net.ConnectivityManager;
 import android.net.Proxy;
-import android.net.ProxyProperties;
+import android.net.ProxyInfo;
 import android.os.Bundle;
-import android.provider.Settings;
 import android.text.Selection;
 import android.text.Spannable;
 import android.text.TextUtils;
@@ -44,11 +39,12 @@ import android.widget.Button;
 import android.widget.EditText;
 import android.widget.TextView;
 
-import java.net.InetSocketAddress;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
+import androidx.appcompat.app.AlertDialog;
 
-public class ProxySelector extends Fragment implements DialogCreatable {
+import com.android.settings.SettingsPreferenceFragment.SettingsDialogFragment;
+import com.android.settings.core.InstrumentedFragment;
+
+public class ProxySelector extends InstrumentedFragment implements DialogCreatable {
     private static final String TAG = "ProxySelector";
 
     EditText    mHostnameField;
@@ -58,31 +54,10 @@ public class ProxySelector extends Fragment implements DialogCreatable {
     Button      mClearButton;
     Button      mDefaultButton;
 
-    // Allows underscore char to supports proxies that do not
-    // follow the spec
-    private static final String HC = "a-zA-Z0-9\\_";
-
-    // Matches blank input, ips, and domain names
-    private static final String HOSTNAME_REGEXP =
-            "^$|^[" + HC + "]+(\\-[" + HC + "]+)*(\\.[" + HC + "]+(\\-[" + HC + "]+)*)*$";
-    private static final Pattern HOSTNAME_PATTERN;
-    private static final String EXCLUSION_REGEXP =
-            "$|^(\\*)?\\.?[" + HC + "]+(\\-[" + HC + "]+)*(\\.[" + HC + "]+(\\-[" + HC + "]+)*)*$";
-    private static final Pattern EXCLUSION_PATTERN;
-    static {
-        HOSTNAME_PATTERN = Pattern.compile(HOSTNAME_REGEXP);
-        EXCLUSION_PATTERN = Pattern.compile(EXCLUSION_REGEXP);
-    }
-
     private static final int ERROR_DIALOG_ID = 0;
 
     private SettingsDialogFragment mDialogFragment;
     private View mView;
-
-    @Override
-    public void onCreate(Bundle icicle) {
-        super.onCreate(icicle);
-    }
 
     @Override
     public View onCreateView(LayoutInflater inflater, ViewGroup container,
@@ -129,12 +104,17 @@ public class ProxySelector extends Fragment implements DialogCreatable {
         return null;
     }
 
+    @Override
+    public int getDialogMetricsCategory(int dialogId) {
+        return SettingsEnums.DIALOG_PROXY_SELECTOR_ERROR;
+    }
+
     private void showDialog(int dialogId) {
         if (mDialogFragment != null) {
             Log.e(TAG, "Old dialog fragment not null!");
         }
-        mDialogFragment = new SettingsDialogFragment(this, dialogId);
-        mDialogFragment.show(getActivity().getFragmentManager(), Integer.toString(dialogId));
+        mDialogFragment = SettingsDialogFragment.newInstance(this, dialogId);
+        mDialogFragment.show(getActivity().getSupportFragmentManager(), Integer.toString(dialogId));
     }
 
     private void initView(View view) {
@@ -167,11 +147,11 @@ public class ProxySelector extends Fragment implements DialogCreatable {
         ConnectivityManager cm =
                 (ConnectivityManager)getActivity().getSystemService(Context.CONNECTIVITY_SERVICE);
 
-        ProxyProperties proxy = cm.getGlobalProxy();
+        ProxyInfo proxy = cm.getGlobalProxy();
         if (proxy != null) {
             hostname = proxy.getHost();
             port = proxy.getPort();
-            exclList = proxy.getExclusionList();
+            exclList = proxy.getExclusionListAsString();
         }
 
         if (hostname == null) {
@@ -195,6 +175,8 @@ public class ProxySelector extends Fragment implements DialogCreatable {
         String title = intent.getStringExtra("title");
         if (!TextUtils.isEmpty(title)) {
             activity.setTitle(title);
+        } else {
+            activity.setTitle(R.string.proxy_settings_title);
         }
     }
 
@@ -203,35 +185,24 @@ public class ProxySelector extends Fragment implements DialogCreatable {
      * @return 0 on success, string resource ID on failure
      */
     public static int validate(String hostname, String port, String exclList) {
-        Matcher match = HOSTNAME_PATTERN.matcher(hostname);
-        String exclListArray[] = exclList.split(",");
-
-        if (!match.matches()) return R.string.proxy_error_invalid_host;
-
-        for (String excl : exclListArray) {
-            Matcher m = EXCLUSION_PATTERN.matcher(excl);
-            if (!m.matches()) return R.string.proxy_error_invalid_exclusion_list;
-        }
-
-        if (hostname.length() > 0 && port.length() == 0) {
-            return R.string.proxy_error_empty_port;
-        }
-
-        if (port.length() > 0) {
-            if (hostname.length() == 0) {
+        switch (Proxy.validate(hostname, port, exclList)) {
+            case Proxy.PROXY_VALID:
+                return 0;
+            case Proxy.PROXY_HOSTNAME_EMPTY:
                 return R.string.proxy_error_empty_host_set_port;
-            }
-            int portVal = -1;
-            try {
-                portVal = Integer.parseInt(port);
-            } catch (NumberFormatException ex) {
+            case Proxy.PROXY_HOSTNAME_INVALID:
+                return R.string.proxy_error_invalid_host;
+            case Proxy.PROXY_PORT_EMPTY:
+                return R.string.proxy_error_empty_port;
+            case Proxy.PROXY_PORT_INVALID:
                 return R.string.proxy_error_invalid_port;
-            }
-            if (portVal <= 0 || portVal > 0xFFFF) {
-                return R.string.proxy_error_invalid_port;
-            }
+            case Proxy.PROXY_EXCLLIST_INVALID:
+                return R.string.proxy_error_invalid_exclusion_list;
+            default:
+                // should neven happen
+                Log.e(TAG, "Unknown proxy settings error");
+                return -1;
         }
-        return 0;
     }
 
     /**
@@ -245,7 +216,7 @@ public class ProxySelector extends Fragment implements DialogCreatable {
         int port = 0;
 
         int result = validate(hostname, portStr, exclList);
-        if (result > 0) {
+        if (result != 0) {
             showDialog(ERROR_DIALOG_ID);
             return false;
         }
@@ -258,7 +229,7 @@ public class ProxySelector extends Fragment implements DialogCreatable {
                 return false;
             }
         }
-        ProxyProperties p = new ProxyProperties(hostname, port, exclList);
+        ProxyInfo p = new ProxyInfo(hostname, port, exclList);
         // FIXME: The best solution would be to make a better UI that would
         // disable editing of the text boxes if the user chooses to use the
         // default settings. i.e. checking a box to always use the default
@@ -303,4 +274,9 @@ public class ProxySelector extends Fragment implements DialogCreatable {
                 }
             }
         };
+
+    @Override
+    public int getMetricsCategory() {
+        return SettingsEnums.PROXY_SELECTOR;
+    }
 }

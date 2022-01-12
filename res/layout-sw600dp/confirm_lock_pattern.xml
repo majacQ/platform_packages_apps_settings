@@ -13,47 +13,16 @@
      See the License for the specific language governing permissions and
      limitations under the License.
 -->
-<com.android.internal.widget.LinearLayoutWithDefaultTouchRecepient
-        xmlns:android="http://schemas.android.com/apk/res/android"
-    android:id="@+id/topLayout"
-    android:orientation="vertical"
+<com.google.android.setupdesign.GlifLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/setup_wizard_layout"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:gravity="center_horizontal">
+    android:layout="@layout/sud_glif_blank_template">
 
-    <!-- top: instructions and buttons -->
-    <!-- header message -->
-    <ScrollView
+    <include
+        layout="@layout/confirm_lock_pattern_base"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:gravity="center"
-        android:layout_marginTop="96dip">
-
-        <TextView android:id="@+id/headerText"
-            android:layout_width="fill_parent"
-            android:layout_height="wrap_content"
-            android:gravity="center"
-            android:textAppearance="?android:attr/textAppearanceMedium"/>
-
-    </ScrollView>
-
-    <!-- footer message -->
-    <TextView android:id="@+id/footerText"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="16dip"
-        android:textAppearance="?android:attr/textAppearanceMedium"/>
-
-    <!-- bottom: lock pattern -->
-    <com.android.internal.widget.LockPatternView android:id="@+id/lockPattern"
-         android:layout_width="354dip"
-         android:layout_height="354dip"
-         android:layout_marginTop="80dip"
-         aspect="square"/>
-
-    <View
-        android:layout_width="match_parent"
-        android:layout_height="0dip"
-        android:layout_weight="1"/>
-
-</com.android.internal.widget.LinearLayoutWithDefaultTouchRecepient>
+        android:layout_height="match_parent"
+        android:layout_gravity="center_horizontal" />
+</com.google.android.setupdesign.GlifLayout>

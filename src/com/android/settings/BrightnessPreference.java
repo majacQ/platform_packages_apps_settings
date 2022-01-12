@@ -19,8 +19,9 @@ package com.android.settings;
 import android.content.Context;
 import android.content.Intent;
 import android.os.UserHandle;
-import android.preference.Preference;
 import android.util.AttributeSet;
+
+import androidx.preference.Preference;
 
 public class BrightnessPreference extends Preference {
 
@@ -30,7 +31,7 @@ public class BrightnessPreference extends Preference {
 
     @Override
     protected void onClick() {
-        Intent intent = new Intent(Intent.ACTION_SHOW_BRIGHTNESS_DIALOG);
-        getContext().sendBroadcastAsUser(intent, UserHandle.CURRENT_OR_SELF);
+        getContext().startActivityAsUser(new Intent(Intent.ACTION_SHOW_BRIGHTNESS_DIALOG),
+                UserHandle.CURRENT_OR_SELF);
     }
 }

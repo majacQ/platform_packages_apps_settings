@@ -26,6 +26,8 @@ import android.view.View;
 import android.widget.ImageView;
 import android.widget.TextView;
 
+import androidx.preference.PreferenceViewHolder;
+
 import com.android.settings.R;
 
 /**
@@ -60,7 +62,7 @@ public class ColorPreference extends ListDialogPreference {
 
     @Override
     public boolean shouldDisableDependents() {
-        return getValue() == Color.TRANSPARENT || super.shouldDisableDependents();
+        return Color.alpha(getValue()) == 0 || super.shouldDisableDependents();
     }
 
     @Override
@@ -79,8 +81,8 @@ public class ColorPreference extends ListDialogPreference {
     }
 
     @Override
-    protected void onBindView(View view) {
-        super.onBindView(view);
+    public void onBindViewHolder(PreferenceViewHolder view) {
+        super.onBindViewHolder(view);
 
         if (mPreviewEnabled) {
             final ImageView previewImage = (ImageView) view.findViewById(R.id.color_preview);

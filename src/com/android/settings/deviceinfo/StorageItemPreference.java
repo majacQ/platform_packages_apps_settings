@@ -18,48 +18,65 @@ package com.android.settings.deviceinfo;
 
 import android.content.Context;
 import android.content.res.Resources;
-import android.graphics.Color;
-import android.graphics.drawable.ShapeDrawable;
-import android.graphics.drawable.shapes.RectShape;
-import android.os.UserHandle;
-import android.preference.Preference;
+import android.util.AttributeSet;
+import android.widget.ProgressBar;
+
+import androidx.preference.Preference;
+import androidx.preference.PreferenceViewHolder;
 
 import com.android.settings.R;
+import com.android.settings.utils.FileSizeFormatter;
 
 public class StorageItemPreference extends Preference {
-    public final int color;
-    public final int userHandle;
+    public int userHandle;
 
-    public StorageItemPreference(Context context, int titleRes, int colorRes) {
-        this(context, context.getText(titleRes), colorRes, UserHandle.USER_NULL);
+    private static final int UNINITIALIZED = -1;
+
+    private ProgressBar mProgressBar;
+    private static final int PROGRESS_MAX = 100;
+    private int mProgressPercent = UNINITIALIZED;
+
+    public StorageItemPreference(Context context) {
+        this(context, null);
     }
 
-    public StorageItemPreference(
-            Context context, CharSequence title, int colorRes, int userHandle) {
-        super(context);
-
-        if (colorRes != 0) {
-            this.color = context.getResources().getColor(colorRes);
-
-            final Resources res = context.getResources();
-            final int width = res.getDimensionPixelSize(R.dimen.device_memory_usage_button_width);
-            final int height = res.getDimensionPixelSize(R.dimen.device_memory_usage_button_height);
-            setIcon(createRectShape(width, height, this.color));
-        } else {
-            this.color = Color.MAGENTA;
-        }
-
-        setTitle(title);
+    public StorageItemPreference(Context context, AttributeSet attrs) {
+        super(context, attrs);
+        setLayoutResource(R.layout.storage_item);
         setSummary(R.string.memory_calculating_size);
-
-        this.userHandle = userHandle;
     }
 
-    private static ShapeDrawable createRectShape(int width, int height, int color) {
-        ShapeDrawable shape = new ShapeDrawable(new RectShape());
-        shape.setIntrinsicHeight(height);
-        shape.setIntrinsicWidth(width);
-        shape.getPaint().setColor(color);
-        return shape;
+    public void setStorageSize(long size, long total) {
+        setSummary(
+                FileSizeFormatter.formatFileSize(
+                        getContext(),
+                        size,
+                        getGigabyteSuffix(getContext().getResources()),
+                        FileSizeFormatter.GIGABYTE_IN_BYTES));
+        if (total == 0) {
+            mProgressPercent = 0;
+        } else {
+            mProgressPercent = (int)(size * PROGRESS_MAX / total);
+        }
+        updateProgressBar();
+    }
+
+    protected void updateProgressBar() {
+        if (mProgressBar == null || mProgressPercent == UNINITIALIZED)
+            return;
+
+        mProgressBar.setMax(PROGRESS_MAX);
+        mProgressBar.setProgress(mProgressPercent);
+    }
+
+    @Override
+    public void onBindViewHolder(PreferenceViewHolder view) {
+        mProgressBar = (ProgressBar) view.findViewById(android.R.id.progress);
+        updateProgressBar();
+        super.onBindViewHolder(view);
+    }
+
+    private static int getGigabyteSuffix(Resources res) {
+        return res.getIdentifier("gigabyteShort", "string", "android");
     }
 }

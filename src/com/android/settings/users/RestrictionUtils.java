@@ -22,7 +22,6 @@ import android.content.res.Resources;
 import android.os.Bundle;
 import android.os.UserHandle;
 import android.os.UserManager;
-import android.provider.Settings.Secure;
 
 import com.android.settings.R;
 
@@ -78,30 +77,8 @@ public class RestrictionUtils {
     public static void setRestrictions(Context context, ArrayList<RestrictionEntry> entries,
             UserHandle user) {
         UserManager um = UserManager.get(context);
-        Bundle userRestrictions = um.getUserRestrictions(user);
-
         for (RestrictionEntry entry : entries) {
-            userRestrictions.putBoolean(entry.getKey(), !entry.getSelectedState());
-            if (entry.getKey().equals(UserManager.DISALLOW_SHARE_LOCATION)
-                    && !entry.getSelectedState()) {
-                Secure.putStringForUser(context.getContentResolver(),
-                        Secure.LOCATION_PROVIDERS_ALLOWED, "", user.getIdentifier());
-            }
+            um.setUserRestriction(entry.getKey(), !entry.getSelectedState(), user);
         }
-        um.setUserRestrictions(userRestrictions, user);
-    }
-
-    public static Bundle restrictionsToBundle(ArrayList<RestrictionEntry> entries) {
-        final Bundle bundle = new Bundle();
-        for (RestrictionEntry entry : entries) {
-            if (entry.getType() == RestrictionEntry.TYPE_BOOLEAN) {
-                bundle.putBoolean(entry.getKey(), entry.getSelectedState());
-            } else if (entry.getType() == RestrictionEntry.TYPE_MULTI_SELECT) {
-                bundle.putStringArray(entry.getKey(), entry.getAllSelectedStrings());
-            } else {
-                bundle.putString(entry.getKey(), entry.getSelectedString());
-            }
-        }
-        return bundle;
     }
 }

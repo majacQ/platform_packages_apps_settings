@@ -16,49 +16,55 @@
 
 package com.android.settings.wifi.p2p;
 
-import com.android.settings.R;
-
 import android.content.Context;
 import android.net.wifi.WifiManager;
 import android.net.wifi.p2p.WifiP2pDevice;
-import android.preference.Preference;
 import android.text.TextUtils;
-import android.view.View;
 import android.widget.ImageView;
+
+import androidx.annotation.VisibleForTesting;
+import androidx.preference.Preference;
+import androidx.preference.PreferenceViewHolder;
+
+import com.android.settings.R;
 
 public class WifiP2pPeer extends Preference {
 
+    private static final int FIXED_RSSI = 60;
     private static final int[] STATE_SECURED = {R.attr.state_encrypted};
     public WifiP2pDevice device;
 
-    private final int mRssi;
+    @VisibleForTesting final int mRssi;
     private ImageView mSignal;
 
-    private static final int SIGNAL_LEVELS = 4;
+    @VisibleForTesting
+    static final int SIGNAL_LEVELS = 4;
 
     public WifiP2pPeer(Context context, WifiP2pDevice dev) {
         super(context);
         device = dev;
         setWidgetLayoutResource(R.layout.preference_widget_wifi_signal);
-        mRssi = 60; //TODO: fix
-    }
-
-    @Override
-    protected void onBindView(View view) {
+        mRssi = FIXED_RSSI; //TODO: fix
         if (TextUtils.isEmpty(device.deviceName)) {
             setTitle(device.deviceAddress);
         } else {
             setTitle(device.deviceName);
         }
+        String[] statusArray = context.getResources().getStringArray(R.array.wifi_p2p_status);
+        setSummary(statusArray[device.status]);
+    }
+
+    @Override
+    public void onBindViewHolder(PreferenceViewHolder view) {
+        super.onBindViewHolder(view);
         mSignal = (ImageView) view.findViewById(R.id.signal);
         if (mRssi == Integer.MAX_VALUE) {
             mSignal.setImageDrawable(null);
         } else {
-            mSignal.setImageResource(R.drawable.wifi_signal_dark);
+            mSignal.setImageResource(R.drawable.wifi_signal);
             mSignal.setImageState(STATE_SECURED,  true);
         }
-        refresh();
-        super.onBindView(view);
+        mSignal.setImageLevel(getLevel());
     }
 
     @Override
@@ -86,15 +92,5 @@ public class WifiP2pPeer extends Preference {
             return -1;
         }
         return WifiManager.calculateSignalLevel(mRssi, SIGNAL_LEVELS);
-    }
-
-    private void refresh() {
-        if (mSignal == null) {
-            return;
-        }
-        Context context = getContext();
-        mSignal.setImageLevel(getLevel());
-        String[] statusArray = context.getResources().getStringArray(R.array.wifi_p2p_status);
-        setSummary(statusArray[device.status]);
     }
 }

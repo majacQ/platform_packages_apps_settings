@@ -16,90 +16,132 @@
 
 package com.android.settings.nfc;
 
-import android.app.ActionBar;
-import android.app.Activity;
-import android.app.Fragment;
+import static com.android.settingslib.RestrictedLockUtils.EnforcedAdmin;
+
+import android.app.settings.SettingsEnums;
+import android.content.Context;
+import android.content.pm.PackageManager;
 import android.nfc.NfcAdapter;
 import android.os.Bundle;
-import android.os.Handler;
-import android.preference.PreferenceActivity;
-import android.view.Gravity;
+import android.os.UserHandle;
+import android.os.UserManager;
 import android.view.LayoutInflater;
+import android.view.Menu;
+import android.view.MenuInflater;
 import android.view.View;
 import android.view.ViewGroup;
-import android.widget.CompoundButton;
 import android.widget.ImageView;
 import android.widget.Switch;
-import com.android.settings.R;
+import android.widget.TextView;
 
-public class AndroidBeam extends Fragment
-        implements CompoundButton.OnCheckedChangeListener {
+import com.android.settings.R;
+import com.android.settings.SettingsActivity;
+import com.android.settings.core.InstrumentedFragment;
+import com.android.settings.enterprise.ActionDisabledByAdminDialogHelper;
+import com.android.settings.widget.SwitchBar;
+import com.android.settingslib.HelpUtils;
+import com.android.settingslib.RestrictedLockUtilsInternal;
+
+public class AndroidBeam extends InstrumentedFragment
+        implements SwitchBar.OnSwitchChangeListener {
     private View mView;
     private NfcAdapter mNfcAdapter;
-    private Switch mActionBarSwitch;
+    private SwitchBar mSwitchBar;
     private CharSequence mOldActivityTitle;
+    private boolean mBeamDisallowedByBase;
+    private boolean mBeamDisallowedByOnlyAdmin;
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        Activity activity = getActivity();
+        final Context context = getActivity();
+        mNfcAdapter = NfcAdapter.getDefaultAdapter(context);
+        final PackageManager pm = context.getPackageManager();
+        if (mNfcAdapter == null || !pm.hasSystemFeature(PackageManager.FEATURE_NFC_BEAM))
+            getActivity().finish();
+        setHasOptionsMenu(true);
+    }
 
-        mActionBarSwitch = new Switch(activity);
-
-        if (activity instanceof PreferenceActivity) {
-            final int padding = activity.getResources().getDimensionPixelSize(
-                    R.dimen.action_bar_switch_padding);
-            mActionBarSwitch.setPaddingRelative(0, 0, padding, 0);
-            activity.getActionBar().setDisplayOptions(ActionBar.DISPLAY_SHOW_CUSTOM,
-                    ActionBar.DISPLAY_SHOW_CUSTOM);
-            activity.getActionBar().setCustomView(mActionBarSwitch, new ActionBar.LayoutParams(
-                    ActionBar.LayoutParams.WRAP_CONTENT,
-                    ActionBar.LayoutParams.WRAP_CONTENT,
-                    Gravity.CENTER_VERTICAL | Gravity.END));
-            mOldActivityTitle = activity.getActionBar().getTitle();
-            activity.getActionBar().setTitle(R.string.android_beam_settings_title);
-        }
-
-        mActionBarSwitch.setOnCheckedChangeListener(this);
-
-        mNfcAdapter = NfcAdapter.getDefaultAdapter(getActivity());
-        mActionBarSwitch.setChecked(mNfcAdapter.isNdefPushEnabled());
+    @Override
+    public void onCreateOptionsMenu(Menu menu, MenuInflater inflater) {
+        super.onCreateOptionsMenu(menu, inflater);
+        HelpUtils.prepareHelpMenuItem(getActivity(), menu, R.string.help_uri_beam,
+                getClass().getName());
     }
 
     @Override
     public View onCreateView(LayoutInflater inflater, ViewGroup container,
             Bundle savedInstanceState) {
-        mView = inflater.inflate(R.layout.android_beam, container, false);
-        initView(mView);
+        final EnforcedAdmin admin = RestrictedLockUtilsInternal.checkIfRestrictionEnforced(
+                getActivity(), UserManager.DISALLOW_OUTGOING_BEAM, UserHandle.myUserId());
+        final UserManager um = UserManager.get(getActivity());
+        mBeamDisallowedByBase = RestrictedLockUtilsInternal.hasBaseUserRestriction(getActivity(),
+                UserManager.DISALLOW_OUTGOING_BEAM, UserHandle.myUserId());
+        if (!mBeamDisallowedByBase && admin != null) {
+            new ActionDisabledByAdminDialogHelper(getActivity())
+                    .prepareDialogBuilder(UserManager.DISALLOW_OUTGOING_BEAM, admin).show();
+            mBeamDisallowedByOnlyAdmin = true;
+            return new View(getContext());
+        }
+        mView = inflater.inflate(R.layout.preference_footer, container, false);
+
+        ImageView iconInfo = mView.findViewById(android.R.id.icon);
+        iconInfo.setImageResource(R.drawable.ic_info_outline_24dp);
+        TextView textInfo = mView.findViewById(android.R.id.title);
+        textInfo.setText(R.string.android_beam_explained);
+
         return mView;
+    }
+
+    @Override
+    public void onActivityCreated(Bundle savedInstanceState) {
+        super.onActivityCreated(savedInstanceState);
+        SettingsActivity activity = (SettingsActivity) getActivity();
+
+        mOldActivityTitle = activity.getActionBar().getTitle();
+
+        mSwitchBar = activity.getSwitchBar();
+        if (mBeamDisallowedByOnlyAdmin) {
+            mSwitchBar.hide();
+        } else {
+            mSwitchBar.setChecked(!mBeamDisallowedByBase && mNfcAdapter.isNdefPushEnabled());
+            mSwitchBar.addOnSwitchChangeListener(this);
+            mSwitchBar.setEnabled(!mBeamDisallowedByBase);
+            mSwitchBar.show();
+        }
+
+        activity.setTitle(R.string.android_beam_settings_title);
     }
 
     @Override
     public void onDestroyView() {
         super.onDestroyView();
-        getActivity().getActionBar().setCustomView(null);
         if (mOldActivityTitle != null) {
             getActivity().getActionBar().setTitle(mOldActivityTitle);
         }
-    }
-
-    private void initView(View view) {
-        mActionBarSwitch.setOnCheckedChangeListener(this);
-        mActionBarSwitch.setChecked(mNfcAdapter.isNdefPushEnabled());
+        if (!mBeamDisallowedByOnlyAdmin) {
+            mSwitchBar.removeOnSwitchChangeListener(this);
+            mSwitchBar.hide();
+        }
     }
 
     @Override
-    public void onCheckedChanged(CompoundButton buttonView, boolean desiredState) {
+    public void onSwitchChanged(Switch switchView, boolean desiredState) {
         boolean success = false;
-        mActionBarSwitch.setEnabled(false);
+        mSwitchBar.setEnabled(false);
         if (desiredState) {
             success = mNfcAdapter.enableNdefPush();
         } else {
             success = mNfcAdapter.disableNdefPush();
         }
         if (success) {
-            mActionBarSwitch.setChecked(desiredState);
+            mSwitchBar.setChecked(desiredState);
         }
-        mActionBarSwitch.setEnabled(true);
+        mSwitchBar.setEnabled(true);
+    }
+
+    @Override
+    public int getMetricsCategory() {
+        return SettingsEnums.NFC_BEAM;
     }
 }

@@ -16,6 +16,8 @@
 
 package com.android.settings.accounts;
 
+import static android.content.Intent.EXTRA_USER;
+
 import android.accounts.AccountManager;
 import android.accounts.AccountManagerCallback;
 import android.accounts.AccountManagerFuture;
@@ -23,20 +25,23 @@ import android.accounts.AuthenticatorException;
 import android.accounts.OperationCanceledException;
 import android.app.Activity;
 import android.app.PendingIntent;
+import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.os.Bundle;
+import android.os.UserHandle;
 import android.os.UserManager;
 import android.util.Log;
 import android.widget.Toast;
 
 import com.android.settings.R;
+import com.android.settings.Settings;
 import com.android.settings.Utils;
+import com.android.settings.password.ChooseLockSettingsHelper;
 
 import java.io.IOException;
-
 /**
- * Entry point Actiivty for account setup. Works as follows
+ * Entry point Activity for account setup. Works as follows
  *
  * 1) When the other Activities launch this Activity, it launches {@link ChooseAccountActivity}
  *    without showing anything.
@@ -49,6 +54,9 @@ import java.io.IOException;
  * currently delegate the work to the other Activity. When we let this Activity do that work, users
  * would see the list of account types when leaving this Activity, since the UI is already ready
  * when returning from each account setup, which doesn't look good.
+ *
+ * An extra {@link UserHandle} can be specified in the intent as {@link EXTRA_USER}, if the user for
+ * which the action needs to be performed is different to the one the Settings App will run in.
  */
 public class AddAccountSettings extends Activity {
     /**
@@ -62,8 +70,9 @@ public class AddAccountSettings extends Activity {
      * application.
      */
     private static final String KEY_CALLER_IDENTITY = "pendingIntent";
+    private static final String SHOULD_NOT_RESOLVE = "SHOULDN'T RESOLVE!";
 
-    private static final String TAG = "AccountSettings";
+    private static final String TAG = "AddAccountSettings";
 
     /* package */ static final String EXTRA_SELECTED_ACCOUNT = "selected_account";
 
@@ -72,6 +81,7 @@ public class AddAccountSettings extends Activity {
 
     private static final int CHOOSE_ACCOUNT_REQUEST = 1;
     private static final int ADD_ACCOUNT_REQUEST = 2;
+    private static final int UNLOCK_WORK_PROFILE_REQUEST = 3;
 
     private PendingIntent mPendingIntent;
 
@@ -89,8 +99,11 @@ public class AddAccountSettings extends Activity {
                     addAccountOptions.putParcelable(KEY_CALLER_IDENTITY, mPendingIntent);
                     addAccountOptions.putBoolean(EXTRA_HAS_MULTIPLE_USERS,
                             Utils.hasMultipleUsers(AddAccountSettings.this));
-                    intent.putExtras(addAccountOptions);
-                    startActivityForResult(intent, ADD_ACCOUNT_REQUEST);
+                    addAccountOptions.putParcelable(EXTRA_USER, mUserHandle);
+                    intent.putExtras(addAccountOptions)
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TASK);
+                    startActivityForResultAsUser(intent, ADD_ACCOUNT_REQUEST, mUserHandle);
                 } else {
                     setResult(RESULT_OK);
                     if (mPendingIntent != null) {
@@ -115,6 +128,7 @@ public class AddAccountSettings extends Activity {
     };
 
     private boolean mAddAccountCalled = false;
+    private UserHandle mUserHandle;
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
@@ -126,7 +140,9 @@ public class AddAccountSettings extends Activity {
         }
 
         final UserManager um = (UserManager) getSystemService(Context.USER_SERVICE);
-        if (um.hasUserRestriction(UserManager.DISALLOW_MODIFY_ACCOUNTS)) {
+        mUserHandle = Utils.getSecureTargetUser(getActivityToken(), um, null /* arguments */,
+                getIntent().getExtras());
+        if (um.hasUserRestriction(UserManager.DISALLOW_MODIFY_ACCOUNTS, mUserHandle)) {
             // We aren't allowed to add an account.
             Toast.makeText(this, R.string.user_cannot_add_accounts_message, Toast.LENGTH_LONG)
                     .show();
@@ -138,25 +154,40 @@ public class AddAccountSettings extends Activity {
             finish();
             return;
         }
-        final String[] authorities =
-                getIntent().getStringArrayExtra(AccountPreferenceBase.AUTHORITIES_FILTER_KEY);
-        final String[] accountTypes =
-                getIntent().getStringArrayExtra(AccountPreferenceBase.ACCOUNT_TYPES_FILTER_KEY);
-        final Intent intent = new Intent(this, ChooseAccountActivity.class);
-        if (authorities != null) {
-            intent.putExtra(AccountPreferenceBase.AUTHORITIES_FILTER_KEY, authorities);
+        if (Utils.startQuietModeDialogIfNecessary(this, um, mUserHandle.getIdentifier())) {
+            finish();
+            return;
         }
-        if (accountTypes != null) {
-            intent.putExtra(AccountPreferenceBase.ACCOUNT_TYPES_FILTER_KEY, accountTypes);
+        if (um.isUserUnlocked(mUserHandle)) {
+            requestChooseAccount();
+        } else {
+            // If the user is locked by fbe: we couldn't start the authenticator. So we must ask the
+            // user to unlock it first.
+            ChooseLockSettingsHelper helper = new ChooseLockSettingsHelper(this);
+            if (!helper.launchConfirmationActivity(UNLOCK_WORK_PROFILE_REQUEST,
+                    getString(R.string.unlock_set_unlock_launch_picker_title),
+                    false,
+                    mUserHandle.getIdentifier())) {
+                requestChooseAccount();
+            }
         }
-        startActivityForResult(intent, CHOOSE_ACCOUNT_REQUEST);
     }
 
     @Override
     public void onActivityResult(int requestCode, int resultCode, Intent data) {
         switch (requestCode) {
+        case UNLOCK_WORK_PROFILE_REQUEST:
+            if (resultCode == Activity.RESULT_OK) {
+                requestChooseAccount();
+            } else {
+                finish();
+            }
+            break;
         case CHOOSE_ACCOUNT_REQUEST:
             if (resultCode == RESULT_CANCELED) {
+                if (data != null) {
+                    startActivityAsUser(data, mUserHandle);
+                }
                 setResult(resultCode);
                 finish();
                 return;
@@ -182,19 +213,50 @@ public class AddAccountSettings extends Activity {
         if (Log.isLoggable(TAG, Log.VERBOSE)) Log.v(TAG, "saved");
     }
 
+    private void requestChooseAccount() {
+        final String[] authorities =
+                getIntent().getStringArrayExtra(AccountPreferenceBase.AUTHORITIES_FILTER_KEY);
+        final String[] accountTypes =
+                getIntent().getStringArrayExtra(AccountPreferenceBase.ACCOUNT_TYPES_FILTER_KEY);
+        final Intent intent = new Intent(this, Settings.ChooseAccountActivity.class);
+        if (authorities != null) {
+            intent.putExtra(AccountPreferenceBase.AUTHORITIES_FILTER_KEY, authorities);
+        }
+        if (accountTypes != null) {
+            intent.putExtra(AccountPreferenceBase.ACCOUNT_TYPES_FILTER_KEY, accountTypes);
+        }
+        intent.putExtra(EXTRA_USER, mUserHandle);
+        startActivityForResult(intent, CHOOSE_ACCOUNT_REQUEST);
+    }
+
     private void addAccount(String accountType) {
         Bundle addAccountOptions = new Bundle();
-        mPendingIntent = PendingIntent.getBroadcast(this, 0, new Intent(), 0);
+        /*
+         * The identityIntent is for the purposes of establishing the identity
+         * of the caller and isn't intended for launching activities, services
+         * or broadcasts.
+         *
+         * Unfortunately for legacy reasons we still need to support this. But
+         * we can cripple the intent so that 3rd party authenticators can't
+         * fill in addressing information and launch arbitrary actions.
+         */
+        Intent identityIntent = new Intent();
+        identityIntent.setComponent(new ComponentName(SHOULD_NOT_RESOLVE, SHOULD_NOT_RESOLVE));
+        identityIntent.setAction(SHOULD_NOT_RESOLVE);
+        identityIntent.addCategory(SHOULD_NOT_RESOLVE);
+
+        mPendingIntent = PendingIntent.getBroadcast(this, 0, identityIntent, 0);
         addAccountOptions.putParcelable(KEY_CALLER_IDENTITY, mPendingIntent);
         addAccountOptions.putBoolean(EXTRA_HAS_MULTIPLE_USERS, Utils.hasMultipleUsers(this));
-        AccountManager.get(this).addAccount(
+        AccountManager.get(this).addAccountAsUser(
                 accountType,
                 null, /* authTokenType */
                 null, /* requiredFeatures */
                 addAccountOptions,
                 null,
                 mCallback,
-                null /* handler */);
+                null /* handler */,
+                mUserHandle);
         mAddAccountCalled  = true;
     }
 }

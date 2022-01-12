@@ -21,14 +21,34 @@ import android.view.LayoutInflater;
 import android.widget.Button;
 
 /**
- * Foundation interface glues between Activities and UIs like
- * {@link WifiDialog} or {@link WifiConfigUiForSetupWizardXL}.
+ * Foundation interface glues between Activities and UIs like {@link WifiDialog}.
+ *
+ * Migrating from Wi-Fi SettingsLib to to WifiTrackerLib, this object will be removed in the near
+ * future, please develop in {@link WifiConfigUiBase2}.
  */
 public interface WifiConfigUiBase {
+
+    /**
+     * Viewing mode for a Wi-Fi access point. Data is displayed in non-editable mode.
+     */
+    int MODE_VIEW = 0;
+    /**
+     * Connect mode. Data is displayed in editable mode, and a connect button will be shown.
+     */
+    int MODE_CONNECT = 1;
+    /**
+     * Modify mode. All data is displayed in editable fields, and a "save" button is shown instead
+     * of "connect". Clients are expected to only save but not connect to the access point in this
+     * mode.
+     */
+    int MODE_MODIFY = 2;
+
     public Context getContext();
     public WifiConfigController getController();
     public LayoutInflater getLayoutInflater();
-    public boolean isEdit();
+    public int getMode();
+
+    public void dispatchSubmit();
 
     public void setTitle(int id);
     public void setTitle(CharSequence title);

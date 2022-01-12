@@ -17,50 +17,106 @@
 package com.android.settings.fuelgauge;
 
 import android.content.Context;
-import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
-import android.preference.Preference;
-import android.view.View;
-import android.widget.ProgressBar;
+import android.util.AttributeSet;
 import android.widget.TextView;
 
+import androidx.preference.PreferenceViewHolder;
+
 import com.android.settings.R;
+import com.android.settings.Utils;
+import com.android.settingslib.widget.apppreference.AppPreference;
 
 /**
- * Custom preference for displaying power consumption as a bar and an icon on
+ * Custom preference for displaying battery usage info as a bar and an icon on
  * the left for the subsystem/app type.
+ *
+ * The battery usage info could be usage percentage or usage time. The preference
+ * won't show any icon if it is null.
  */
-public class PowerGaugePreference extends Preference {
-    private BatterySipper mInfo;
-    private int mProgress;
-    private CharSequence mProgressText;
+public class PowerGaugePreference extends AppPreference {
 
-    public PowerGaugePreference(Context context, Drawable icon, BatterySipper info) {
-        super(context);
-        setLayoutResource(R.layout.app_percentage_item);
-        setIcon(icon != null ? icon : new ColorDrawable(0));
-        mInfo = info;
+    private BatteryEntry mInfo;
+    private CharSequence mContentDescription;
+    private CharSequence mProgress;
+    private boolean mShowAnomalyIcon;
+
+    public PowerGaugePreference(Context context, Drawable icon, CharSequence contentDescription,
+            BatteryEntry info) {
+        this(context, null, icon, contentDescription, info);
     }
 
-    public void setPercent(double percentOfMax, double percentOfTotal) {
-        mProgress = (int) Math.ceil(percentOfMax);
-        mProgressText = getContext().getResources().getString(
-                R.string.percentage, (int) Math.ceil(percentOfTotal));
+    public PowerGaugePreference(Context context) {
+        this(context, null, null, null, null);
+    }
+
+    public PowerGaugePreference(Context context, AttributeSet attrs) {
+        this(context, attrs, null, null, null);
+    }
+
+    private PowerGaugePreference(Context context, AttributeSet attrs, Drawable icon,
+            CharSequence contentDescription, BatteryEntry info) {
+        super(context, attrs);
+        if (icon != null) {
+            setIcon(icon);
+        }
+        setWidgetLayoutResource(R.layout.preference_widget_summary);
+        mInfo = info;
+        mContentDescription = contentDescription;
+        mShowAnomalyIcon = false;
+    }
+
+    public void setContentDescription(String name) {
+        mContentDescription = name;
         notifyChanged();
     }
 
-    BatterySipper getInfo() {
+    public void setPercent(double percentOfTotal) {
+        mProgress = Utils.formatPercentage(percentOfTotal, true);
+        notifyChanged();
+    }
+
+    public String getPercent() {
+        return mProgress.toString();
+    }
+
+    public void setSubtitle(CharSequence subtitle) {
+        mProgress = subtitle;
+        notifyChanged();
+    }
+
+    public CharSequence getSubtitle() {
+        return mProgress;
+    }
+
+    public void shouldShowAnomalyIcon(boolean showAnomalyIcon) {
+        mShowAnomalyIcon = showAnomalyIcon;
+        notifyChanged();
+    }
+
+    public boolean showAnomalyIcon() {
+        return mShowAnomalyIcon;
+    }
+
+    BatteryEntry getInfo() {
         return mInfo;
     }
 
     @Override
-    protected void onBindView(View view) {
-        super.onBindView(view);
+    public void onBindViewHolder(PreferenceViewHolder view) {
+        super.onBindViewHolder(view);
 
-        final ProgressBar progress = (ProgressBar) view.findViewById(android.R.id.progress);
-        progress.setProgress(mProgress);
-
-        final TextView text1 = (TextView) view.findViewById(android.R.id.text1);
-        text1.setText(mProgressText);
+        final TextView subtitle = (TextView) view.findViewById(R.id.widget_summary);
+        subtitle.setText(mProgress);
+        if (mShowAnomalyIcon) {
+            subtitle.setCompoundDrawablesRelativeWithIntrinsicBounds(R.drawable.ic_warning_24dp, 0,
+                    0, 0);
+        } else {
+            subtitle.setCompoundDrawablesRelativeWithIntrinsicBounds(0, 0, 0, 0);
+        }
+        if (mContentDescription != null) {
+            final TextView titleView = (TextView) view.findViewById(android.R.id.title);
+            titleView.setContentDescription(mContentDescription);
+        }
     }
 }

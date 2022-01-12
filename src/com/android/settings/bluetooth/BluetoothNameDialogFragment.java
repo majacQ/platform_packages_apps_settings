@@ -16,43 +16,44 @@
 
 package com.android.settings.bluetooth;
 
-import android.app.AlertDialog;
 import android.app.Dialog;
-import android.app.DialogFragment;
-import android.bluetooth.BluetoothAdapter;
-import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.DialogInterface;
-import android.content.Intent;
-import android.content.IntentFilter;
+import android.content.res.Configuration;
 import android.os.Bundle;
 import android.text.Editable;
 import android.text.InputFilter;
+import android.text.TextUtils;
 import android.text.TextWatcher;
-import android.util.Log;
 import android.view.KeyEvent;
 import android.view.LayoutInflater;
 import android.view.View;
-import android.view.WindowManager;
 import android.view.inputmethod.EditorInfo;
+import android.view.inputmethod.InputMethodManager;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.TextView;
 
+import androidx.annotation.VisibleForTesting;
+import androidx.appcompat.app.AlertDialog;
+
 import com.android.settings.R;
+import com.android.settings.core.instrumentation.InstrumentedDialogFragment;
 
 /**
- * Dialog fragment for renaming the local Bluetooth device.
+ * Dialog fragment for renaming a Bluetooth device.
  */
-public final class BluetoothNameDialogFragment extends DialogFragment implements TextWatcher {
-    private static final int BLUETOOTH_NAME_MAX_LENGTH_BYTES = 248;
+abstract class BluetoothNameDialogFragment extends InstrumentedDialogFragment
+        implements TextWatcher, TextView.OnEditorActionListener {
 
-    private AlertDialog mAlertDialog;
+    // Key to save the edited name and edit status for restoring after rotation
+    private static final String KEY_NAME = "device_name";
+    private static final String KEY_NAME_EDITED = "device_name_edited";
+
+    @VisibleForTesting
+    AlertDialog mAlertDialog;
     private Button mOkButton;
 
-    // accessed from inner class (not private to avoid thunks)
-    static final String TAG = "BluetoothNameDialogFragment";
-    final LocalBluetoothAdapter mLocalAdapter;
     EditText mDeviceNameView;
 
     // This flag is set when the name is updated by code, to distinguish from user changes
@@ -61,58 +62,48 @@ public final class BluetoothNameDialogFragment extends DialogFragment implements
     // This flag is set when the user edits the name (preserved on rotation)
     private boolean mDeviceNameEdited;
 
-    // Key to save the edited name and edit status for restoring after rotation
-    private static final String KEY_NAME = "device_name";
-    private static final String KEY_NAME_EDITED = "device_name_edited";
+    /**
+     * @return the title to use for the dialog.
+     */
+    abstract protected int getDialogTitle();
 
-    private final BroadcastReceiver mReceiver = new BroadcastReceiver() {
-        @Override
-        public void onReceive(Context context, Intent intent) {
-            String action = intent.getAction();
-            if (action.equals(BluetoothAdapter.ACTION_LOCAL_NAME_CHANGED)) {
-                updateDeviceName();
-            } else if (action.equals(BluetoothAdapter.ACTION_STATE_CHANGED) &&
-                    (intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, BluetoothAdapter.ERROR) ==
-                            BluetoothAdapter.STATE_ON)) {
-                updateDeviceName();
-            }
-        }
-    };
+    /**
+     * @return the current name used for this device.
+     */
+    abstract protected String getDeviceName();
 
-    public BluetoothNameDialogFragment() {
-        LocalBluetoothManager localManager = LocalBluetoothManager.getInstance(getActivity());
-        mLocalAdapter = localManager.getBluetoothAdapter();
-    }
+    /**
+     * Set the device to the given name.
+     * @param deviceName the name to use
+     */
+    abstract protected void setDeviceName(String deviceName);
 
     @Override
     public Dialog onCreateDialog(Bundle savedInstanceState) {
-        String deviceName = mLocalAdapter.getName();
+        String deviceName = getDeviceName();
         if (savedInstanceState != null) {
             deviceName = savedInstanceState.getString(KEY_NAME, deviceName);
             mDeviceNameEdited = savedInstanceState.getBoolean(KEY_NAME_EDITED, false);
         }
-        mAlertDialog = new AlertDialog.Builder(getActivity())
-                .setIcon(android.R.drawable.ic_dialog_info)
-                .setTitle(R.string.bluetooth_rename_device)
+        AlertDialog.Builder builder = new AlertDialog.Builder(getActivity())
+                .setTitle(getDialogTitle())
                 .setView(createDialogView(deviceName))
-                .setPositiveButton(R.string.bluetooth_rename_button,
-                        new DialogInterface.OnClickListener() {
-                            public void onClick(DialogInterface dialog, int which) {
-                                String deviceName = mDeviceNameView.getText().toString();
-                                setDeviceName(deviceName);
-                            }
-                        })
-                .setNegativeButton(android.R.string.cancel, null)
-                .create();
-        mAlertDialog.getWindow().setSoftInputMode(
-                WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE);
+                .setPositiveButton(R.string.bluetooth_rename_button, (dialog, which) -> {
+                    setDeviceName(mDeviceNameView.getText().toString());
+                })
+                .setNegativeButton(android.R.string.cancel, null);
+        mAlertDialog = builder.create();
+        mAlertDialog.setOnShowListener(d -> {
+            if (mDeviceNameView != null && mDeviceNameView.requestFocus()) {
+                InputMethodManager imm = (InputMethodManager) getContext().getSystemService(
+                        Context.INPUT_METHOD_SERVICE);
+                if (imm != null) {
+                    imm.showSoftInput(mDeviceNameView, InputMethodManager.SHOW_IMPLICIT);
+                }
+            }
+        });
 
         return mAlertDialog;
-    }
-
-    private void setDeviceName(String deviceName) {
-        Log.d(TAG, "Setting device name to " + deviceName);
-        mLocalAdapter.setName(deviceName);
     }
 
     @Override
@@ -127,23 +118,29 @@ public final class BluetoothNameDialogFragment extends DialogFragment implements
         View view = layoutInflater.inflate(R.layout.dialog_edittext, null);
         mDeviceNameView = (EditText) view.findViewById(R.id.edittext);
         mDeviceNameView.setFilters(new InputFilter[] {
-                new Utf8ByteLengthFilter(BLUETOOTH_NAME_MAX_LENGTH_BYTES)
+                new BluetoothLengthDeviceNameFilter()
         });
         mDeviceNameView.setText(deviceName);    // set initial value before adding listener
+        if (!TextUtils.isEmpty(deviceName)) {
+            mDeviceNameView.setSelection(deviceName.length());
+        }
         mDeviceNameView.addTextChangedListener(this);
-        mDeviceNameView.setOnEditorActionListener(new TextView.OnEditorActionListener() {
-            @Override
-            public boolean onEditorAction(TextView v, int actionId, KeyEvent event) {
-                if (actionId == EditorInfo.IME_ACTION_DONE) {
-                    setDeviceName(v.getText().toString());
-                    mAlertDialog.dismiss();
-                    return true;    // action handled
-                } else {
-                    return false;   // not handled
-                }
-            }
-        });
+        com.android.settings.Utils.setEditTextCursorPosition(mDeviceNameView);
+        mDeviceNameView.setOnEditorActionListener(this);
         return view;
+    }
+
+    @Override
+    public boolean onEditorAction(TextView v, int actionId, KeyEvent event) {
+        if (actionId == EditorInfo.IME_ACTION_DONE) {
+            setDeviceName(v.getText().toString());
+            if (mAlertDialog != null && mAlertDialog.isShowing()) {
+                mAlertDialog.dismiss();
+            }
+            return true;    // action handled
+        } else {
+            return false;   // not handled
+        }
     }
 
     @Override
@@ -161,23 +158,14 @@ public final class BluetoothNameDialogFragment extends DialogFragment implements
             mOkButton = mAlertDialog.getButton(DialogInterface.BUTTON_POSITIVE);
             mOkButton.setEnabled(mDeviceNameEdited);    // Ok button enabled after user edits
         }
-        IntentFilter filter = new IntentFilter();
-        filter.addAction(BluetoothAdapter.ACTION_STATE_CHANGED);
-        filter.addAction(BluetoothAdapter.ACTION_LOCAL_NAME_CHANGED);
-        getActivity().registerReceiver(mReceiver, filter);
-    }
-
-    @Override
-    public void onPause() {
-        super.onPause();
-        getActivity().unregisterReceiver(mReceiver);
     }
 
     void updateDeviceName() {
-        if (mLocalAdapter != null && mLocalAdapter.isEnabled()) {
+        String name = getDeviceName();
+        if (name != null) {
             mDeviceNameUpdated = true;
             mDeviceNameEdited = false;
-            mDeviceNameView.setText(mLocalAdapter.getName());
+            mDeviceNameView.setText(name);
         }
     }
 
@@ -189,8 +177,15 @@ public final class BluetoothNameDialogFragment extends DialogFragment implements
         } else {
             mDeviceNameEdited = true;
             if (mOkButton != null) {
-                mOkButton.setEnabled(s.length() != 0);
+                mOkButton.setEnabled(s.toString().trim().length() != 0);
             }
+        }
+    }
+
+    public void onConfigurationChanged(Configuration newConfig, CharSequence s) {
+        super.onConfigurationChanged(newConfig);
+        if (mOkButton != null) {
+            mOkButton.setEnabled(s.length() != 0 && !(s.toString().trim().isEmpty()));
         }
     }
 

@@ -16,21 +16,26 @@
 
 package com.android.settings.wifi;
 
-import com.android.settings.R;
-
+import android.app.settings.SettingsEnums;
 import android.os.Bundle;
-import android.preference.PreferenceActivity;
+
+import com.android.settings.R;
+import com.android.settings.SettingsPreferenceFragment;
 
 
 /**
  * Wifi information menu item on the diagnostic screen
  */
-public class WifiInfo extends PreferenceActivity {
+public class WifiInfo extends SettingsPreferenceFragment {
 
     @Override
-    protected void onCreate(Bundle savedInstanceState) {
+    public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         addPreferencesFromResource(R.xml.testing_wifi_settings);
     }
 
+    @Override
+    public int getMetricsCategory() {
+        return SettingsEnums.TESTING;
+    }
 }

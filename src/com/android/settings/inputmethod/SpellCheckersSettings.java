@@ -16,144 +16,261 @@
 
 package com.android.settings.inputmethod;
 
-import com.android.settings.R;
-import com.android.settings.SettingsPreferenceFragment;
-
-import android.app.AlertDialog;
+import android.app.settings.SettingsEnums;
 import android.content.Context;
 import android.content.DialogInterface;
 import android.content.pm.ApplicationInfo;
-import android.content.pm.PackageManager;
 import android.os.Bundle;
-import android.preference.Preference;
-import android.preference.PreferenceScreen;
+import android.provider.Settings;
 import android.util.Log;
 import android.view.textservice.SpellCheckerInfo;
+import android.view.textservice.SpellCheckerSubtype;
 import android.view.textservice.TextServicesManager;
+import android.widget.Switch;
 
-import java.util.ArrayList;
+import androidx.appcompat.app.AlertDialog;
+import androidx.preference.Preference;
+import androidx.preference.Preference.OnPreferenceChangeListener;
+import androidx.preference.PreferenceScreen;
+
+import com.android.settings.R;
+import com.android.settings.SettingsActivity;
+import com.android.settings.SettingsPreferenceFragment;
+import com.android.settings.widget.SwitchBar;
+import com.android.settings.widget.SwitchBar.OnSwitchChangeListener;
 
 public class SpellCheckersSettings extends SettingsPreferenceFragment
-        implements Preference.OnPreferenceClickListener {
+        implements OnSwitchChangeListener, OnPreferenceChangeListener {
     private static final String TAG = SpellCheckersSettings.class.getSimpleName();
     private static final boolean DBG = false;
 
+    private static final String KEY_SPELL_CHECKER_LANGUAGE = "spellchecker_language";
+    private static final String KEY_DEFAULT_SPELL_CHECKER = "default_spellchecker";
+    private static final int ITEM_ID_USE_SYSTEM_LANGUAGE = 0;
+
+    private SwitchBar mSwitchBar;
+    private Preference mSpellCheckerLanaguagePref;
     private AlertDialog mDialog = null;
     private SpellCheckerInfo mCurrentSci;
     private SpellCheckerInfo[] mEnabledScis;
     private TextServicesManager mTsm;
-    private final ArrayList<SingleSpellCheckerPreference> mSpellCheckers =
-            new ArrayList<SingleSpellCheckerPreference>();
 
     @Override
-    public void onCreate(Bundle icicle) {
-        super.onCreate(icicle);
-        mTsm = (TextServicesManager) getSystemService(Context.TEXT_SERVICES_MANAGER_SERVICE);
-        addPreferencesFromResource(R.xml.spellchecker_prefs);
-        updateScreen();
+    public int getMetricsCategory() {
+        return SettingsEnums.INPUTMETHOD_SPELL_CHECKERS;
     }
 
     @Override
-    public boolean onPreferenceTreeClick(PreferenceScreen screen, Preference preference) {
-        return false;
+    public void onCreate(final Bundle icicle) {
+        super.onCreate(icicle);
+
+        addPreferencesFromResource(R.xml.spellchecker_prefs);
+        mSpellCheckerLanaguagePref = findPreference(KEY_SPELL_CHECKER_LANGUAGE);
+
+        mTsm = (TextServicesManager) getSystemService(Context.TEXT_SERVICES_MANAGER_SERVICE);
+        mCurrentSci = mTsm.getCurrentSpellChecker();
+        mEnabledScis = mTsm.getEnabledSpellCheckers();
+        populatePreferenceScreen();
+    }
+
+    private void populatePreferenceScreen() {
+        final SpellCheckerPreference pref = new SpellCheckerPreference(getPrefContext(),
+                mEnabledScis);
+        pref.setTitle(R.string.default_spell_checker);
+        final int count = (mEnabledScis == null) ? 0 : mEnabledScis.length;
+        if (count > 0) {
+            pref.setSummary("%s");
+        } else {
+            pref.setSummary(R.string.spell_checker_not_selected);
+        }
+        pref.setKey(KEY_DEFAULT_SPELL_CHECKER);
+        pref.setOnPreferenceChangeListener(this);
+        getPreferenceScreen().addPreference(pref);
     }
 
     @Override
     public void onResume() {
         super.onResume();
-        updateScreen();
+        mSwitchBar = ((SettingsActivity) getActivity()).getSwitchBar();
+        mSwitchBar.setSwitchBarText(
+                R.string.spell_checker_master_switch_title,
+                R.string.spell_checker_master_switch_title);
+        mSwitchBar.show();
+        mSwitchBar.addOnSwitchChangeListener(this);
+        updatePreferenceScreen();
     }
 
     @Override
     public void onPause() {
         super.onPause();
-        saveState();
-    }
-
-    private void saveState() {
-        SpellCheckerUtils.setCurrentSpellChecker(mTsm, mCurrentSci);
-    }
-
-    private void updateScreen() {
-        getPreferenceScreen().removeAll();
-        updateEnabledSpellCheckers();
-    }
-
-    private void updateEnabledSpellCheckers() {
-        final PackageManager pm = getPackageManager();
-        mCurrentSci = SpellCheckerUtils.getCurrentSpellChecker(mTsm);
-        mEnabledScis = SpellCheckerUtils.getEnabledSpellCheckers(mTsm);
-        if (mCurrentSci == null || mEnabledScis == null) {
-            return;
-        }
-        mSpellCheckers.clear();
-        for (int i = 0; i < mEnabledScis.length; ++i) {
-            final SpellCheckerInfo sci = mEnabledScis[i];
-            final SingleSpellCheckerPreference scPref = new SingleSpellCheckerPreference(
-                    this, null, sci, mTsm);
-            mSpellCheckers.add(scPref);
-            scPref.setTitle(sci.loadLabel(pm));
-            scPref.setSelected(mCurrentSci != null && mCurrentSci.getId().equals(sci.getId()));
-            getPreferenceScreen().addPreference(scPref);
-        }
+        mSwitchBar.removeOnSwitchChangeListener(this);
     }
 
     @Override
-    public boolean onPreferenceClick(Preference pref) {
-        SingleSpellCheckerPreference targetScp = null;
-        for (SingleSpellCheckerPreference scp : mSpellCheckers) {
-            if (pref.equals(scp)) {
-                targetScp = scp;
-            }
-        }
-        if (targetScp != null) {
-            if (!isSystemApp(targetScp.getSpellCheckerInfo())) {
-                showSecurityWarnDialog(targetScp);
-            } else {
-                changeCurrentSpellChecker(targetScp);
-            }
-        }
-        return true;
+    public void onSwitchChanged(final Switch switchView, final boolean isChecked) {
+        Settings.Secure.putInt(getContentResolver(), Settings.Secure.SPELL_CHECKER_ENABLED,
+                isChecked ? 1 : 0);
+        updatePreferenceScreen();
     }
 
-    private void showSecurityWarnDialog(final SingleSpellCheckerPreference scp) {
+    private void updatePreferenceScreen() {
+        mCurrentSci = mTsm.getCurrentSpellChecker();
+        final boolean isSpellCheckerEnabled = mTsm.isSpellCheckerEnabled();
+        mSwitchBar.setChecked(isSpellCheckerEnabled);
+
+        final SpellCheckerSubtype currentScs;
+        if (mCurrentSci != null) {
+            currentScs = mTsm.getCurrentSpellCheckerSubtype(
+                    false /* allowImplicitlySelectedSubtype */);
+        } else {
+            currentScs = null;
+        }
+        mSpellCheckerLanaguagePref.setSummary(getSpellCheckerSubtypeLabel(mCurrentSci, currentScs));
+
+        final PreferenceScreen screen = getPreferenceScreen();
+        final int count = screen.getPreferenceCount();
+        for (int index = 0; index < count; index++) {
+            final Preference preference = screen.getPreference(index);
+            preference.setEnabled(isSpellCheckerEnabled);
+            if (preference instanceof SpellCheckerPreference) {
+                final SpellCheckerPreference pref = (SpellCheckerPreference) preference;
+                pref.setSelected(mCurrentSci);
+            }
+        }
+        mSpellCheckerLanaguagePref.setEnabled(isSpellCheckerEnabled && mCurrentSci != null);
+    }
+
+    private CharSequence getSpellCheckerSubtypeLabel(final SpellCheckerInfo sci,
+            final SpellCheckerSubtype subtype) {
+        if (sci == null) {
+            return getString(R.string.spell_checker_not_selected);
+        }
+        if (subtype == null) {
+            return getString(R.string.use_system_language_to_select_input_method_subtypes);
+        }
+        return subtype.getDisplayName(
+                getActivity(), sci.getPackageName(), sci.getServiceInfo().applicationInfo);
+    }
+
+    @Override
+    public boolean onPreferenceTreeClick(Preference preference) {
+        if (KEY_SPELL_CHECKER_LANGUAGE.equals(preference.getKey())) {
+            writePreferenceClickMetric(preference);
+            showChooseLanguageDialog();
+            return true;
+        }
+        return super.onPreferenceTreeClick(preference);
+    }
+
+    @Override
+    public boolean onPreferenceChange(Preference preference, Object newValue) {
+        final SpellCheckerInfo sci = (SpellCheckerInfo) newValue;
+        final boolean isSystemApp =
+                (sci.getServiceInfo().applicationInfo.flags & ApplicationInfo.FLAG_SYSTEM) != 0;
+        if (isSystemApp) {
+            changeCurrentSpellChecker(sci);
+            return true;
+        } else {
+            showSecurityWarnDialog(sci);
+            return false;
+        }
+    }
+
+    private static int convertSubtypeIndexToDialogItemId(final int index) {
+        return index + 1;
+    }
+
+    private static int convertDialogItemIdToSubtypeIndex(final int item) {
+        return item - 1;
+    }
+
+    private void showChooseLanguageDialog() {
         if (mDialog != null && mDialog.isShowing()) {
             mDialog.dismiss();
         }
-        mDialog = (new AlertDialog.Builder(getActivity()))
-                .setTitle(android.R.string.dialog_alert_title)
-                .setIconAttribute(android.R.attr.alertDialogIcon)
-                .setCancelable(true)
-                .setPositiveButton(android.R.string.ok,
-                        new DialogInterface.OnClickListener() {
-                    @Override
-                    public void onClick(DialogInterface dialog, int which) {
-                        changeCurrentSpellChecker(scp);
-                    }
-                })
-                .setNegativeButton(android.R.string.cancel,
-                        new DialogInterface.OnClickListener() {
-                    @Override
-                    public void onClick(DialogInterface dialog, int which) {
-                    }
-                })
-                .create();
-        mDialog.setMessage(getResources().getString(R.string.spellchecker_security_warning,
-                scp.getSpellCheckerInfo().getServiceInfo().applicationInfo.loadLabel(
-                        getActivity().getPackageManager())));
+        final SpellCheckerInfo currentSci = mTsm.getCurrentSpellChecker();
+        if (currentSci == null) {
+            // This can happen in some situations.  One example is that the package that the current
+            // spell checker belongs to was uninstalled or being in background.
+            return;
+        }
+        final SpellCheckerSubtype currentScs = mTsm.getCurrentSpellCheckerSubtype(
+                false /* allowImplicitlySelectedSubtype */);
+        final AlertDialog.Builder builder = new AlertDialog.Builder(getActivity());
+        builder.setTitle(R.string.phone_language);
+        final int subtypeCount = currentSci.getSubtypeCount();
+        final CharSequence[] items = new CharSequence[subtypeCount + 1 /* default */];
+        items[ITEM_ID_USE_SYSTEM_LANGUAGE] = getSpellCheckerSubtypeLabel(currentSci, null);
+        int checkedItemId = ITEM_ID_USE_SYSTEM_LANGUAGE;
+        for (int index = 0; index < subtypeCount; ++index) {
+            final SpellCheckerSubtype subtype = currentSci.getSubtypeAt(index);
+            final int itemId = convertSubtypeIndexToDialogItemId(index);
+            items[itemId] = getSpellCheckerSubtypeLabel(currentSci, subtype);
+            if (subtype.equals(currentScs)) {
+                checkedItemId = itemId;
+            }
+        }
+        builder.setSingleChoiceItems(items, checkedItemId, new AlertDialog.OnClickListener() {
+            @Override
+            public void onClick(final DialogInterface dialog, final int item) {
+                final int subtypeId;
+                if (item == ITEM_ID_USE_SYSTEM_LANGUAGE) {
+                    subtypeId = SpellCheckerSubtype.SUBTYPE_ID_NONE;
+                } else {
+                    final int index = convertDialogItemIdToSubtypeIndex(item);
+                    subtypeId = currentSci.getSubtypeAt(index).hashCode();
+                }
+
+                Settings.Secure.putInt(getContentResolver(),
+                        Settings.Secure.SELECTED_SPELL_CHECKER_SUBTYPE, subtypeId);
+
+                if (DBG) {
+                    final SpellCheckerSubtype subtype = mTsm.getCurrentSpellCheckerSubtype(
+                            true /* allowImplicitlySelectedSubtype */);
+                    Log.d(TAG, "Current spell check locale is "
+                            + subtype == null ? "null" : subtype.getLocale());
+                }
+                dialog.dismiss();
+                updatePreferenceScreen();
+            }
+        });
+        mDialog = builder.create();
         mDialog.show();
     }
 
-    private void changeCurrentSpellChecker(SingleSpellCheckerPreference scp) {
-        mTsm.setCurrentSpellChecker(scp.getSpellCheckerInfo());
-        if (DBG) {
-            Log.d(TAG, "Current spell check is "
-                        + SpellCheckerUtils.getCurrentSpellChecker(mTsm).getId());
+    private void showSecurityWarnDialog(final SpellCheckerInfo sci) {
+        if (mDialog != null && mDialog.isShowing()) {
+            mDialog.dismiss();
         }
-        updateScreen();
+        final AlertDialog.Builder builder = new AlertDialog.Builder(getActivity());
+        builder.setTitle(android.R.string.dialog_alert_title);
+        builder.setMessage(getString(R.string.spellchecker_security_warning,
+                sci.loadLabel(getPackageManager())));
+        builder.setCancelable(true);
+        builder.setPositiveButton(android.R.string.ok, new DialogInterface.OnClickListener() {
+            @Override
+            public void onClick(final DialogInterface dialog, final int which) {
+                changeCurrentSpellChecker(sci);
+            }
+        });
+        builder.setNegativeButton(android.R.string.cancel, new DialogInterface.OnClickListener() {
+            @Override
+            public void onClick(final DialogInterface dialog, final int which) {
+            }
+        });
+        mDialog = builder.create();
+        mDialog.show();
     }
 
-    private static boolean isSystemApp(SpellCheckerInfo sci) {
-        return (sci.getServiceInfo().applicationInfo.flags & ApplicationInfo.FLAG_SYSTEM) != 0;
+    private void changeCurrentSpellChecker(final SpellCheckerInfo sci) {
+        Settings.Secure.putString(getContentResolver(), Settings.Secure.SELECTED_SPELL_CHECKER,
+                sci.getId());
+        // Reset the spell checker subtype
+        Settings.Secure.putInt(getContentResolver(), Settings.Secure.SELECTED_SPELL_CHECKER_SUBTYPE,
+                SpellCheckerSubtype.SUBTYPE_ID_NONE);
+        if (DBG) {
+            Log.d(TAG, "Current spell check is " + mTsm.getCurrentSpellChecker().getId());
+        }
+        updatePreferenceScreen();
     }
 }

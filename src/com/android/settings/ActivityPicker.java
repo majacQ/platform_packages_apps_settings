@@ -16,10 +16,7 @@
 
 package com.android.settings;
 
-import android.graphics.ColorFilter;
-import android.util.DisplayMetrics;
-import com.android.internal.app.AlertActivity;
-import com.android.internal.app.AlertController;
+import static android.view.WindowManager.LayoutParams.SYSTEM_FLAG_HIDE_NON_SYSTEM_OVERLAY_WINDOWS;
 
 import android.app.Activity;
 import android.content.Context;
@@ -27,11 +24,12 @@ import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.Intent.ShortcutIconResource;
 import android.content.pm.PackageManager;
-import android.content.pm.ResolveInfo;
 import android.content.pm.PackageManager.NameNotFoundException;
+import android.content.pm.ResolveInfo;
 import android.content.res.Resources;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
+import android.graphics.ColorFilter;
 import android.graphics.Paint;
 import android.graphics.PaintFlagsDrawFilter;
 import android.graphics.PixelFormat;
@@ -41,11 +39,15 @@ import android.graphics.drawable.Drawable;
 import android.graphics.drawable.PaintDrawable;
 import android.os.Bundle;
 import android.os.Parcelable;
+import android.util.DisplayMetrics;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.BaseAdapter;
 import android.widget.TextView;
+
+import com.android.internal.app.AlertActivity;
+import com.android.internal.app.AlertController;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -71,6 +73,8 @@ public class ActivityPicker extends AlertActivity implements
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+
+        getWindow().addPrivateFlags(SYSTEM_FLAG_HIDE_NON_SYSTEM_OVERLAY_WINDOWS);
         
         final Intent intent = getIntent();
         
@@ -78,6 +82,10 @@ public class ActivityPicker extends AlertActivity implements
         Parcelable parcel = intent.getParcelableExtra(Intent.EXTRA_INTENT);
         if (parcel instanceof Intent) {
             mBaseIntent = (Intent) parcel;
+            mBaseIntent.setFlags(mBaseIntent.getFlags() & ~(Intent.FLAG_GRANT_READ_URI_PERMISSION
+                    | Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                    | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION
+                    | Intent.FLAG_GRANT_PREFIX_URI_PERMISSION));
         } else {
             mBaseIntent = new Intent(Intent.ACTION_MAIN, null);
             mBaseIntent.addCategory(Intent.CATEGORY_DEFAULT);
@@ -159,7 +167,7 @@ public class ActivityPicker extends AlertActivity implements
                     Resources res = packageManager.getResourcesForApplication(
                             iconResource.packageName);
                     icon = res.getDrawable(res.getIdentifier(
-                            iconResource.resourceName, null, null));
+                            iconResource.resourceName, null, null), null);
                 } catch (NameNotFoundException e) {
                     // Ignore
                 }

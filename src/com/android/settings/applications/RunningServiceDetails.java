@@ -2,12 +2,10 @@ package com.android.settings.applications;
 
 import android.app.Activity;
 import android.app.ActivityManager;
-import android.app.AlertDialog;
 import android.app.ApplicationErrorReport;
 import android.app.Dialog;
-import android.app.DialogFragment;
-import android.app.Fragment;
 import android.app.PendingIntent;
+import android.app.settings.SettingsEnums;
 import android.content.ActivityNotFoundException;
 import android.content.ComponentName;
 import android.content.Context;
@@ -22,7 +20,6 @@ import android.content.pm.ServiceInfo;
 import android.content.res.Resources;
 import android.os.Bundle;
 import android.os.Debug;
-import android.os.Handler;
 import android.os.SystemClock;
 import android.os.UserHandle;
 import android.provider.Settings;
@@ -33,8 +30,14 @@ import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.TextView;
 
+import androidx.appcompat.app.AlertDialog;
+import androidx.fragment.app.DialogFragment;
+
 import com.android.settings.R;
 import com.android.settings.Utils;
+import com.android.settings.core.InstrumentedFragment;
+import com.android.settings.core.instrumentation.InstrumentedDialogFragment;
+import com.android.settingslib.utils.ThreadUtils;
 
 import java.io.File;
 import java.io.FileInputStream;
@@ -43,7 +46,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 
-public class RunningServiceDetails extends Fragment
+public class RunningServiceDetails extends InstrumentedFragment
         implements RunningState.OnRefreshUiListener {
     static final String TAG = "RunningServicesDetails";
 
@@ -223,7 +226,7 @@ public class RunningServiceDetails extends Fragment
 
     void addServicesHeader() {
         if (mNumServices == 0) {
-            mServicesHeader = (TextView)mInflater.inflate(R.layout.separator_label,
+            mServicesHeader = (TextView) mInflater.inflate(R.layout.preference_category,
                     mAllDetails, false);
             mServicesHeader.setText(R.string.runningservicedetails_services_title);
             mAllDetails.addView(mServicesHeader);
@@ -233,7 +236,7 @@ public class RunningServiceDetails extends Fragment
 
     void addProcessesHeader() {
         if (mNumProcesses == 0) {
-            mProcessesHeader = (TextView)mInflater.inflate(R.layout.separator_label,
+            mProcessesHeader = (TextView) mInflater.inflate(R.layout.preference_category,
                     mAllDetails, false);
             mProcessesHeader.setText(R.string.runningservicedetails_processes_title);
             mAllDetails.addView(mProcessesHeader);
@@ -479,31 +482,29 @@ public class RunningServiceDetails extends Fragment
             addDetailViews();
         }
     }
-    
+
     private void finish() {
-        (new Handler()).post(new Runnable() {
-            @Override
-            public void run() {
-                Activity a = getActivity();
-                if (a != null) {
-                    a.onBackPressed();
-                }
+        ThreadUtils.postOnMainThread(() -> {
+            final Activity a = getActivity();
+            if (a != null) {
+                a.onBackPressed();
             }
         });
     }
-    
+
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        
+        setHasOptionsMenu(true);
         mUid = getArguments().getInt(KEY_UID, -1);
         mUserId = getArguments().getInt(KEY_USER_ID, 0);
         mProcessName = getArguments().getString(KEY_PROCESS, null);
         mShowBackground = getArguments().getBoolean(KEY_BACKGROUND, false);
-        
-        mAm = (ActivityManager)getActivity().getSystemService(Context.ACTIVITY_SERVICE);
-        mInflater = (LayoutInflater)getActivity().getSystemService(Context.LAYOUT_INFLATER_SERVICE);
-        
+
+        mAm = (ActivityManager) getActivity().getSystemService(Context.ACTIVITY_SERVICE);
+        mInflater = (LayoutInflater) getActivity().getSystemService(
+                Context.LAYOUT_INFLATER_SERVICE);
+
         mState = RunningState.getInstance(getActivity());
     }
     
@@ -533,6 +534,11 @@ public class RunningServiceDetails extends Fragment
     }
 
     @Override
+    public int getMetricsCategory() {
+        return SettingsEnums.RUNNING_SERVICE_DETAILS;
+    }
+
+    @Override
     public void onResume() {
         super.onResume();
         ensureData();
@@ -548,15 +554,15 @@ public class RunningServiceDetails extends Fragment
         }
         return null;
     }
-    
+
     private void showConfirmStopDialog(ComponentName comp) {
         DialogFragment newFragment = MyAlertDialogFragment.newConfirmStop(
                 DIALOG_CONFIRM_STOP, comp);
         newFragment.setTargetFragment(this, 0);
         newFragment.show(getFragmentManager(), "confirmstop");
     }
-    
-    public static class MyAlertDialogFragment extends DialogFragment {
+
+    public static class MyAlertDialogFragment extends InstrumentedDialogFragment {
 
         public static MyAlertDialogFragment newConfirmStop(int id, ComponentName comp) {
             MyAlertDialogFragment frag = new MyAlertDialogFragment();
@@ -583,7 +589,6 @@ public class RunningServiceDetails extends Fragment
                     
                     return new AlertDialog.Builder(getActivity())
                             .setTitle(getActivity().getString(R.string.runningservicedetails_stop_dlg_title))
-                            .setIconAttribute(android.R.attr.alertDialogIcon)
                             .setMessage(getActivity().getString(R.string.runningservicedetails_stop_dlg_text))
                             .setPositiveButton(R.string.dlg_ok,
                                     new DialogInterface.OnClickListener() {
@@ -599,6 +604,11 @@ public class RunningServiceDetails extends Fragment
                 }
             }
             throw new IllegalArgumentException("unknown id " + id);
+        }
+
+        @Override
+        public int getMetricsCategory() {
+            return SettingsEnums.DIALOG_RUNNIGN_SERVICE;
         }
     }
 

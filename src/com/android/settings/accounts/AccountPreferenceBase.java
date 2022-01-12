@@ -1,4 +1,5 @@
 /*
+
  * Copyright (C) 2008 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -16,50 +17,57 @@
 
 package com.android.settings.accounts;
 
-import java.util.ArrayList;
-import java.util.Date;
-import java.util.HashMap;
-import java.util.Map;
-
-import com.android.settings.SettingsPreferenceFragment;
-import com.google.android.collect.Maps;
-
-import android.accounts.Account;
-import android.accounts.AccountManager;
-import android.accounts.AuthenticatorDescription;
-import android.accounts.OnAccountsUpdateListener;
 import android.app.Activity;
 import android.content.ContentResolver;
 import android.content.Context;
-import android.content.SyncAdapterType;
 import android.content.SyncStatusObserver;
-import android.content.pm.PackageManager;
-import android.content.res.Resources;
 import android.graphics.drawable.Drawable;
 import android.os.Bundle;
-import android.os.Handler;
-import android.preference.PreferenceActivity;
-import android.preference.PreferenceScreen;
+import android.os.UserHandle;
+import android.os.UserManager;
 import android.text.format.DateFormat;
 import android.util.Log;
 
-class AccountPreferenceBase extends SettingsPreferenceFragment
-        implements OnAccountsUpdateListener {
+import com.android.settings.SettingsPreferenceFragment;
+import com.android.settings.Utils;
+import com.android.settingslib.accounts.AuthenticatorHelper;
+import com.android.settingslib.utils.ThreadUtils;
 
-    protected static final String TAG = "AccountSettings";
+abstract class AccountPreferenceBase extends SettingsPreferenceFragment
+        implements AuthenticatorHelper.OnAccountsUpdateListener {
+
+    protected static final String TAG = "AccountPreferenceBase";
+    protected static final boolean VERBOSE = Log.isLoggable(TAG, Log.VERBOSE);
+
     public static final String AUTHORITIES_FILTER_KEY = "authorities";
     public static final String ACCOUNT_TYPES_FILTER_KEY = "account_types";
-    private final Handler mHandler = new Handler();
+
+    private UserManager mUm;
     private Object mStatusChangeListenerHandle;
-    private HashMap<String, ArrayList<String>> mAccountTypeToAuthorities = null;
-    private AuthenticatorHelper mAuthenticatorHelper = new AuthenticatorHelper();
+    protected AuthenticatorHelper mAuthenticatorHelper;
+    protected UserHandle mUserHandle;
+    protected AccountTypePreferenceLoader mAccountTypePreferenceLoader;
+
     private java.text.DateFormat mDateFormat;
     private java.text.DateFormat mTimeFormat;
+
+    @Override
+    public void onCreate(Bundle icicle) {
+        super.onCreate(icicle);
+        mUm = (UserManager) getSystemService(Context.USER_SERVICE);
+        final Activity activity = getActivity();
+        mUserHandle = Utils.getSecureTargetUser(activity.getActivityToken(), mUm, getArguments(),
+                activity.getIntent().getExtras());
+        mAuthenticatorHelper = new AuthenticatorHelper(activity, mUserHandle, this);
+        mAccountTypePreferenceLoader =
+            new AccountTypePreferenceLoader(this, mAuthenticatorHelper, mUserHandle);
+    }
 
     /**
      * Overload to handle account updates.
      */
-    public void onAccountsUpdated(Account[] accounts) {
+    @Override
+    public void onAccountsUpdate(UserHandle userHandle) {
 
     }
 
@@ -104,62 +112,8 @@ class AccountPreferenceBase extends SettingsPreferenceFragment
         ContentResolver.removeStatusChangeListener(mStatusChangeListenerHandle);
     }
 
-    private SyncStatusObserver mSyncStatusObserver = new SyncStatusObserver() {
-        public void onStatusChanged(int which) {
-            mHandler.post(new Runnable() {
-                public void run() {
-                    onSyncStateUpdated();
-                }
-            });
-        }
-    };
-
-    public ArrayList<String> getAuthoritiesForAccountType(String type) {
-        if (mAccountTypeToAuthorities == null) {
-            mAccountTypeToAuthorities = Maps.newHashMap();
-            SyncAdapterType[] syncAdapters = ContentResolver.getSyncAdapterTypes();
-            for (int i = 0, n = syncAdapters.length; i < n; i++) {
-                final SyncAdapterType sa = syncAdapters[i];
-                ArrayList<String> authorities = mAccountTypeToAuthorities.get(sa.accountType);
-                if (authorities == null) {
-                    authorities = new ArrayList<String>();
-                    mAccountTypeToAuthorities.put(sa.accountType, authorities);
-                }
-                if (Log.isLoggable(TAG, Log.VERBOSE)) {
-                    Log.d(TAG, "added authority " + sa.authority + " to accountType "
-                            + sa.accountType);
-                }
-                authorities.add(sa.authority);
-            }
-        }
-        return mAccountTypeToAuthorities.get(type);
-    }
-
-    /**
-     * Gets the preferences.xml file associated with a particular account type.
-     * @param accountType the type of account
-     * @return a PreferenceScreen inflated from accountPreferenceId.
-     */
-    public PreferenceScreen addPreferencesForType(final String accountType,
-            PreferenceScreen parent) {
-        PreferenceScreen prefs = null;
-        if (mAuthenticatorHelper.containsAccountType(accountType)) {
-            AuthenticatorDescription desc = null;
-            try {
-                desc = mAuthenticatorHelper.getAccountTypeDescription(accountType);
-                if (desc != null && desc.accountPreferencesId != 0) {
-                    Context authContext = getActivity().createPackageContext(desc.packageName, 0);
-                    prefs = getPreferenceManager().inflateFromResource(authContext,
-                            desc.accountPreferencesId, parent);
-                }
-            } catch (PackageManager.NameNotFoundException e) {
-                Log.w(TAG, "Couldn't load preferences.xml file from " + desc.packageName);
-            } catch (Resources.NotFoundException e) {
-                Log.w(TAG, "Couldn't load preferences.xml file from " + desc.packageName);
-            }
-        }
-        return prefs;
-    }
+    private SyncStatusObserver mSyncStatusObserver =
+            which -> ThreadUtils.postOnMainThread(() -> onSyncStateUpdated());
 
     public void updateAuthDescriptions() {
         mAuthenticatorHelper.updateAuthDescriptions(getActivity());
@@ -172,10 +126,5 @@ class AccountPreferenceBase extends SettingsPreferenceFragment
 
     protected CharSequence getLabelForType(final String accountType) {
         return mAuthenticatorHelper.getLabelForType(getActivity(), accountType);
-    }
-
-    protected String formatSyncDate(Date date) {
-        // TODO: Switch to using DateUtils.formatDateTime
-        return mDateFormat.format(date) + " " + mTimeFormat.format(date);
     }
 }

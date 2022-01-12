@@ -17,27 +17,50 @@
 package com.android.settings;
 
 import android.content.Context;
-import android.preference.Preference;
 import android.util.AttributeSet;
 import android.view.View;
 
+import androidx.preference.Preference;
+import androidx.preference.PreferenceViewHolder;
+
+/**
+ * A category with a progress spinner
+ */
 public class ProgressCategory extends ProgressCategoryBase {
 
-    private final int mEmptyTextRes;
+    private int mEmptyTextRes;
     private boolean mProgress = false;
     private Preference mNoDeviceFoundPreference;
     private boolean mNoDeviceFoundAdded;
 
-    public ProgressCategory(Context context, AttributeSet attrs,
-            int emptyTextRes) {
+    public ProgressCategory(Context context) {
+        super(context);
+        setLayoutResource(R.layout.preference_progress_category);
+    }
+
+    public ProgressCategory(Context context, AttributeSet attrs) {
         super(context, attrs);
         setLayoutResource(R.layout.preference_progress_category);
+    }
+
+    public ProgressCategory(Context context, AttributeSet attrs,
+            int defStyleAttr) {
+        super(context, attrs, defStyleAttr);
+        setLayoutResource(R.layout.preference_progress_category);
+    }
+
+    public ProgressCategory(Context context, AttributeSet attrs, int defStyleAttr, int defStyleRes) {
+        super(context, attrs, defStyleAttr, defStyleRes);
+        setLayoutResource(R.layout.preference_progress_category);
+    }
+
+    public void setEmptyTextRes(int emptyTextRes) {
         mEmptyTextRes = emptyTextRes;
     }
 
     @Override
-    public void onBindView(View view) {
-        super.onBindView(view);
+    public void onBindViewHolder(PreferenceViewHolder view) {
+        super.onBindViewHolder(view);
         final View progressBar = view.findViewById(R.id.scanning_progress);
 
         boolean noDeviceFound = (getPreferenceCount() == 0 ||

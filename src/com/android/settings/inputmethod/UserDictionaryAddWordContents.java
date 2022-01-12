@@ -27,7 +27,6 @@ import android.view.View;
 import android.widget.EditText;
 
 import com.android.settings.R;
-import com.android.settings.UserDictionarySettings;
 import com.android.settings.Utils;
 
 import java.util.ArrayList;
@@ -61,8 +60,8 @@ public class UserDictionaryAddWordContents {
     private String mSavedShortcut;
 
     /* package */ UserDictionaryAddWordContents(final View view, final Bundle args) {
-        mWordEditText = (EditText)view.findViewById(R.id.user_dictionary_add_word_text);
-        mShortcutEditText = (EditText)view.findViewById(R.id.user_dictionary_add_shortcut);
+        mWordEditText = (EditText) view.findViewById(R.id.user_dictionary_add_word_text);
+        mShortcutEditText = (EditText) view.findViewById(R.id.user_dictionary_add_shortcut);
         final String word = args.getString(EXTRA_WORD);
         if (null != word) {
             mWordEditText.setText(word);
@@ -82,12 +81,12 @@ public class UserDictionaryAddWordContents {
 
     /* package */ UserDictionaryAddWordContents(final View view,
             final UserDictionaryAddWordContents oldInstanceToBeEdited) {
-        mWordEditText = (EditText)view.findViewById(R.id.user_dictionary_add_word_text);
-        mShortcutEditText = (EditText)view.findViewById(R.id.user_dictionary_add_shortcut);
+        mWordEditText = (EditText) view.findViewById(R.id.user_dictionary_add_word_text);
+        mShortcutEditText = (EditText) view.findViewById(R.id.user_dictionary_add_shortcut);
         mMode = MODE_EDIT;
         mOldWord = oldInstanceToBeEdited.mSavedWord;
         mOldShortcut = oldInstanceToBeEdited.mSavedShortcut;
-        updateLocale(mLocale);
+        updateLocale(oldInstanceToBeEdited.getCurrentUserDictionaryLocale());
     }
 
     // locale may be null, this means default locale
@@ -146,7 +145,9 @@ public class UserDictionaryAddWordContents {
         // should not insert, because either A. the word exists with no shortcut, in which
         // case the exact same thing we want to insert is already there, or B. the word
         // exists with at least one shortcut, in which case it has priority on our word.
-        if (hasWord(newWord, context)) return UserDictionaryAddWordActivity.CODE_ALREADY_PRESENT;
+        if (TextUtils.isEmpty(newShortcut) && hasWord(newWord, context)) {
+            return UserDictionaryAddWordActivity.CODE_ALREADY_PRESENT;
+        }
 
         // Disallow duplicates. If the same word with no shortcut is defined, remove it; if
         // the same word with the same shortcut is defined, remove it; but we don't mind if
@@ -166,23 +167,24 @@ public class UserDictionaryAddWordContents {
         return UserDictionaryAddWordActivity.CODE_WORD_ADDED;
     }
 
-    private static final String[] HAS_WORD_PROJECTION = { UserDictionary.Words.WORD };
+    private static final String[] HAS_WORD_PROJECTION = {UserDictionary.Words.WORD};
     private static final String HAS_WORD_SELECTION_ONE_LOCALE = UserDictionary.Words.WORD
             + "=? AND " + UserDictionary.Words.LOCALE + "=?";
     private static final String HAS_WORD_SELECTION_ALL_LOCALES = UserDictionary.Words.WORD
             + "=? AND " + UserDictionary.Words.LOCALE + " is null";
+
     private boolean hasWord(final String word, final Context context) {
         final Cursor cursor;
         // mLocale == "" indicates this is an entry for all languages. Here, mLocale can't
         // be null at all (it's ensured by the updateLocale method).
         if ("".equals(mLocale)) {
             cursor = context.getContentResolver().query(UserDictionary.Words.CONTENT_URI,
-                      HAS_WORD_PROJECTION, HAS_WORD_SELECTION_ALL_LOCALES,
-                      new String[] { word }, null /* sort order */);
+                    HAS_WORD_PROJECTION, HAS_WORD_SELECTION_ALL_LOCALES,
+                    new String[] {word}, null /* sort order */);
         } else {
             cursor = context.getContentResolver().query(UserDictionary.Words.CONTENT_URI,
-                      HAS_WORD_PROJECTION, HAS_WORD_SELECTION_ONE_LOCALE,
-                      new String[] { word, mLocale }, null /* sort order */);
+                    HAS_WORD_PROJECTION, HAS_WORD_SELECTION_ONE_LOCALE,
+                    new String[] {word, mLocale}, null /* sort order */);
         }
         try {
             if (null == cursor) return false;
@@ -195,6 +197,7 @@ public class UserDictionaryAddWordContents {
     public static class LocaleRenderer {
         private final String mLocaleString;
         private final String mDescription;
+
         // LocaleString may NOT be null.
         public LocaleRenderer(final Context context, final String localeString) {
             mLocaleString = localeString;
@@ -206,13 +209,16 @@ public class UserDictionaryAddWordContents {
                 mDescription = Utils.createLocaleFromString(localeString).getDisplayName();
             }
         }
+
         @Override
         public String toString() {
             return mDescription;
         }
+
         public String getLocaleString() {
             return mLocaleString;
         }
+
         // "More languages..." is null ; "All languages" is the empty string.
         public boolean isMoreLanguages() {
             return null == mLocaleString;
@@ -228,7 +234,8 @@ public class UserDictionaryAddWordContents {
 
     // Helper method to get the list of locales to display for this word
     public ArrayList<LocaleRenderer> getLocalesList(final Activity activity) {
-        final TreeSet<String> locales = UserDictionaryList.getUserDictionaryLocalesSet(activity);
+        final TreeSet<String> locales =
+                UserDictionaryListPreferenceController.getUserDictionaryLocalesSet(activity);
         // Remove our locale if it's in, because we're always gonna put it at the top
         locales.remove(mLocale); // mLocale may not be null
         final String systemLocale = Locale.getDefault().toString();

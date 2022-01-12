@@ -13,54 +13,108 @@
      See the License for the specific language governing permissions and
      limitations under the License.
 -->
-
-<com.android.internal.widget.LinearLayoutWithDefaultTouchRecepient
-        xmlns:android="http://schemas.android.com/apk/res/android"
-    android:id="@+id/topLayout"
-    android:orientation="horizontal"
+<com.google.android.setupdesign.GlifLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/setup_wizard_layout"
     android:layout_width="match_parent"
-    android:layout_height="match_parent">
+    android:layout_height="match_parent"
+    android:icon="@drawable/ic_enterprise"
+    android:layout="@layout/sud_glif_blank_template">
 
-    <!-- left side: instructions and messages -->
-    <LinearLayout
-            android:orientation="vertical"
-            android:layout_width="0dip"
+    <com.android.internal.widget.LinearLayoutWithDefaultTouchRecepient
+        android:id="@+id/topLayout"
+        android:orientation="horizontal"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent">
+
+        <ScrollView
+            android:layout_width="0dp"
             android:layout_height="match_parent"
-            android:layout_weight="1.0"
-            >
+            android:layout_weight="1"
+            android:fillViewport="true">
 
-        <!-- header message -->
-        <TextView android:id="@+id/headerText"
-                  android:layout_width="match_parent"
-                  android:layout_height="wrap_content"
-                  android:gravity="center"
-                  android:textSize="18sp"/>
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:paddingBottom="24dp">
 
-        <!-- fill space between header and button below -->
-        <View
-            android:layout_weight="1.0"
-            android:layout_width="match_parent"
-            android:layout_height="0dip"
-            />
+                <ImageView
+                    android:id="@+id/sud_layout_icon"
+                    style="@style/SudGlifIcon"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="?attr/sudGlifHeaderGravity"
+                    android:src="@drawable/ic_enterprise" />
 
-        <!-- footer message -->
-        <TextView android:id="@+id/footerText"
-                  android:layout_width="match_parent"
-                  android:layout_height="wrap_content"
-                  android:gravity="center"
-                  android:textSize="14sp"/>
-    </LinearLayout>
+                <TextView
+                    android:id="@+id/headerText"
+                    style="@style/SudGlifHeaderTitle"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content" />
 
-    <View
-         android:background="@*android:drawable/code_lock_left"
-         android:layout_width="2dip"
-         android:layout_height="match_parent" />
+                <TextView
+                    android:id="@+id/sud_layout_description"
+                    style="@style/SudDescription.Glif"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="?attr/sudMarginSides"
+                    android:layout_marginEnd="?attr/sudMarginSides" />
 
-    <!-- right side: lock pattern -->
-    <com.android.internal.widget.LockPatternView android:id="@+id/lockPattern"
-         android:layout_width="match_parent"
-         android:layout_height="match_parent" />
+                <Button
+                    android:id="@+id/cancelButton"
+                    style="@style/SetupWizardButton.Negative"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="?attr/sudMarginSides"
+                    android:layout_marginEnd="?attr/sudMarginSides"
+                    android:text="@string/cancel" />
 
+                <Button
+                    android:id="@+id/forgotButton"
+                    style="@style/SudGlifButton.Secondary"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="?attr/sudMarginSides"
+                    android:layout_marginEnd="?attr/sudMarginSides"
+                    android:layout_gravity="center"
+                    android:visibility="gone" />
 
-</com.android.internal.widget.LinearLayoutWithDefaultTouchRecepient>
+                <Space
+                    android:layout_width="match_parent"
+                    android:layout_height="0dp"
+                    android:layout_weight="1" />
+
+                <TextView
+                    style="@style/TextAppearance.ErrorText"
+                    android:accessibilityLiveRegion="polite"
+                    android:id="@+id/errorText"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="?attr/sudMarginSides"
+                    android:layout_marginEnd="?attr/sudMarginSides"
+                    android:layout_marginBottom="24dp"
+                    android:gravity="center_vertical"/>
+
+            </LinearLayout>
+
+        </ScrollView>
+
+        <com.google.android.setupdesign.view.FillContentLayout
+            style="@style/LockPatternContainerStyle"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:paddingStart="0dp">
+
+            <com.android.internal.widget.LockPatternView
+                android:id="@+id/lockPattern"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:layout_gravity="center" />
+
+        </com.google.android.setupdesign.view.FillContentLayout>
+
+    </com.android.internal.widget.LinearLayoutWithDefaultTouchRecepient>
+</com.google.android.setupdesign.GlifLayout>
 

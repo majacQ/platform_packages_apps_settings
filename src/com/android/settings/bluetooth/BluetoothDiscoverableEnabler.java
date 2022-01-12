@@ -24,13 +24,12 @@ import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.os.Handler;
 import android.os.SystemProperties;
-import android.preference.Preference;
-import android.text.format.DateUtils;
+import android.util.Log;
+
+import androidx.preference.Preference;
 
 import com.android.settings.R;
-
-import android.text.format.Time;
-import android.util.Log;
+import com.android.settingslib.bluetooth.BluetoothDiscoverableTimeoutReceiver;
 
 /**
  * BluetoothDiscoverableEnabler is a helper to manage the "Discoverable"
@@ -60,11 +59,11 @@ final class BluetoothDiscoverableEnabler implements Preference.OnPreferenceClick
 
     static final int DEFAULT_DISCOVERABLE_TIMEOUT = DISCOVERABLE_TIMEOUT_TWO_MINUTES;
 
-    private final Context mContext;
+    private Context mContext;
     private final Handler mUiHandler;
     private final Preference mDiscoveryPreference;
 
-    private final LocalBluetoothAdapter mLocalAdapter;
+    private final BluetoothAdapter mBluetoothAdapter;
 
     private final SharedPreferences mSharedPreferences;
 
@@ -92,29 +91,31 @@ final class BluetoothDiscoverableEnabler implements Preference.OnPreferenceClick
         }
     };
 
-    BluetoothDiscoverableEnabler(Context context, LocalBluetoothAdapter adapter,
-            Preference discoveryPreference) {
-        mContext = context;
+    BluetoothDiscoverableEnabler(Preference discoveryPreference) {
         mUiHandler = new Handler();
-        mLocalAdapter = adapter;
+        mBluetoothAdapter = BluetoothAdapter.getDefaultAdapter();
         mDiscoveryPreference = discoveryPreference;
         mSharedPreferences = discoveryPreference.getSharedPreferences();
         discoveryPreference.setPersistent(false);
     }
 
-    public void resume() {
-        if (mLocalAdapter == null) {
+    public void resume(Context context) {
+        if (mBluetoothAdapter == null) {
             return;
+        }
+
+        if (mContext != context) {
+            mContext = context;
         }
 
         IntentFilter filter = new IntentFilter(BluetoothAdapter.ACTION_SCAN_MODE_CHANGED);
         mContext.registerReceiver(mReceiver, filter);
         mDiscoveryPreference.setOnPreferenceClickListener(this);
-        handleModeChanged(mLocalAdapter.getScanMode());
+        handleModeChanged(mBluetoothAdapter.getScanMode());
     }
 
     public void pause() {
-        if (mLocalAdapter == null) {
+        if (mBluetoothAdapter == null) {
             return;
         }
 
@@ -136,16 +137,20 @@ final class BluetoothDiscoverableEnabler implements Preference.OnPreferenceClick
             long endTimestamp = System.currentTimeMillis() + timeout * 1000L;
             LocalBluetoothPreferences.persistDiscoverableEndTimestamp(mContext, endTimestamp);
 
-            mLocalAdapter.setScanMode(BluetoothAdapter.SCAN_MODE_CONNECTABLE_DISCOVERABLE, timeout);
+            mBluetoothAdapter
+                    .setScanMode(BluetoothAdapter.SCAN_MODE_CONNECTABLE_DISCOVERABLE, timeout);
             updateCountdownSummary();
 
             Log.d(TAG, "setEnabled(): enabled = " + enable + "timeout = " + timeout);
 
             if (timeout > 0) {
                 BluetoothDiscoverableTimeoutReceiver.setDiscoverableAlarm(mContext, endTimestamp);
+            } else {
+                BluetoothDiscoverableTimeoutReceiver.cancelDiscoverableAlarm(mContext);
             }
+
         } else {
-            mLocalAdapter.setScanMode(BluetoothAdapter.SCAN_MODE_CONNECTABLE);
+            mBluetoothAdapter.setScanMode(BluetoothAdapter.SCAN_MODE_CONNECTABLE);
             BluetoothDiscoverableTimeoutReceiver.cancelDiscoverableAlarm(mContext);
         }
     }
@@ -244,7 +249,7 @@ final class BluetoothDiscoverableEnabler implements Preference.OnPreferenceClick
 
     void setNumberOfPairedDevices(int pairedDevices) {
         mNumberOfPairedDevices = pairedDevices;
-        handleModeChanged(mLocalAdapter.getScanMode());
+        handleModeChanged(mBluetoothAdapter.getScanMode());
     }
 
     void handleModeChanged(int mode) {
@@ -267,7 +272,7 @@ final class BluetoothDiscoverableEnabler implements Preference.OnPreferenceClick
     }
 
     private void updateCountdownSummary() {
-        int mode = mLocalAdapter.getScanMode();
+        int mode = mBluetoothAdapter.getScanMode();
         if (mode != BluetoothAdapter.SCAN_MODE_CONNECTABLE_DISCOVERABLE) {
             return;
         }

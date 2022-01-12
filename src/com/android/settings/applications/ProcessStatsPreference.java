@@ -17,46 +17,43 @@
 package com.android.settings.applications;
 
 import android.content.Context;
-import android.graphics.drawable.ColorDrawable;
-import android.graphics.drawable.Drawable;
-import android.preference.Preference;
+import android.content.pm.PackageManager;
+import android.text.TextUtils;
 import android.text.format.Formatter;
-import android.view.View;
-import android.widget.ProgressBar;
-import android.widget.TextView;
-import com.android.settings.R;
+import android.util.Log;
 
-public class ProcessStatsPreference extends Preference {
-    private final ProcStatsEntry mEntry;
-    private int mProgress;
-    private CharSequence mProgressText;
+import com.android.settingslib.widget.apppreference.AppPreference;
 
-    public ProcessStatsPreference(Context context, Drawable icon, ProcStatsEntry entry) {
-        super(context);
+public class ProcessStatsPreference extends AppPreference {
+    static final String TAG = "ProcessStatsPreference";
+
+    private ProcStatsPackageEntry mEntry;
+
+    public ProcessStatsPreference(Context context) {
+        super(context, null);
+    }
+
+    public void init(ProcStatsPackageEntry entry, PackageManager pm, double maxMemory,
+            double weightToRam, double totalScale, boolean avg) {
         mEntry = entry;
-        setLayoutResource(R.layout.app_percentage_item);
-        setIcon(icon != null ? icon : new ColorDrawable(0));
+        String title = TextUtils.isEmpty(entry.mUiLabel) ? entry.mPackage : entry.mUiLabel;
+        setTitle(title);
+        if (TextUtils.isEmpty(title)) {
+            Log.d(TAG, "PackageEntry contained no package name or uiLabel");
+        }
+        if (entry.mUiTargetApp != null) {
+            setIcon(entry.mUiTargetApp.loadIcon(pm));
+        } else {
+            setIcon(pm.getDefaultActivityIcon());
+        }
+        boolean statsForeground = entry.mRunWeight > entry.mBgWeight;
+        double amount = avg ? (statsForeground ? entry.mRunWeight : entry.mBgWeight) * weightToRam
+                : (statsForeground ? entry.mMaxRunMem : entry.mMaxBgMem) * totalScale * 1024;
+        setSummary(Formatter.formatShortFileSize(getContext(), (long) amount));
+        setProgress((int) (100 * amount / maxMemory));
     }
 
-    public ProcStatsEntry getEntry() {
+    public ProcStatsPackageEntry getEntry() {
         return mEntry;
-    }
-
-    public void setPercent(double percentOfWeight, double percentOfTime) {
-        mProgress = (int) Math.ceil(percentOfWeight);
-        mProgressText = getContext().getResources().getString(
-                R.string.percentage, (int) Math.round(percentOfTime));
-        notifyChanged();
-    }
-
-    @Override
-    protected void onBindView(View view) {
-        super.onBindView(view);
-
-        final ProgressBar progress = (ProgressBar) view.findViewById(android.R.id.progress);
-        progress.setProgress(mProgress);
-
-        final TextView text1 = (TextView) view.findViewById(android.R.id.text1);
-        text1.setText(mProgressText);
     }
 }

@@ -16,11 +16,14 @@
 
 package com.android.settings.bluetooth;
 
-import android.app.QueuedWork;
+import android.bluetooth.BluetoothAdapter;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.content.res.Configuration;
+import android.text.TextUtils;
 import android.util.Log;
+
+import com.android.settingslib.bluetooth.LocalBluetoothManager;
 
 /**
  * LocalBluetoothPreferences provides an interface to the preferences
@@ -36,13 +39,9 @@ final class LocalBluetoothPreferences {
     // of raising notifications
     private static final int GRACE_PERIOD_TO_SHOW_DIALOGS_IN_FOREGROUND = 60 * 1000;
 
-    private static final String KEY_DISCOVERING_TIMESTAMP = "last_discovering_time";
-
     private static final String KEY_LAST_SELECTED_DEVICE = "last_selected_device";
 
     private static final String KEY_LAST_SELECTED_DEVICE_TIME = "last_selected_device_time";
-
-    private static final String KEY_DOCK_AUTO_CONNECT = "auto_connect_to_dock";
 
     private static final String KEY_DISCOVERABLE_END_TIMESTAMP = "discoverable_end_timestamp";
 
@@ -59,10 +58,10 @@ final class LocalBluetoothPreferences {
     }
 
     static boolean shouldShowDialogInForeground(Context context,
-            String deviceAddress) {
-        LocalBluetoothManager manager = LocalBluetoothManager.getInstance(context);
+            String deviceAddress, String deviceName) {
+        LocalBluetoothManager manager = Utils.getLocalBtManager(context);
         if (manager == null) {
-            if(DEBUG) Log.v(TAG, "manager == null - do not show dialog.");
+            if (DEBUG) Log.v(TAG, "manager == null - do not show dialog.");
             return false;
         }
 
@@ -90,12 +89,15 @@ final class LocalBluetoothPreferences {
         }
 
         // If the device was discoverING recently
-        LocalBluetoothAdapter adapter = manager.getBluetoothAdapter();
-        if (adapter != null && adapter.isDiscovering()) {
-            return true;
-        } else if ((sharedPreferences.getLong(KEY_DISCOVERING_TIMESTAMP, 0) +
+        BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
+        if (adapter != null) {
+            if (adapter.isDiscovering()) {
+                return true;
+            }
+            if ((adapter.getDiscoveryEndMillis() +
                 GRACE_PERIOD_TO_SHOW_DIALOGS_IN_FOREGROUND) > currentTimeMillis) {
-            return true;
+                return true;
+            }
         }
 
         // If the device was picked in the device picker recently
@@ -112,6 +114,18 @@ final class LocalBluetoothPreferences {
                 }
             }
         }
+
+
+        if (!TextUtils.isEmpty(deviceName)) {
+            // If the device is a custom BT keyboard specifically for this device
+            String packagedKeyboardName = context.getString(
+                    com.android.internal.R.string.config_packagedKeyboardName);
+            if (deviceName.equals(packagedKeyboardName)) {
+                if (DEBUG) Log.v(TAG, "showing dialog for packaged keyboard");
+                return true;
+            }
+        }
+
         if (DEBUG) Log.v(TAG, "Found no reason to show the dialog - do not show dialog.");
         return false;
     }
@@ -128,41 +142,6 @@ final class LocalBluetoothPreferences {
     static void persistDiscoverableEndTimestamp(Context context, long endTimestamp) {
         SharedPreferences.Editor editor = getSharedPreferences(context).edit();
         editor.putLong(KEY_DISCOVERABLE_END_TIMESTAMP, endTimestamp);
-        editor.apply();
-    }
-
-    static void persistDiscoveringTimestamp(final Context context) {
-        // Load the shared preferences and edit it on a background
-        // thread (but serialized!).
-        QueuedWork.singleThreadExecutor().submit(new Runnable() {
-                public void run() {
-                    SharedPreferences.Editor editor = getSharedPreferences(context).edit();
-                    editor.putLong(
-                            KEY_DISCOVERING_TIMESTAMP,
-                        System.currentTimeMillis());
-                    editor.apply();
-                }
-            });
-    }
-
-    static boolean hasDockAutoConnectSetting(Context context, String addr) {
-        return getSharedPreferences(context).contains(KEY_DOCK_AUTO_CONNECT + addr);
-    }
-
-    static boolean getDockAutoConnectSetting(Context context, String addr) {
-        return getSharedPreferences(context).getBoolean(KEY_DOCK_AUTO_CONNECT + addr,
-                false);
-    }
-
-    static void saveDockAutoConnectSetting(Context context, String addr, boolean autoConnect) {
-        SharedPreferences.Editor editor = getSharedPreferences(context).edit();
-        editor.putBoolean(KEY_DOCK_AUTO_CONNECT + addr, autoConnect);
-        editor.apply();
-    }
-
-    static void removeDockAutoConnectSetting(Context context, String addr) {
-        SharedPreferences.Editor editor = getSharedPreferences(context).edit();
-        editor.remove(KEY_DOCK_AUTO_CONNECT + addr);
         editor.apply();
     }
 }

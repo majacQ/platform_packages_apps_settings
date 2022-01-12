@@ -16,46 +16,94 @@
 
 package com.android.settings;
 
-import android.app.AlertDialog.Builder;
+import android.app.ActivityManager;
+import android.app.settings.SettingsEnums;
 import android.content.Context;
 import android.content.DialogInterface;
-import android.os.Bundle;
-import android.os.SystemProperties;
-import android.preference.DialogPreference;
+import android.os.RemoteException;
 import android.util.AttributeSet;
+import android.util.Log;
 import android.view.View;
+import android.widget.CheckedTextView;
+import android.widget.TextView;
 
-public class BugreportPreference extends DialogPreference {
+import androidx.appcompat.app.AlertDialog.Builder;
+
+import com.android.settings.overlay.FeatureFactory;
+import com.android.settingslib.CustomDialogPreferenceCompat;
+
+public class BugreportPreference extends CustomDialogPreferenceCompat {
+
+    private static final String TAG = "BugreportPreference";
+
+    private CheckedTextView mInteractiveTitle;
+    private TextView mInteractiveSummary;
+    private CheckedTextView mFullTitle;
+    private TextView mFullSummary;
+
     public BugreportPreference(Context context, AttributeSet attrs) {
         super(context, attrs);
     }
 
     @Override
-    protected void onPrepareDialogBuilder(Builder builder) {
-        super.onPrepareDialogBuilder(builder);
-        builder.setPositiveButton(com.android.internal.R.string.report, this);
-        builder.setMessage(com.android.internal.R.string.bugreport_message);
+    protected void onPrepareDialogBuilder(Builder builder,
+            DialogInterface.OnClickListener listener) {
+        super.onPrepareDialogBuilder(builder, listener);
+
+        final View dialogView = View.inflate(getContext(), R.layout.bugreport_options_dialog, null);
+        mInteractiveTitle = (CheckedTextView) dialogView
+                .findViewById(R.id.bugreport_option_interactive_title);
+        mInteractiveSummary = (TextView) dialogView
+                .findViewById(R.id.bugreport_option_interactive_summary);
+        mFullTitle = (CheckedTextView) dialogView.findViewById(R.id.bugreport_option_full_title);
+        mFullSummary = (TextView) dialogView.findViewById(R.id.bugreport_option_full_summary);
+        final View.OnClickListener l = new View.OnClickListener() {
+
+            @Override
+            public void onClick(View v) {
+                if (v == mFullTitle || v == mFullSummary) {
+                    mInteractiveTitle.setChecked(false);
+                    mFullTitle.setChecked(true);
+                }
+                if (v == mInteractiveTitle || v == mInteractiveSummary) {
+                    mInteractiveTitle.setChecked(true);
+                    mFullTitle.setChecked(false);
+                }
+            }
+        };
+        mInteractiveTitle.setOnClickListener(l);
+        mFullTitle.setOnClickListener(l);
+        mInteractiveSummary.setOnClickListener(l);
+        mFullSummary.setOnClickListener(l);
+
+        builder.setPositiveButton(com.android.internal.R.string.report, listener);
+        builder.setView(dialogView);
     }
 
     @Override
-    protected void showDialog(Bundle state) {
-        super.showDialog(state);
-    }
-
-    @Override
-    protected void onBindDialogView(View view) {
-        super.onBindDialogView(view);
-    }
-
-    @Override
-    protected void onDialogClosed(boolean positiveResult) {
-        super.onDialogClosed(positiveResult);
-    }
-
-    @Override
-    public void onClick(DialogInterface dialog, int which) {
+    protected void onClick(DialogInterface dialog, int which) {
         if (which == DialogInterface.BUTTON_POSITIVE) {
-            SystemProperties.set("ctl.start", "bugreport");
+
+            final Context context = getContext();
+            if (mFullTitle.isChecked()) {
+                Log.v(TAG, "Taking full bugreport right away");
+                FeatureFactory.getFactory(context).getMetricsFeatureProvider().action(context,
+                        SettingsEnums.ACTION_BUGREPORT_FROM_SETTINGS_FULL);
+                try {
+                    ActivityManager.getService().requestFullBugReport();
+                } catch (RemoteException e) {
+                    Log.e(TAG, "error taking bugreport (bugreportType=Full)", e);
+                }
+            } else {
+                Log.v(TAG, "Taking interactive bugreport right away");
+                FeatureFactory.getFactory(context).getMetricsFeatureProvider().action(context,
+                        SettingsEnums.ACTION_BUGREPORT_FROM_SETTINGS_INTERACTIVE);
+                try {
+                    ActivityManager.getService().requestInteractiveBugReport();
+                } catch (RemoteException e) {
+                    Log.e(TAG, "error taking bugreport (bugreportType=Interactive)", e);
+                }
+            }
         }
     }
 }

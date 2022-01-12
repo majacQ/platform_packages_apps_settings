@@ -16,15 +16,13 @@
 
 package com.android.settings.wfd;
 
-import android.app.ActionBar;
-import android.app.Activity;
-import android.app.AlertDialog;
-import android.app.Service;
+import android.app.settings.SettingsEnums;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.content.pm.PackageManager;
 import android.database.ContentObserver;
 import android.hardware.display.DisplayManager;
 import android.hardware.display.WifiDisplay;
@@ -32,43 +30,43 @@ import android.hardware.display.WifiDisplayStatus;
 import android.media.MediaRouter;
 import android.media.MediaRouter.RouteInfo;
 import android.net.Uri;
+import android.net.wifi.WpsInfo;
 import android.net.wifi.p2p.WifiP2pManager;
 import android.net.wifi.p2p.WifiP2pManager.ActionListener;
 import android.net.wifi.p2p.WifiP2pManager.Channel;
-import android.net.wifi.WpsInfo;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
-import android.preference.CheckBoxPreference;
-import android.preference.ListPreference;
-import android.preference.Preference;
-import android.preference.PreferenceActivity;
-import android.preference.PreferenceCategory;
-import android.preference.PreferenceGroup;
-import android.preference.PreferenceScreen;
 import android.provider.Settings;
-import android.text.Html;
 import android.util.Slog;
 import android.util.TypedValue;
-import android.view.Gravity;
-import android.view.LayoutInflater;
 import android.view.Menu;
 import android.view.MenuInflater;
 import android.view.MenuItem;
 import android.view.View;
 import android.view.View.OnClickListener;
-import android.view.ViewGroup;
 import android.widget.Button;
-import android.widget.CompoundButton;
 import android.widget.EditText;
 import android.widget.ImageView;
-import android.widget.Switch;
 import android.widget.TextView;
 
+import androidx.appcompat.app.AlertDialog;
+import androidx.preference.ListPreference;
+import androidx.preference.Preference;
+import androidx.preference.Preference.OnPreferenceChangeListener;
+import androidx.preference.PreferenceCategory;
+import androidx.preference.PreferenceGroup;
+import androidx.preference.PreferenceScreen;
+import androidx.preference.PreferenceViewHolder;
+import androidx.preference.SwitchPreference;
+
 import com.android.internal.app.MediaRouteDialogPresenter;
-import com.android.settings.ProgressCategory;
 import com.android.settings.R;
 import com.android.settings.SettingsPreferenceFragment;
+import com.android.settings.search.BaseSearchIndexProvider;
+import com.android.settingslib.TwoTargetPreference;
+import com.android.settingslib.search.Indexable;
+import com.android.settingslib.search.SearchIndexable;
 
 /**
  * The Settings screen for WifiDisplay configuration and connection management.
@@ -78,7 +76,8 @@ import com.android.settings.SettingsPreferenceFragment;
  * on the system.  In that case, the enable option will not be shown but other
  * remote display routes will continue to be made available.
  */
-public final class WifiDisplaySettings extends SettingsPreferenceFragment {
+@SearchIndexable(forTarget = SearchIndexable.ALL & ~SearchIndexable.ARC)
+public final class WifiDisplaySettings extends SettingsPreferenceFragment implements Indexable {
     private static final String TAG = "WifiDisplaySettings";
     private static final boolean DEBUG = false;
 
@@ -123,17 +122,28 @@ public final class WifiDisplaySettings extends SettingsPreferenceFragment {
     }
 
     @Override
+    public int getMetricsCategory() {
+        return SettingsEnums.WFD_WIFI_DISPLAY;
+    }
+
+    @Override
     public void onCreate(Bundle icicle) {
         super.onCreate(icicle);
 
         final Context context = getActivity();
-        mRouter = (MediaRouter)context.getSystemService(Context.MEDIA_ROUTER_SERVICE);
-        mDisplayManager = (DisplayManager)context.getSystemService(Context.DISPLAY_SERVICE);
-        mWifiP2pManager = (WifiP2pManager)context.getSystemService(Context.WIFI_P2P_SERVICE);
+        mRouter = (MediaRouter) context.getSystemService(Context.MEDIA_ROUTER_SERVICE);
+        mRouter.setRouterGroupId(MediaRouter.MIRRORING_GROUP_ID);
+        mDisplayManager = (DisplayManager) context.getSystemService(Context.DISPLAY_SERVICE);
+        mWifiP2pManager = (WifiP2pManager) context.getSystemService(Context.WIFI_P2P_SERVICE);
         mWifiP2pChannel = mWifiP2pManager.initialize(context, Looper.getMainLooper(), null);
 
         addPreferencesFromResource(R.xml.wifi_display_settings);
         setHasOptionsMenu(true);
+    }
+
+    @Override
+    public int getHelpResource() {
+        return R.string.help_url_remote_display;
     }
 
     @Override
@@ -142,7 +152,7 @@ public final class WifiDisplaySettings extends SettingsPreferenceFragment {
 
         mEmptyView = (TextView) getView().findViewById(android.R.id.empty);
         mEmptyView.setText(R.string.wifi_display_no_devices_found);
-        getListView().setEmptyView(mEmptyView);
+        setEmptyView(mEmptyView);
     }
 
     @Override
@@ -208,6 +218,12 @@ public final class WifiDisplaySettings extends SettingsPreferenceFragment {
         return super.onOptionsItemSelected(item);
     }
 
+    public static boolean isAvailable(Context context) {
+        return context.getSystemService(Context.DISPLAY_SERVICE) != null
+                && context.getPackageManager().hasSystemFeature(PackageManager.FEATURE_WIFI_DIRECT)
+                && context.getSystemService(Context.WIFI_P2P_SERVICE) != null;
+    }
+
     private void scheduleUpdate(int changes) {
         if (mStarted) {
             if (mPendingChanges == 0) {
@@ -234,7 +250,7 @@ public final class WifiDisplaySettings extends SettingsPreferenceFragment {
             mWifiDisplayCertificationOn = Settings.Global.getInt(getContentResolver(),
                     Settings.Global.WIFI_DISPLAY_CERTIFICATION_ON, 0) != 0;
             mWpsConfig = Settings.Global.getInt(getContentResolver(),
-                Settings.Global.WIFI_DISPLAY_WPS_CONFIG, WpsInfo.INVALID);
+                    Settings.Global.WIFI_DISPLAY_WPS_CONFIG, WpsInfo.INVALID);
 
             // The wifi display enabled setting may have changed.
             invalidateOptions = true;
@@ -269,7 +285,7 @@ public final class WifiDisplaySettings extends SettingsPreferenceFragment {
                 if (!display.isRemembered() && display.isAvailable()
                         && !display.equals(mWifiDisplayStatus.getActiveDisplay())) {
                     preferenceScreen.addPreference(new UnpairedWifiDisplayPreference(
-                            getActivity(), display));
+                            getPrefContext(), display));
                 }
             }
 
@@ -288,9 +304,9 @@ public final class WifiDisplaySettings extends SettingsPreferenceFragment {
     private RoutePreference createRoutePreference(MediaRouter.RouteInfo route) {
         WifiDisplay display = findWifiDisplay(route.getDeviceAddress());
         if (display != null) {
-            return new WifiDisplayRoutePreference(getActivity(), route, display);
+            return new WifiDisplayRoutePreference(getPrefContext(), route, display);
         } else {
-            return new RoutePreference(getActivity(), route);
+            return new RoutePreference(getPrefContext(), route);
         }
     }
 
@@ -307,7 +323,7 @@ public final class WifiDisplaySettings extends SettingsPreferenceFragment {
 
     private void buildCertificationMenu(final PreferenceScreen preferenceScreen) {
         if (mCertCategory == null) {
-            mCertCategory = new PreferenceCategory(getActivity());
+            mCertCategory = new PreferenceCategory(getPrefContext());
             mCertCategory.setTitle(R.string.wifi_display_certification_heading);
             mCertCategory.setOrder(ORDER_CERTIFICATION);
         } else {
@@ -317,26 +333,19 @@ public final class WifiDisplaySettings extends SettingsPreferenceFragment {
 
         // display session info if there is an active p2p session
         if (!mWifiDisplayStatus.getSessionInfo().getGroupId().isEmpty()) {
-            Preference p = new Preference(getActivity());
+            Preference p = new Preference(getPrefContext());
             p.setTitle(R.string.wifi_display_session_info);
             p.setSummary(mWifiDisplayStatus.getSessionInfo().toString());
             mCertCategory.addPreference(p);
 
             // show buttons for Pause/Resume when a WFD session is established
             if (mWifiDisplayStatus.getSessionInfo().getSessionId() != 0) {
-                mCertCategory.addPreference(new Preference(getActivity()) {
+                mCertCategory.addPreference(new Preference(getPrefContext()) {
                     @Override
-                    public View getView(View convertView, ViewGroup parent) {
-                        final View v;
-                        if (convertView == null) {
-                            LayoutInflater li = (LayoutInflater) getActivity().
-                                    getSystemService(Service.LAYOUT_INFLATER_SERVICE);
-                            v = li.inflate(R.layout.two_buttons_panel, null);
-                        } else {
-                            v = convertView;
-                        }
+                    public void onBindViewHolder(PreferenceViewHolder view) {
+                        super.onBindViewHolder(view);
 
-                        Button b = (Button)v.findViewById(R.id.left_button);
+                        Button b = (Button) view.findViewById(R.id.left_button);
                         b.setText(R.string.wifi_display_pause);
                         b.setOnClickListener(new OnClickListener() {
                             @Override
@@ -345,7 +354,7 @@ public final class WifiDisplaySettings extends SettingsPreferenceFragment {
                             }
                         });
 
-                        b = (Button)v.findViewById(R.id.right_button);
+                        b = (Button) view.findViewById(R.id.right_button);
                         b.setText(R.string.wifi_display_resume);
                         b.setOnClickListener(new OnClickListener() {
                             @Override
@@ -353,15 +362,14 @@ public final class WifiDisplaySettings extends SettingsPreferenceFragment {
                                 mDisplayManager.resumeWifiDisplay();
                             }
                         });
-
-                        return v;
                     }
                 });
+                mCertCategory.setLayoutResource(R.layout.two_buttons_panel);
             }
         }
 
         // switch for Listen Mode
-        CheckBoxPreference cbp = new CheckBoxPreference(getActivity()) {
+        SwitchPreference pref = new SwitchPreference(getPrefContext()) {
             @Override
             protected void onClick() {
                 mListen = !mListen;
@@ -369,12 +377,12 @@ public final class WifiDisplaySettings extends SettingsPreferenceFragment {
                 setChecked(mListen);
             }
         };
-        cbp.setTitle(R.string.wifi_display_listen_mode);
-        cbp.setChecked(mListen);
-        mCertCategory.addPreference(cbp);
+        pref.setTitle(R.string.wifi_display_listen_mode);
+        pref.setChecked(mListen);
+        mCertCategory.addPreference(pref);
 
         // switch for Autonomous GO
-        cbp = new CheckBoxPreference(getActivity()) {
+        pref = new SwitchPreference(getPrefContext()) {
             @Override
             protected void onClick() {
                 mAutoGO = !mAutoGO;
@@ -386,32 +394,34 @@ public final class WifiDisplaySettings extends SettingsPreferenceFragment {
                 setChecked(mAutoGO);
             }
         };
-        cbp.setTitle(R.string.wifi_display_autonomous_go);
-        cbp.setChecked(mAutoGO);
-        mCertCategory.addPreference(cbp);
+        pref.setTitle(R.string.wifi_display_autonomous_go);
+        pref.setChecked(mAutoGO);
+        mCertCategory.addPreference(pref);
 
         // Drop down list for choosing WPS method (PBC/KEYPAD/DISPLAY)
-        ListPreference lp = new ListPreference(getActivity()) {
+        ListPreference lp = new ListPreference(getPrefContext());
+        lp.setOnPreferenceChangeListener(new OnPreferenceChangeListener() {
             @Override
-            protected void onDialogClosed(boolean positiveResult) {
-                super.onDialogClosed(positiveResult);
-                if (positiveResult) {
-                    mWpsConfig = Integer.parseInt(getValue());
-                    setSummary("%1$s");
+            public boolean onPreferenceChange(Preference preference, Object value) {
+                int wpsConfig = Integer.parseInt((String) value);
+                if (wpsConfig != mWpsConfig) {
+                    mWpsConfig = wpsConfig;
                     getActivity().invalidateOptionsMenu();
                     Settings.Global.putInt(getActivity().getContentResolver(),
                             Settings.Global.WIFI_DISPLAY_WPS_CONFIG, mWpsConfig);
                 }
+                return true;
             }
-        };
+        });
         mWpsConfig = Settings.Global.getInt(getActivity().getContentResolver(),
                 Settings.Global.WIFI_DISPLAY_WPS_CONFIG, WpsInfo.INVALID);
-        String[] wpsEntries = { "Default", "PBC", "KEYPAD", "DISPLAY" };
+        String[] wpsEntries = {"Default", "PBC", "KEYPAD", "DISPLAY"};
         String[] wpsValues = {
-            "" + WpsInfo.INVALID,
-            "" + WpsInfo.PBC,
-            "" + WpsInfo.KEYPAD,
-            "" + WpsInfo.DISPLAY };
+                "" + WpsInfo.INVALID,
+                "" + WpsInfo.PBC,
+                "" + WpsInfo.KEYPAD,
+                "" + WpsInfo.DISPLAY};
+        lp.setKey("wps");
         lp.setTitle(R.string.wifi_display_wps_config);
         lp.setEntries(wpsEntries);
         lp.setEntryValues(wpsValues);
@@ -420,20 +430,22 @@ public final class WifiDisplaySettings extends SettingsPreferenceFragment {
         mCertCategory.addPreference(lp);
 
         // Drop down list for choosing listen channel
-        lp = new ListPreference(getActivity()) {
+        lp = new ListPreference(getPrefContext());
+        lp.setOnPreferenceChangeListener(new OnPreferenceChangeListener() {
             @Override
-            protected void onDialogClosed(boolean positiveResult) {
-                super.onDialogClosed(positiveResult);
-                if (positiveResult) {
-                    mListenChannel = Integer.parseInt(getValue());
-                    setSummary("%1$s");
+            public boolean onPreferenceChange(Preference preference, Object value) {
+                int channel = Integer.parseInt((String) value);
+                if (channel != mListenChannel) {
+                    mListenChannel = channel;
                     getActivity().invalidateOptionsMenu();
                     setWifiP2pChannels(mListenChannel, mOperatingChannel);
                 }
+                return true;
             }
-        };
-        String[] lcEntries = { "Auto", "1", "6", "11" };
-        String[] lcValues = { "0", "1", "6", "11" };
+        });
+        String[] lcEntries = {"Auto", "1", "6", "11"};
+        String[] lcValues = {"0", "1", "6", "11"};
+        lp.setKey("listening_channel");
         lp.setTitle(R.string.wifi_display_listen_channel);
         lp.setEntries(lcEntries);
         lp.setEntryValues(lcValues);
@@ -442,20 +454,22 @@ public final class WifiDisplaySettings extends SettingsPreferenceFragment {
         mCertCategory.addPreference(lp);
 
         // Drop down list for choosing operating channel
-        lp = new ListPreference(getActivity()) {
+        lp = new ListPreference(getPrefContext());
+        lp.setOnPreferenceChangeListener(new OnPreferenceChangeListener() {
             @Override
-            protected void onDialogClosed(boolean positiveResult) {
-                super.onDialogClosed(positiveResult);
-                if (positiveResult) {
-                    mOperatingChannel = Integer.parseInt(getValue());
-                    setSummary("%1$s");
+            public boolean onPreferenceChange(Preference preference, Object value) {
+                int channel = Integer.parseInt((String) value);
+                if (channel != mOperatingChannel) {
+                    mOperatingChannel = channel;
                     getActivity().invalidateOptionsMenu();
                     setWifiP2pChannels(mListenChannel, mOperatingChannel);
                 }
+                return true;
             }
-        };
-        String[] ocEntries = { "Auto", "1", "6", "11", "36" };
-        String[] ocValues = { "0", "1", "6", "11", "36" };
+        });
+        String[] ocEntries = {"Auto", "1", "6", "11", "36"};
+        String[] ocValues = {"0", "1", "6", "11", "36"};
+        lp.setKey("operating_channel");
         lp.setTitle(R.string.wifi_display_operating_channel);
         lp.setEntries(ocEntries);
         lp.setEntryValues(ocValues);
@@ -506,21 +520,26 @@ public final class WifiDisplaySettings extends SettingsPreferenceFragment {
         if (DEBUG) {
             Slog.d(TAG, "Setting listen mode to: " + enable);
         }
-        mWifiP2pManager.listen(mWifiP2pChannel, enable, new ActionListener() {
+        final ActionListener listener = new ActionListener() {
             @Override
             public void onSuccess() {
                 if (DEBUG) {
                     Slog.d(TAG, "Successfully " + (enable ? "entered" : "exited")
-                            +" listen mode.");
+                            + " listen mode.");
                 }
             }
 
             @Override
             public void onFailure(int reason) {
                 Slog.e(TAG, "Failed to " + (enable ? "entered" : "exited")
-                        +" listen mode with reason " + reason + ".");
+                        + " listen mode with reason " + reason + ".");
             }
-        });
+        };
+        if (enable) {
+            mWifiP2pManager.startListening(mWifiP2pChannel, listener);
+        } else {
+            mWifiP2pManager.stopListening(mWifiP2pChannel, listener);
+        }
     }
 
     private void setWifiP2pChannels(final int lc, final int oc) {
@@ -529,18 +548,18 @@ public final class WifiDisplaySettings extends SettingsPreferenceFragment {
         }
         mWifiP2pManager.setWifiP2pChannels(mWifiP2pChannel,
                 lc, oc, new ActionListener() {
-            @Override
-            public void onSuccess() {
-                if (DEBUG) {
-                    Slog.d(TAG, "Successfully set wifi p2p channels.");
-                }
-            }
+                    @Override
+                    public void onSuccess() {
+                        if (DEBUG) {
+                            Slog.d(TAG, "Successfully set wifi p2p channels.");
+                        }
+                    }
 
-            @Override
-            public void onFailure(int reason) {
-                Slog.e(TAG, "Failed to set wifi p2p channels with reason " + reason + ".");
-            }
-        });
+                    @Override
+                    public void onFailure(int reason) {
+                        Slog.e(TAG, "Failed to set wifi p2p channels with reason " + reason + ".");
+                    }
+                });
     }
 
     private void toggleRoute(MediaRouter.RouteInfo route) {
@@ -560,7 +579,7 @@ public final class WifiDisplaySettings extends SettingsPreferenceFragment {
 
     private void showWifiDisplayOptionsDialog(final WifiDisplay display) {
         View view = getActivity().getLayoutInflater().inflate(R.layout.wifi_display_options, null);
-        final EditText nameEditText = (EditText)view.findViewById(R.id.name);
+        final EditText nameEditText = (EditText) view.findViewById(R.id.name);
         nameEditText.setText(display.getFriendlyDisplayName());
 
         DialogInterface.OnClickListener done = new DialogInterface.OnClickListener() {
@@ -643,7 +662,7 @@ public final class WifiDisplaySettings extends SettingsPreferenceFragment {
         }
     };
 
-    private class RoutePreference extends Preference
+    private class RoutePreference extends TwoTargetPreference
             implements Preference.OnPreferenceClickListener {
         private final MediaRouter.RouteInfo mRoute;
 
@@ -687,27 +706,30 @@ public final class WifiDisplaySettings extends SettingsPreferenceFragment {
             implements View.OnClickListener {
         private final WifiDisplay mDisplay;
 
+        @Override
+        protected int getSecondTargetResId() {
+            return R.layout.preference_widget_gear;
+        }
+
         public WifiDisplayRoutePreference(Context context, MediaRouter.RouteInfo route,
                 WifiDisplay display) {
             super(context, route);
-
             mDisplay = display;
-            setWidgetLayoutResource(R.layout.wifi_display_preference);
         }
 
         @Override
-        protected void onBindView(View view) {
-            super.onBindView(view);
+        public void onBindViewHolder(PreferenceViewHolder holder) {
+            super.onBindViewHolder(holder);
 
-            ImageView deviceDetails = (ImageView) view.findViewById(R.id.deviceDetails);
-            if (deviceDetails != null) {
-                deviceDetails.setOnClickListener(this);
+            final ImageView gear = (ImageView) holder.findViewById(R.id.settings_button);
+            if (gear != null) {
+                gear.setOnClickListener(this);
                 if (!isEnabled()) {
                     TypedValue value = new TypedValue();
                     getContext().getTheme().resolveAttribute(android.R.attr.disabledAlpha,
                             value, true);
-                    deviceDetails.setImageAlpha((int)(value.getFloat() * 255));
-                    deviceDetails.setEnabled(true); // always allow button to be pressed
+                    gear.setImageAlpha((int) (value.getFloat() * 255));
+                    gear.setEnabled(true); // always allow button to be pressed
                 }
             }
         }
@@ -744,4 +766,7 @@ public final class WifiDisplaySettings extends SettingsPreferenceFragment {
             return true;
         }
     }
+
+    public static final BaseSearchIndexProvider SEARCH_INDEX_DATA_PROVIDER =
+            new BaseSearchIndexProvider(R.xml.wifi_display_settings);
 }

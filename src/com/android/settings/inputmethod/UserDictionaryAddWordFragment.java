@@ -16,23 +16,21 @@
 
 package com.android.settings.inputmethod;
 
-import android.app.Fragment;
+import android.app.settings.SettingsEnums;
 import android.os.Bundle;
-import android.preference.PreferenceActivity;
 import android.view.LayoutInflater;
 import android.view.Menu;
 import android.view.MenuInflater;
 import android.view.MenuItem;
 import android.view.View;
 import android.view.ViewGroup;
-import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 
 import com.android.settings.R;
+import com.android.settings.core.InstrumentedFragment;
 import com.android.settings.inputmethod.UserDictionaryAddWordContents.LocaleRenderer;
 
 import java.util.ArrayList;
-import java.util.Locale;
 
 /**
  * Fragment to add a word/shortcut to the user dictionary.
@@ -40,9 +38,7 @@ import java.util.Locale;
  * As opposed to the UserDictionaryActivity, this is only invoked within Settings
  * from the UserDictionarySettings.
  */
-public class UserDictionaryAddWordFragment extends Fragment
-        implements AdapterView.OnItemSelectedListener,
-        com.android.internal.app.LocalePicker.LocaleSelectionListener {
+public class UserDictionaryAddWordFragment extends InstrumentedFragment {
 
     private static final int OPTIONS_MENU_DELETE = Menu.FIRST;
 
@@ -54,7 +50,6 @@ public class UserDictionaryAddWordFragment extends Fragment
     public void onActivityCreated(final Bundle savedInstanceState) {
         super.onActivityCreated(savedInstanceState);
         setHasOptionsMenu(true);
-        getActivity().getActionBar().setTitle(R.string.user_dict_settings_title);
         // Keep the instance so that we remember mContents when configuration changes (eg rotation)
         setRetainInstance(true);
     }
@@ -85,7 +80,7 @@ public class UserDictionaryAddWordFragment extends Fragment
     @Override
     public void onCreateOptionsMenu(final Menu menu, final MenuInflater inflater) {
         MenuItem actionItem = menu.add(0, OPTIONS_MENU_DELETE, 0, R.string.delete)
-                .setIcon(android.R.drawable.ic_menu_delete);
+                .setIcon(R.drawable.ic_delete);
         actionItem.setShowAsAction(MenuItem.SHOW_AS_ACTION_IF_ROOM |
                 MenuItem.SHOW_AS_ACTION_WITH_TEXT);
     }
@@ -106,6 +101,11 @@ public class UserDictionaryAddWordFragment extends Fragment
             return true;
         }
         return false;
+    }
+
+    @Override
+    public int getMetricsCategory() {
+        return SettingsEnums.INPUTMETHOD_USER_DICTIONARY_ADD_WORD;
     }
 
     @Override
@@ -130,31 +130,5 @@ public class UserDictionaryAddWordFragment extends Fragment
         if (!mIsDeleting) {
             mContents.apply(getActivity(), null);
         }
-    }
-
-    @Override
-    public void onItemSelected(final AdapterView<?> parent, final View view, final int pos,
-            final long id) {
-        final LocaleRenderer locale = (LocaleRenderer)parent.getItemAtPosition(pos);
-        if (locale.isMoreLanguages()) {
-            PreferenceActivity preferenceActivity = (PreferenceActivity)getActivity();
-            preferenceActivity.startPreferenceFragment(new UserDictionaryLocalePicker(this), true);
-        } else {
-            mContents.updateLocale(locale.getLocaleString());
-        }
-    }
-
-    @Override
-    public void onNothingSelected(final AdapterView<?> parent) {
-        // I'm not sure we can come here, but if we do, that's the right thing to do.
-        final Bundle args = getArguments();
-        mContents.updateLocale(args.getString(UserDictionaryAddWordContents.EXTRA_LOCALE));
-    }
-
-    // Called by the locale picker
-    @Override
-    public void onLocaleSelected(final Locale locale) {
-        mContents.updateLocale(locale.toString());
-        getActivity().onBackPressed();
     }
 }

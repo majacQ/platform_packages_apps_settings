@@ -19,45 +19,63 @@ package com.android.settings.bluetooth;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
 import android.os.Bundle;
-import android.preference.Preference;
-import android.preference.PreferenceCategory;
-import android.preference.PreferenceGroup;
-import android.preference.PreferenceScreen;
+import android.os.SystemProperties;
+import android.text.BidiFormatter;
 import android.util.Log;
 
-import com.android.settings.ProgressCategory;
-import com.android.settings.RestrictedSettingsFragment;
-import com.android.settings.SettingsPreferenceFragment;
+import androidx.annotation.VisibleForTesting;
+import androidx.preference.Preference;
+import androidx.preference.PreferenceCategory;
+import androidx.preference.PreferenceGroup;
 
+import com.android.settings.R;
+import com.android.settings.dashboard.RestrictedDashboardFragment;
+import com.android.settingslib.bluetooth.BluetoothCallback;
+import com.android.settingslib.bluetooth.BluetoothDeviceFilter;
+import com.android.settingslib.bluetooth.CachedBluetoothDevice;
+import com.android.settingslib.bluetooth.LocalBluetoothManager;
+
+import java.util.ArrayList;
 import java.util.Collection;
-import java.util.WeakHashMap;
+import java.util.HashMap;
+import java.util.List;
 
 /**
  * Parent class for settings fragments that contain a list of Bluetooth
  * devices.
  *
- * @see BluetoothSettings
  * @see DevicePickerFragment
  */
+// TODO: Refactor this fragment
 public abstract class DeviceListPreferenceFragment extends
-        RestrictedSettingsFragment implements BluetoothCallback {
+        RestrictedDashboardFragment implements BluetoothCallback {
 
     private static final String TAG = "DeviceListPreferenceFragment";
 
-    private static final String KEY_BT_DEVICE_LIST = "bt_device_list";
     private static final String KEY_BT_SCAN = "bt_scan";
+
+    // Copied from BluetoothDeviceNoNamePreferenceController.java
+    private static final String BLUETOOTH_SHOW_DEVICES_WITHOUT_NAMES_PROPERTY =
+            "persist.bluetooth.showdeviceswithoutnames";
 
     private BluetoothDeviceFilter.Filter mFilter;
 
+    @VisibleForTesting
+    boolean mScanEnabled;
+
     BluetoothDevice mSelectedDevice;
 
-    LocalBluetoothAdapter mLocalAdapter;
+    BluetoothAdapter mBluetoothAdapter;
     LocalBluetoothManager mLocalManager;
 
-    private PreferenceGroup mDeviceListGroup;
+    @VisibleForTesting
+    PreferenceGroup mDeviceListGroup;
 
-    final WeakHashMap<CachedBluetoothDevice, BluetoothDevicePreference> mDevicePreferenceMap =
-            new WeakHashMap<CachedBluetoothDevice, BluetoothDevicePreference>();
+    final HashMap<CachedBluetoothDevice, BluetoothDevicePreference> mDevicePreferenceMap =
+            new HashMap<>();
+    final List<BluetoothDevice> mSelectedList = new ArrayList<>();
+
+    boolean mShowDevicesWithoutNames;
 
     DeviceListPreferenceFragment(String restrictedKey) {
         super(restrictedKey);
@@ -76,40 +94,38 @@ public abstract class DeviceListPreferenceFragment extends
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        mLocalManager = LocalBluetoothManager.getInstance(getActivity());
+        mLocalManager = Utils.getLocalBtManager(getActivity());
         if (mLocalManager == null) {
             Log.e(TAG, "Bluetooth is not supported on this device");
             return;
         }
-        mLocalAdapter = mLocalManager.getBluetoothAdapter();
+        mBluetoothAdapter = BluetoothAdapter.getDefaultAdapter();
+        mShowDevicesWithoutNames = SystemProperties.getBoolean(
+                BLUETOOTH_SHOW_DEVICES_WITHOUT_NAMES_PROPERTY, false);
 
-        addPreferencesForActivity();
+        initPreferencesFromPreferenceScreen();
 
-        mDeviceListGroup = (PreferenceCategory) findPreference(KEY_BT_DEVICE_LIST);
+        mDeviceListGroup = (PreferenceCategory) findPreference(getDeviceListKey());
     }
 
-    void setDeviceListGroup(PreferenceGroup preferenceGroup) {
-        mDeviceListGroup = preferenceGroup;
-    }
-
-    /** Add preferences from the subclass. */
-    abstract void addPreferencesForActivity();
+    /** find and update preference that already existed in preference screen */
+    abstract void initPreferencesFromPreferenceScreen();
 
     @Override
-    public void onResume() {
-        super.onResume();
-        if (mLocalManager == null) return;
+    public void onStart() {
+        super.onStart();
+        if (mLocalManager == null || isUiRestricted()) return;
 
         mLocalManager.setForegroundActivity(getActivity());
         mLocalManager.getEventManager().registerCallback(this);
-
-        updateProgressUi(mLocalAdapter.isDiscovering());
     }
 
     @Override
-    public void onPause() {
-        super.onPause();
-        if (mLocalManager == null) return;
+    public void onStop() {
+        super.onStop();
+        if (mLocalManager == null || isUiRestricted()) {
+            return;
+        }
 
         removeAllDevices();
         mLocalManager.setForegroundActivity(null);
@@ -117,7 +133,6 @@ public abstract class DeviceListPreferenceFragment extends
     }
 
     void removeAllDevices() {
-        mLocalAdapter.stopScanning();
         mDevicePreferenceMap.clear();
         mDeviceListGroup.removeAll();
     }
@@ -131,10 +146,9 @@ public abstract class DeviceListPreferenceFragment extends
     }
 
     @Override
-    public boolean onPreferenceTreeClick(PreferenceScreen preferenceScreen,
-            Preference preference) {
+    public boolean onPreferenceTreeClick(Preference preference) {
         if (KEY_BT_SCAN.equals(preference.getKey())) {
-            mLocalAdapter.startScanning(true);
+            startScanning();
             return true;
         }
 
@@ -142,47 +156,69 @@ public abstract class DeviceListPreferenceFragment extends
             BluetoothDevicePreference btPreference = (BluetoothDevicePreference) preference;
             CachedBluetoothDevice device = btPreference.getCachedDevice();
             mSelectedDevice = device.getDevice();
+            mSelectedList.add(mSelectedDevice);
             onDevicePreferenceClick(btPreference);
             return true;
         }
 
-        return super.onPreferenceTreeClick(preferenceScreen, preference);
+        return super.onPreferenceTreeClick(preference);
     }
 
     void onDevicePreferenceClick(BluetoothDevicePreference btPreference) {
         btPreference.onClicked();
     }
 
+    @Override
     public void onDeviceAdded(CachedBluetoothDevice cachedDevice) {
         if (mDevicePreferenceMap.get(cachedDevice) != null) {
             return;
         }
 
         // Prevent updates while the list shows one of the state messages
-        if (mLocalAdapter.getBluetoothState() != BluetoothAdapter.STATE_ON) return;
+        if (mBluetoothAdapter.getState() != BluetoothAdapter.STATE_ON) return;
 
         if (mFilter.matches(cachedDevice.getDevice())) {
             createDevicePreference(cachedDevice);
         }
-     }
+    }
 
     void createDevicePreference(CachedBluetoothDevice cachedDevice) {
-        BluetoothDevicePreference preference = new BluetoothDevicePreference(
-                getActivity(), cachedDevice);
+        if (mDeviceListGroup == null) {
+            Log.w(TAG, "Trying to create a device preference before the list group/category "
+                    + "exists!");
+            return;
+        }
+
+        String key = cachedDevice.getDevice().getAddress();
+        BluetoothDevicePreference preference = (BluetoothDevicePreference) getCachedPreference(key);
+
+        if (preference == null) {
+            preference = new BluetoothDevicePreference(getPrefContext(), cachedDevice,
+                    mShowDevicesWithoutNames, BluetoothDevicePreference.SortType.TYPE_FIFO);
+            preference.setKey(key);
+            //Set hideSecondTarget is true if it's bonded device.
+            preference.hideSecondTarget(true);
+            mDeviceListGroup.addPreference(preference);
+        }
 
         initDevicePreference(preference);
-        mDeviceListGroup.addPreference(preference);
         mDevicePreferenceMap.put(cachedDevice, preference);
     }
 
-    /**
-     * Overridden in {@link BluetoothSettings} to add a listener.
-     * @param preference the newly added preference
-     */
-    void initDevicePreference(BluetoothDevicePreference preference) {
+    protected void initDevicePreference(BluetoothDevicePreference preference) {
         // Does nothing by default
     }
 
+    @VisibleForTesting
+    void updateFooterPreference(Preference myDevicePreference) {
+        final BidiFormatter bidiFormatter = BidiFormatter.getInstance();
+
+        myDevicePreference.setTitle(getString(
+                R.string.bluetooth_footer_mac_message,
+                bidiFormatter.unicodeWrap(mBluetoothAdapter.getAddress())));
+    }
+
+    @Override
     public void onDeviceDeleted(CachedBluetoothDevice cachedDevice) {
         BluetoothDevicePreference preference = mDevicePreferenceMap.remove(cachedDevice);
         if (preference != null) {
@@ -190,19 +226,69 @@ public abstract class DeviceListPreferenceFragment extends
         }
     }
 
-    public void onScanningStateChanged(boolean started) {
-        updateProgressUi(started);
+    @VisibleForTesting
+    void enableScanning() {
+        // BluetoothAdapter already handles repeated scan requests
+        startScanning();
+        mScanEnabled = true;
     }
 
-    private void updateProgressUi(boolean start) {
-        if (mDeviceListGroup instanceof BluetoothProgressCategory) {
-            ((BluetoothProgressCategory) mDeviceListGroup).setProgress(start);
+    @VisibleForTesting
+    void disableScanning() {
+        stopScanning();
+        mScanEnabled = false;
+    }
+
+    @Override
+    public void onScanningStateChanged(boolean started) {
+        if (!started && mScanEnabled) {
+            startScanning();
         }
     }
 
-    public void onBluetoothStateChanged(int bluetoothState) {
-        if (bluetoothState == BluetoothAdapter.STATE_OFF) {
-            updateProgressUi(false);
+    /**
+     * Add bluetooth device preferences to {@code preferenceGroup} which satisfy the {@code filter}
+     *
+     * This method will also (1) set the title for {@code preferenceGroup} and (2) change the
+     * default preferenceGroup and filter
+     * @param preferenceGroup
+     * @param titleId
+     * @param filter
+     * @param addCachedDevices
+     */
+    public void addDeviceCategory(PreferenceGroup preferenceGroup, int titleId,
+            BluetoothDeviceFilter.Filter filter, boolean addCachedDevices) {
+        cacheRemoveAllPrefs(preferenceGroup);
+        preferenceGroup.setTitle(titleId);
+        mDeviceListGroup = preferenceGroup;
+        if (addCachedDevices) {
+            // Don't show bonded devices when screen turned back on
+            setFilter(BluetoothDeviceFilter.UNBONDED_DEVICE_FILTER);
+            addCachedDevices();
+        }
+        setFilter(filter);
+        preferenceGroup.setEnabled(true);
+        removeCachedPrefs(preferenceGroup);
+    }
+
+    /**
+     * Return the key of the {@link PreferenceGroup} that contains the bluetooth devices
+     */
+    public abstract String getDeviceListKey();
+
+    public boolean shouldShowDevicesWithoutNames() {
+        return mShowDevicesWithoutNames;
+    }
+
+    void startScanning() {
+        if (!mBluetoothAdapter.isDiscovering()) {
+            mBluetoothAdapter.startDiscovery();
+        }
+    }
+
+    void stopScanning() {
+        if (mBluetoothAdapter.isDiscovering()) {
+            mBluetoothAdapter.cancelDiscovery();
         }
     }
 }

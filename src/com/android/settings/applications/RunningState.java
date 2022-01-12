@@ -16,14 +16,13 @@
 
 package com.android.settings.applications;
 
-import com.android.settings.R;
-import com.android.settings.users.UserUtils;
-
 import android.app.ActivityManager;
-import android.app.ActivityManagerNative;
 import android.app.ActivityThread;
+import android.content.BroadcastReceiver;
 import android.content.ComponentName;
 import android.content.Context;
+import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageItemInfo;
@@ -43,6 +42,10 @@ import android.os.UserManager;
 import android.text.format.Formatter;
 import android.util.Log;
 import android.util.SparseArray;
+
+import com.android.settings.R;
+import com.android.settingslib.Utils;
+import com.android.settingslib.applications.InterestingConfigChanges;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -77,6 +80,7 @@ public class RunningState {
     final PackageManager mPm;
     final UserManager mUm;
     final int mMyUserId;
+    final boolean mHideManagedProfiles;
 
     OnRefreshUiListener mRefreshUiListener;
 
@@ -119,9 +123,6 @@ public class RunningState {
     // If there are other users on the device, these are the merged items
     // representing all items that would be put in mUserBackgroundItems for that user.
     final SparseArray<MergedItem> mOtherUserBackgroundItems = new SparseArray<MergedItem>();
-
-    // Tracking of information about users.
-    final SparseArray<UserState> mUsers = new SparseArray<UserState>();
 
     static class AppProcessInfo {
         final ActivityManager.RunningAppProcessInfo info;
@@ -282,6 +283,42 @@ public class RunningState {
         }
     };
 
+    private final class UserManagerBroadcastReceiver extends BroadcastReceiver {
+        private volatile boolean usersChanged;
+
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            synchronized (mLock) {
+                if (mResumed) {
+                    mHaveData = false;
+                    mBackgroundHandler.removeMessages(MSG_RESET_CONTENTS);
+                    mBackgroundHandler.sendEmptyMessage(MSG_RESET_CONTENTS);
+                    mBackgroundHandler.removeMessages(MSG_UPDATE_CONTENTS);
+                    mBackgroundHandler.sendEmptyMessage(MSG_UPDATE_CONTENTS);
+                } else {
+                    usersChanged = true;
+                }
+            }
+        }
+
+        public boolean checkUsersChangedLocked() {
+            boolean oldValue = usersChanged;
+            usersChanged = false;
+            return oldValue;
+        }
+
+        void register(Context context) {
+            IntentFilter filter = new IntentFilter();
+            filter.addAction(Intent.ACTION_USER_STOPPED);
+            filter.addAction(Intent.ACTION_USER_STARTED);
+            filter.addAction(Intent.ACTION_USER_INFO_CHANGED);
+            context.registerReceiverAsUser(this, UserHandle.ALL, filter, null, null);
+        }
+    }
+
+    private final UserManagerBroadcastReceiver mUmBroadcastReceiver =
+            new UserManagerBroadcastReceiver();
+
     // ----- DATA STRUCTURES -----
 
     static interface OnRefreshUiListener {
@@ -323,7 +360,9 @@ public class RunningState {
 
         public Drawable loadIcon(Context context, RunningState state) {
             if (mPackageInfo != null) {
-                return mPackageInfo.loadIcon(state.mPm);
+                Drawable unbadgedIcon = mPackageInfo.loadUnbadgedIcon(state.mPm);
+                Drawable icon = state.mPm.getUserBadgedIcon(unbadgedIcon, new UserHandle(mUserId));
+                return icon;
             }
             return null;
         }
@@ -381,7 +420,7 @@ public class RunningState {
             
             try {
                 ApplicationInfo ai = pm.getApplicationInfo(mProcessName,
-                        PackageManager.GET_UNINSTALLED_PACKAGES);
+                        PackageManager.MATCH_ANY_USER);
                 if (ai.uid == mUid) {
                     mDisplayLabel = ai.loadLabel(pm);
                     mLabel = mDisplayLabel.toString();
@@ -399,7 +438,7 @@ public class RunningState {
             if (pkgs.length == 1) {
                 try {
                     ApplicationInfo ai = pm.getApplicationInfo(pkgs[0],
-                            PackageManager.GET_UNINSTALLED_PACKAGES);
+                            PackageManager.MATCH_ANY_USER);
                     mDisplayLabel = ai.loadLabel(pm);
                     mLabel = mDisplayLabel.toString();
                     mPackageInfo = ai;
@@ -441,7 +480,7 @@ public class RunningState {
             // Finally... whatever, just pick the first package's name.
             try {
                 ApplicationInfo ai = pm.getApplicationInfo(pkgs[0],
-                        PackageManager.GET_UNINSTALLED_PACKAGES);
+                        PackageManager.MATCH_ANY_USER);
                 mDisplayLabel = ai.loadLabel(pm);
                 mLabel = mDisplayLabel.toString();
                 mPackageInfo = ai;
@@ -461,7 +500,7 @@ public class RunningState {
                 si.mRunningService = service;
                 try {
                     si.mServiceInfo = ActivityThread.getPackageManager().getServiceInfo(
-                            service.service, PackageManager.GET_UNINSTALLED_PACKAGES,
+                            service.service, PackageManager.MATCH_ANY_USER,
                             UserHandle.getUserId(service.uid));
 
                     if (si.mServiceInfo == null) {
@@ -679,7 +718,7 @@ public class RunningState {
                     return constState.newDrawable();
                 }
             }
-            return context.getResources().getDrawable(
+            return context.getDrawable(
                     com.android.internal.R.drawable.ic_menu_cc);
         }
     }
@@ -741,17 +780,23 @@ public class RunningState {
         mPm = mApplicationContext.getPackageManager();
         mUm = (UserManager)mApplicationContext.getSystemService(Context.USER_SERVICE);
         mMyUserId = UserHandle.myUserId();
+        UserInfo userInfo = mUm.getUserInfo(mMyUserId);
+        mHideManagedProfiles = userInfo == null || !userInfo.canHaveProfile();
         mResumed = false;
         mBackgroundThread = new HandlerThread("RunningState:Background");
         mBackgroundThread.start();
         mBackgroundHandler = new BackgroundHandler(mBackgroundThread.getLooper());
+        mUmBroadcastReceiver.register(mApplicationContext);
     }
 
     void resume(OnRefreshUiListener listener) {
         synchronized (mLock) {
             mResumed = true;
             mRefreshUiListener = listener;
-            if (mInterestingConfigChanges.applyNewConfig(mApplicationContext.getResources())) {
+            boolean usersChanged = mUmBroadcastReceiver.checkUsersChangedLocked();
+            boolean configChanged =
+                    mInterestingConfigChanges.applyNewConfig(mApplicationContext.getResources());
+            if (usersChanged || configChanged) {
                 mHaveData = false;
                 mBackgroundHandler.removeMessages(MSG_RESET_CONTENTS);
                 mBackgroundHandler.removeMessages(MSG_UPDATE_CONTENTS);
@@ -817,7 +862,6 @@ public class RunningState {
         mRunningProcesses.clear();
         mProcessItems.clear();
         mAllProcessItems.clear();
-        mUsers.clear();
     }
 
     private void addOtherUserItem(Context context, ArrayList<MergedItem> newMergedItems,
@@ -825,6 +869,14 @@ public class RunningState {
         MergedItem userItem = userItems.get(newItem.mUserId);
         boolean first = userItem == null || userItem.mCurSeq != mSequence;
         if (first) {
+            UserInfo info = mUm.getUserInfo(newItem.mUserId);
+            if (info == null) {
+                // The user no longer exists, skip
+                return;
+            }
+            if (mHideManagedProfiles && info.isManagedProfile()) {
+                return;
+            }
             if (userItem == null) {
                 userItem = new MergedItem(newItem.mUserId);
                 userItems.put(newItem.mUserId, userItem);
@@ -832,21 +884,10 @@ public class RunningState {
                 userItem.mChildren.clear();
             }
             userItem.mCurSeq = mSequence;
-            if ((userItem.mUser=mUsers.get(newItem.mUserId)) == null) {
-                userItem.mUser = new UserState();
-                UserInfo info = mUm.getUserInfo(newItem.mUserId);
-                userItem.mUser.mInfo = info;
-                if (info != null) {
-                    userItem.mUser.mIcon = UserUtils.getUserIcon(context, mUm,
-                            info, context.getResources());
-                }
-                String name = info != null ? info.name : null;
-                if (name == null) {
-                    name = Integer.toString(info.id);
-                }
-                userItem.mUser.mLabel = context.getResources().getString(
-                        R.string.running_process_item_user_label, name);
-            }
+            userItem.mUser = new UserState();
+            userItem.mUser.mInfo = info;
+            userItem.mUser.mIcon = Utils.getUserIcon(context, mUm, info);
+            userItem.mUser.mLabel = Utils.getUserLabel(context, info);
             newMergedItems.add(userItem);
         }
         userItem.mChildren.add(newItem);
@@ -854,7 +895,7 @@ public class RunningState {
 
     private boolean update(Context context, ActivityManager am) {
         final PackageManager pm = context.getPackageManager();
-        
+
         mSequence++;
         
         boolean changed = false;
@@ -1144,7 +1185,6 @@ public class RunningState {
             
             ArrayList<BaseItem> newItems = new ArrayList<BaseItem>();
             ArrayList<MergedItem> newMergedItems = new ArrayList<MergedItem>();
-            SparseArray<MergedItem> otherUsers = null;
             mProcessItems.clear();
             for (int i=0; i<sortedProcesses.size(); i++) {
                 ProcessItem pi = sortedProcesses.get(i);
@@ -1279,7 +1319,7 @@ public class RunningState {
             for (int i=0; i<numProc; i++) {
                 pids[i] = mAllProcessItems.get(i).mPid;
             }
-            long[] pss = ActivityManagerNative.getDefault()
+            long[] pss = ActivityManager.getService()
                     .getProcessPss(pids);
             int bgIndex = 0;
             for (int i=0; i<pids.length; i++) {
@@ -1394,12 +1434,6 @@ public class RunningState {
         }
         
         return changed;
-    }
-    
-    ArrayList<BaseItem> getCurrentItems() {
-        synchronized (mLock) {
-            return mItems;
-        }
     }
     
     void setWatchingBackgroundItems(boolean watching) {

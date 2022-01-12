@@ -18,6 +18,8 @@ package com.android.settings.bluetooth;
 
 import static android.os.UserManager.DISALLOW_CONFIG_BLUETOOTH;
 
+import android.Manifest;
+import android.app.settings.SettingsEnums;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothDevicePicker;
@@ -25,34 +27,65 @@ import android.content.Context;
 import android.content.Intent;
 import android.os.Bundle;
 import android.os.UserManager;
+import android.util.Log;
+import android.text.TextUtils;
+import android.view.Menu;
+import android.view.MenuInflater;
+
+import androidx.annotation.VisibleForTesting;
 
 import com.android.settings.R;
+import com.android.settings.password.PasswordUtils;
+import com.android.settingslib.bluetooth.CachedBluetoothDevice;
+import com.android.settingslib.core.AbstractPreferenceController;
+
+import java.util.List;
 
 /**
  * BluetoothSettings is the Settings screen for Bluetooth configuration and
  * connection management.
  */
 public final class DevicePickerFragment extends DeviceListPreferenceFragment {
+    private static final String KEY_BT_DEVICE_LIST = "bt_device_list";
+    private static final String TAG = "DevicePickerFragment";
+
+    @VisibleForTesting
+    BluetoothProgressCategory mAvailableDevicesCategory;
+    @VisibleForTesting
+    Context mContext;
+    @VisibleForTesting
+    String mLaunchPackage;
+    @VisibleForTesting
+    String mLaunchClass;
+    @VisibleForTesting
+    String mCallingAppPackageName;
+
+    private boolean mNeedAuth;
+    private boolean mScanAllowed;
 
     public DevicePickerFragment() {
         super(null /* Not tied to any user restrictions. */);
     }
 
-    private boolean mNeedAuth;
-    private String mLaunchPackage;
-    private String mLaunchClass;
-    private boolean mStartScanOnResume;
-
     @Override
-    void addPreferencesForActivity() {
-        addPreferencesFromResource(R.xml.device_picker);
-
+    void initPreferencesFromPreferenceScreen() {
         Intent intent = getActivity().getIntent();
         mNeedAuth = intent.getBooleanExtra(BluetoothDevicePicker.EXTRA_NEED_AUTH, false);
         setFilter(intent.getIntExtra(BluetoothDevicePicker.EXTRA_FILTER_TYPE,
                 BluetoothDevicePicker.FILTER_TYPE_ALL));
         mLaunchPackage = intent.getStringExtra(BluetoothDevicePicker.EXTRA_LAUNCH_PACKAGE);
         mLaunchClass = intent.getStringExtra(BluetoothDevicePicker.EXTRA_LAUNCH_CLASS);
+        mAvailableDevicesCategory = (BluetoothProgressCategory) findPreference(KEY_BT_DEVICE_LIST);
+    }
+
+    @Override
+    public void onCreateOptionsMenu(Menu menu, MenuInflater inflater) {
+        super.onCreateOptionsMenu(menu, inflater);
+    }
+
+    @Override
+    public int getMetricsCategory() {
+        return SettingsEnums.BLUETOOTH_DEVICE_PICKER;
     }
 
     @Override
@@ -60,23 +93,49 @@ public final class DevicePickerFragment extends DeviceListPreferenceFragment {
         super.onCreate(savedInstanceState);
         getActivity().setTitle(getString(R.string.device_picker));
         UserManager um = (UserManager) getSystemService(Context.USER_SERVICE);
-        mStartScanOnResume = !um.hasUserRestriction(DISALLOW_CONFIG_BLUETOOTH)
-                && (savedInstanceState == null);  // don't start scan after rotation
+        mScanAllowed = !um.hasUserRestriction(DISALLOW_CONFIG_BLUETOOTH);
+        mCallingAppPackageName = PasswordUtils.getCallingAppPackageName(
+                getActivity().getActivityToken());
+        if (!TextUtils.equals(mCallingAppPackageName, mLaunchPackage)) {
+            Log.w(TAG, "sendDevicePickedIntent() launch package name is not equivalent to"
+                    + " calling package name!");
+        }
+        mContext = getContext();
+        setHasOptionsMenu(true);
     }
 
     @Override
-    public void onResume() {
-        super.onResume();
+    public void onStart() {
+        super.onStart();
         addCachedDevices();
-        if (mStartScanOnResume) {
-            mLocalAdapter.startScanning(true);
-            mStartScanOnResume = false;
+        mSelectedDevice = null;
+        if (mScanAllowed) {
+            enableScanning();
+            mAvailableDevicesCategory.setProgress(mBluetoothAdapter.isDiscovering());
+        }
+    }
+
+    @Override
+    public void onStop() {
+        // Try disable scanning no matter what, no effect if enableScanning has not been called
+        disableScanning();
+        super.onStop();
+    }
+
+    @Override
+    public void onDestroy() {
+        super.onDestroy();
+        /* Check if any device was selected, if no device selected
+         * send  ACTION_DEVICE_SELECTED with a null device, otherwise
+         * don't do anything */
+        if (mSelectedDevice == null) {
+            sendDevicePickedIntent(null);
         }
     }
 
     @Override
     void onDevicePreferenceClick(BluetoothDevicePreference btPreference) {
-        mLocalAdapter.stopScanning();
+        disableScanning();
         LocalBluetoothPreferences.persistSelectedDeviceInPicker(
                 getActivity(), mSelectedDevice.getAddress());
         if ((btPreference.getCachedDevice().getBondState() ==
@@ -88,15 +147,31 @@ public final class DevicePickerFragment extends DeviceListPreferenceFragment {
         }
     }
 
+    @Override
+    public void onScanningStateChanged(boolean started) {
+        super.onScanningStateChanged(started);
+        started |= mScanEnabled;
+        mAvailableDevicesCategory.setProgress(started);
+    }
+
     public void onDeviceBondStateChanged(CachedBluetoothDevice cachedDevice,
             int bondState) {
-        if (bondState == BluetoothDevice.BOND_BONDED) {
-            BluetoothDevice device = cachedDevice.getDevice();
-            if (device.equals(mSelectedDevice)) {
-                sendDevicePickedIntent(device);
-                finish();
-            }
+        BluetoothDevice device = cachedDevice.getDevice();
+        if (!device.equals(mSelectedDevice)) {
+            return;
         }
+        if (bondState == BluetoothDevice.BOND_BONDED) {
+            sendDevicePickedIntent(device);
+            finish();
+        } else if (bondState == BluetoothDevice.BOND_NONE) {
+            enableScanning();
+        }
+    }
+
+    @Override
+    protected void initDevicePreference(BluetoothDevicePreference preference) {
+        super.initDevicePreference(preference);
+        preference.setNeedNotifyHierarchyChanged(true);
     }
 
     @Override
@@ -104,16 +179,39 @@ public final class DevicePickerFragment extends DeviceListPreferenceFragment {
         super.onBluetoothStateChanged(bluetoothState);
 
         if (bluetoothState == BluetoothAdapter.STATE_ON) {
-            mLocalAdapter.startScanning(false);
+            enableScanning();
         }
+    }
+
+    @Override
+    protected String getLogTag() {
+        return TAG;
+    }
+
+    @Override
+    protected int getPreferenceScreenResId() {
+        return R.xml.device_picker;
+    }
+
+    @Override
+    protected List<AbstractPreferenceController> createPreferenceControllers(Context context) {
+        return null;
+    }
+
+    @Override
+    public String getDeviceListKey() {
+        return KEY_BT_DEVICE_LIST;
     }
 
     private void sendDevicePickedIntent(BluetoothDevice device) {
         Intent intent = new Intent(BluetoothDevicePicker.ACTION_DEVICE_SELECTED);
         intent.putExtra(BluetoothDevice.EXTRA_DEVICE, device);
         if (mLaunchPackage != null && mLaunchClass != null) {
-            intent.setClassName(mLaunchPackage, mLaunchClass);
+            if (TextUtils.equals(mCallingAppPackageName, mLaunchPackage)) {
+                intent.setClassName(mLaunchPackage, mLaunchClass);
+            }
         }
-        getActivity().sendBroadcast(intent);
+
+        mContext.sendBroadcast(intent, Manifest.permission.BLUETOOTH_ADMIN);
     }
 }

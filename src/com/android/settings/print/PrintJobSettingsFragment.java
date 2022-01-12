@@ -16,75 +16,47 @@
 
 package com.android.settings.print;
 
-import android.app.ActivityManager;
+import android.app.settings.SettingsEnums;
 import android.content.Context;
-import android.graphics.drawable.Drawable;
 import android.os.Bundle;
-import android.preference.Preference;
 import android.print.PrintJob;
-import android.print.PrintJobId;
-import android.print.PrintJobInfo;
-import android.print.PrintManager;
-import android.print.PrintManager.PrintJobStateChangeListener;
-import android.text.TextUtils;
-import android.text.format.DateUtils;
 import android.view.Menu;
 import android.view.MenuInflater;
 import android.view.MenuItem;
 import android.view.View;
 
 import com.android.settings.R;
-import com.android.settings.SettingsPreferenceFragment;
-
-import java.text.DateFormat;
+import com.android.settings.dashboard.DashboardFragment;
 
 /**
  * Fragment for management of a print job.
  */
-public class PrintJobSettingsFragment extends SettingsPreferenceFragment {
+public class PrintJobSettingsFragment extends DashboardFragment {
+    private static final String TAG = "PrintJobSettingsFragment";
+
     private static final int MENU_ITEM_ID_CANCEL = 1;
     private static final int MENU_ITEM_ID_RESTART = 2;
 
-    private static final String EXTRA_PRINT_JOB_ID = "EXTRA_PRINT_JOB_ID";
-
-    private static final String PRINT_JOB_PREFERENCE = "print_job_preference";
-    private static final String PRINT_JOB_MESSAGE_PREFERENCE = "print_job_message_preference";
-
-    private Drawable mListDivider;
-
-    private final PrintJobStateChangeListener mPrintJobStateChangeListener =
-            new PrintJobStateChangeListener() {
-        @Override
-        public void onPrintJobStateChanged(PrintJobId printJobId) {
-            updateUi();
-        }
-    };
-
-    private PrintManager mPrintManager;
-
-    private Preference mPrintJobPreference;
-    private Preference mMessagePreference;
-
-    private PrintJobId mPrintJobId;
-    private PrintJob mPrintJob;
+    @Override
+    protected int getPreferenceScreenResId() {
+        return R.xml.print_job_settings;
+    }
 
     @Override
-    public void onCreate(Bundle icicle) {
-        super.onCreate(icicle);
+    protected String getLogTag() {
+        return TAG;
+    }
 
-        addPreferencesFromResource(R.xml.print_job_settings);
-        mPrintJobPreference = findPreference(PRINT_JOB_PREFERENCE);
-        mMessagePreference = findPreference(PRINT_JOB_MESSAGE_PREFERENCE);
+    @Override
+    public void onAttach(Context context) {
+        super.onAttach(context);
+        use(PrintJobPreferenceController.class).init(this);
+        use(PrintJobMessagePreferenceController.class).init(this);
+    }
 
-        mPrintManager = ((PrintManager) getActivity().getSystemService(
-                Context.PRINT_SERVICE)).getGlobalPrintManagerForUser(
-                        ActivityManager.getCurrentUser());
-
-        getActivity().setTitle(R.string.print_print_job);
-
-        processArguments();
-
-        setHasOptionsMenu(true);
+    @Override
+    public int getMetricsCategory() {
+        return SettingsEnums.PRINT_JOB_SETTINGS;
     }
 
     @Override
@@ -94,31 +66,21 @@ public class PrintJobSettingsFragment extends SettingsPreferenceFragment {
     }
 
     @Override
-    public void onResume() {
-        super.onResume();
-        mPrintManager.addPrintJobStateChangeListener(
-                mPrintJobStateChangeListener);
-        updateUi();
-    }
-
-    @Override
-    public void onPause() {
-        super.onPause();
-        mPrintManager.removePrintJobStateChangeListener(
-                mPrintJobStateChangeListener);
-    }
-
-    @Override
     public void onCreateOptionsMenu(Menu menu, MenuInflater inflater) {
         super.onCreateOptionsMenu(menu, inflater);
 
-        if (!mPrintJob.getInfo().isCancelling()) {
+        final PrintJob printJob = use(PrintJobPreferenceController.class).getPrintJob();
+        if (printJob == null) {
+            return;
+        }
+
+        if (!printJob.getInfo().isCancelling()) {
             MenuItem cancel = menu.add(0, MENU_ITEM_ID_CANCEL, Menu.NONE,
                     getString(R.string.print_cancel));
             cancel.setShowAsAction(MenuItem.SHOW_AS_ACTION_IF_ROOM);
         }
 
-        if (mPrintJob.isFailed()) {
+        if (printJob.isFailed()) {
             MenuItem restart = menu.add(0, MENU_ITEM_ID_RESTART, Menu.NONE,
                     getString(R.string.print_restart));
             restart.setShowAsAction(MenuItem.SHOW_AS_ACTION_IF_ROOM);
@@ -127,103 +89,24 @@ public class PrintJobSettingsFragment extends SettingsPreferenceFragment {
 
     @Override
     public boolean onOptionsItemSelected(MenuItem item) {
-        switch (item.getItemId()) {
-            case MENU_ITEM_ID_CANCEL: {
-                mPrintJob.cancel();
-                finish();
-                return true;
-            }
+        final PrintJob printJob = use(PrintJobPreferenceController.class).getPrintJob();
 
-            case MENU_ITEM_ID_RESTART: {
-                mPrintJob.restart();
-                finish();
-                return true;
+        if (printJob != null) {
+            switch (item.getItemId()) {
+                case MENU_ITEM_ID_CANCEL: {
+                    printJob.cancel();
+                    finish();
+                    return true;
+                }
+
+                case MENU_ITEM_ID_RESTART: {
+                    printJob.restart();
+                    finish();
+                    return true;
+                }
             }
         }
 
         return super.onOptionsItemSelected(item);
-    }
-
-    private void processArguments() {
-        String printJobId = getArguments().getString(EXTRA_PRINT_JOB_ID);
-        mPrintJobId = PrintJobId.unflattenFromString(printJobId);
-        if (mPrintJobId == null) {
-            finish();
-        }
-    }
-
-    private void updateUi() {
-        mPrintJob = mPrintManager.getPrintJob(mPrintJobId);
-
-        if (mPrintJob == null) {
-            finish();
-            return;
-        }
-
-        if (mPrintJob.isCancelled() || mPrintJob.isCompleted()) {
-            finish();
-            return;
-        }
-
-        PrintJobInfo info = mPrintJob.getInfo();
-
-        switch (info.getState()) {
-            case PrintJobInfo.STATE_QUEUED:
-            case PrintJobInfo.STATE_STARTED: {
-                if (!mPrintJob.getInfo().isCancelling()) {
-                    mPrintJobPreference.setTitle(getString(
-                            R.string.print_printing_state_title_template, info.getLabel()));
-                } else {
-                    mPrintJobPreference.setTitle(getString(
-                            R.string.print_cancelling_state_title_template, info.getLabel()));
-                }
-            } break;
-
-            case PrintJobInfo.STATE_FAILED: {
-                mPrintJobPreference.setTitle(getString(
-                        R.string.print_failed_state_title_template, info.getLabel()));
-            } break;
-
-            case PrintJobInfo.STATE_BLOCKED: {
-                if (!mPrintJob.getInfo().isCancelling()) {
-                    mPrintJobPreference.setTitle(getString(
-                            R.string.print_blocked_state_title_template, info.getLabel()));
-                } else {
-                    mPrintJobPreference.setTitle(getString(
-                            R.string.print_cancelling_state_title_template, info.getLabel()));
-                }
-            } break;
-        }
-
-        mPrintJobPreference.setSummary(getString(R.string.print_job_summary,
-                info.getPrinterName(), DateUtils.formatSameDayTime(
-                        info.getCreationTime(), info.getCreationTime(), DateFormat.SHORT,
-                        DateFormat.SHORT)));
-
-        switch (info.getState()) {
-            case PrintJobInfo.STATE_QUEUED:
-            case PrintJobInfo.STATE_STARTED: {
-                mPrintJobPreference.setIcon(com.android.internal.R.drawable.ic_print);
-            } break;
-
-            case PrintJobInfo.STATE_FAILED:
-            case PrintJobInfo.STATE_BLOCKED: {
-                mPrintJobPreference.setIcon(com.android.internal.R.drawable.ic_print_error);
-            } break;
-        }
-
-        String stateReason = info.getStateReason();
-        if (!TextUtils.isEmpty(stateReason)) {
-            if (getPreferenceScreen().findPreference(PRINT_JOB_MESSAGE_PREFERENCE) == null) {
-                getPreferenceScreen().addPreference(mMessagePreference);
-            }
-            mMessagePreference.setSummary(stateReason);
-            getListView().setDivider(null);
-        } else {
-            getPreferenceScreen().removePreference(mMessagePreference);
-            getListView().setDivider(mListDivider);
-        }
-
-        getActivity().invalidateOptionsMenu();
     }
 }
