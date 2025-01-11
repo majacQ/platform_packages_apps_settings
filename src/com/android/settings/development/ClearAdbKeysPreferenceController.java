@@ -25,6 +25,7 @@ import android.sysprop.AdbProperties;
 import android.text.TextUtils;
 import android.util.Log;
 
+import androidx.annotation.Nullable;
 import androidx.annotation.VisibleForTesting;
 import androidx.preference.Preference;
 import androidx.preference.PreferenceScreen;
@@ -40,10 +41,10 @@ public class ClearAdbKeysPreferenceController extends DeveloperOptionsPreference
     private static final String CLEAR_ADB_KEYS = "clear_adb_keys";
 
     private final IAdbManager mAdbManager;
-    private final DevelopmentSettingsDashboardFragment mFragment;
+    @Nullable private final DevelopmentSettingsDashboardFragment mFragment;
 
     public ClearAdbKeysPreferenceController(Context context,
-            DevelopmentSettingsDashboardFragment fragment) {
+            @Nullable DevelopmentSettingsDashboardFragment fragment) {
         super(context);
 
         mFragment = fragment;
@@ -52,6 +53,9 @@ public class ClearAdbKeysPreferenceController extends DeveloperOptionsPreference
 
     @Override
     public boolean isAvailable() {
+        // If the build is insecure (any -user build, 'ro.adb.secure=0'), adbd does not
+        // requests/store authorizations. There is no need for a "revoke authorizations"
+        // button.
         return AdbProperties.secure().orElse(false);
     }
 

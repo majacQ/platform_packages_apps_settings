@@ -40,9 +40,11 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.verifyZeroInteractions;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import android.app.Application;
+import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ActivityInfo;
@@ -57,15 +59,22 @@ import android.os.UserHandle;
 import android.os.UserManager;
 import android.util.Pair;
 
+import androidx.fragment.app.Fragment;
 import androidx.fragment.app.FragmentActivity;
 import androidx.preference.Preference;
 import androidx.preference.SwitchPreference;
+import androidx.test.core.app.ApplicationProvider;
 
 import com.android.internal.logging.nano.MetricsProto.MetricsEvent;
 import com.android.settings.R;
 import com.android.settings.SettingsActivity;
 import com.android.settings.Utils;
+import com.android.settings.homepage.TopLevelHighlightMixin;
+import com.android.settings.homepage.TopLevelSettings;
+import com.android.settings.search.SearchFeatureProviderImpl;
 import com.android.settings.testutils.FakeFeatureFactory;
+import com.android.settings.testutils.shadow.ShadowActivityEmbeddingUtils;
+import com.android.settings.testutils.shadow.ShadowSplitController;
 import com.android.settings.testutils.shadow.ShadowTileUtils;
 import com.android.settings.testutils.shadow.ShadowUserManager;
 import com.android.settingslib.core.instrumentation.MetricsFeatureProvider;
@@ -76,15 +85,16 @@ import com.android.settingslib.drawer.Tile;
 import com.android.settingslib.drawer.TileUtils;
 
 import org.junit.Before;
+import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.mockito.Answers;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
-import org.mockito.MockitoAnnotations;
+import org.mockito.junit.MockitoJUnit;
+import org.mockito.junit.MockitoRule;
 import org.robolectric.Robolectric;
 import org.robolectric.RobolectricTestRunner;
-import org.robolectric.RuntimeEnvironment;
 import org.robolectric.Shadows;
 import org.robolectric.annotation.Config;
 import org.robolectric.shadows.ShadowActivity;
@@ -96,9 +106,13 @@ import java.util.List;
 @RunWith(RobolectricTestRunner.class)
 @Config(shadows = ShadowUserManager.class)
 public class DashboardFeatureProviderImplTest {
+    @Rule
+    public final MockitoRule mMockitoRule = MockitoJUnit.rule();
 
     private static final String KEY = "key";
     private static final String SWITCH_URI = "content://com.android.settings/tile_switch";
+
+    private final Application mApplication = ApplicationProvider.getApplicationContext();
 
     @Mock(answer = Answers.RETURNS_DEEP_STUBS)
     private FragmentActivity mActivity;
@@ -114,12 +128,12 @@ public class DashboardFeatureProviderImplTest {
     private Bundle mSwitchMetaData;
     private DashboardFeatureProviderImpl mImpl;
     private boolean mForceRoundedIcon;
+    private DashboardFragment mFragment;
 
     @Before
     public void setUp() {
-        MockitoAnnotations.initMocks(this);
-        mContext = spy(RuntimeEnvironment.application);
-        doReturn(RuntimeEnvironment.application).when(mActivity).getApplicationContext();
+        mContext = spy(mApplication);
+        doReturn(mApplication).when(mActivity).getApplicationContext();
         mForceRoundedIcon = false;
         mActivityInfo = new ActivityInfo();
         mActivityInfo.packageName = mContext.getPackageName();
@@ -144,6 +158,7 @@ public class DashboardFeatureProviderImplTest {
                 .thenReturn(new ResolveInfo());
         mFeatureFactory = FakeFeatureFactory.setupForTest();
         mImpl = new DashboardFeatureProviderImpl(mContext);
+        mFragment = new TestFragment();
     }
 
     @Test
@@ -153,14 +168,14 @@ public class DashboardFeatureProviderImplTest {
 
     @Test
     public void bindPreference_shouldBindAllData() {
-        final Preference preference = new Preference(RuntimeEnvironment.application);
+        final Preference preference = new Preference(mApplication);
         final Tile tile = spy(new ActivityTile(mActivityInfo, CategoryKey.CATEGORY_HOMEPAGE));
         mActivityInfo.metaData.putInt(META_DATA_KEY_ORDER, 10);
         doReturn(Icon.createWithBitmap(Bitmap.createBitmap(1, 1, Bitmap.Config.RGB_565)))
                 .when(tile).getIcon(any(Context.class));
         mActivityInfo.metaData.putString(SettingsActivity.META_DATA_KEY_FRAGMENT_CLASS, "HI");
-        mImpl.bindPreferenceToTileAndGetObservers(mActivity, mForceRoundedIcon,
-                MetricsEvent.SETTINGS_GESTURES, preference, tile, "123", Preference.DEFAULT_ORDER);
+        mImpl.bindPreferenceToTileAndGetObservers(mActivity, mFragment, mForceRoundedIcon,
+                preference, tile, "123", Preference.DEFAULT_ORDER);
 
         assertThat(preference.getTitle()).isEqualTo(mContext.getText(R.string.settings_label));
         assertThat(preference.getSummary())
@@ -173,15 +188,15 @@ public class DashboardFeatureProviderImplTest {
 
     @Test
     public void bindPreference_shouldBindAllSwitchData() {
-        final Preference preference = new SwitchPreference(RuntimeEnvironment.application);
+        final Preference preference = new SwitchPreference(mApplication);
         final Tile tile = spy(new ProviderTile(mProviderInfo, CategoryKey.CATEGORY_HOMEPAGE,
                 mSwitchMetaData));
         mSwitchMetaData.putInt(META_DATA_KEY_ORDER, 10);
         doReturn(Icon.createWithBitmap(Bitmap.createBitmap(1, 1, Bitmap.Config.RGB_565)))
                 .when(tile).getIcon(any(Context.class));
         final List<DynamicDataObserver> observers = mImpl.bindPreferenceToTileAndGetObservers(
-                mActivity, mForceRoundedIcon, MetricsEvent.SETTINGS_GESTURES, preference, tile,
-                null /* key*/, Preference.DEFAULT_ORDER);
+                mActivity, mFragment, mForceRoundedIcon, preference, tile, null /* key*/,
+                Preference.DEFAULT_ORDER);
 
         assertThat(preference.getTitle()).isEqualTo(mContext.getText(R.string.settings_label));
         assertThat(preference.getSummary())
@@ -193,13 +208,34 @@ public class DashboardFeatureProviderImplTest {
     }
 
     @Test
+    public void bindPreference_providerTileWithPendingIntent_shouldBindIntent() {
+        final Preference preference = new SwitchPreference(mApplication);
+        Bundle metaData = new Bundle();
+        metaData.putInt(META_DATA_PREFERENCE_TITLE, R.string.settings_label);
+        metaData.putInt(META_DATA_PREFERENCE_SUMMARY, R.string.about_settings_summary);
+        metaData.putInt(META_DATA_KEY_ORDER, 10);
+        metaData.putString(META_DATA_PREFERENCE_KEYHINT, KEY);
+        final Tile tile = new ProviderTile(mProviderInfo, CategoryKey.CATEGORY_HOMEPAGE, metaData);
+        PendingIntent pendingIntent =
+                PendingIntent.getActivity(mApplication, 0, new Intent("test"), 0);
+        tile.pendingIntentMap.put(UserHandle.CURRENT, pendingIntent);
+
+        mImpl.bindPreferenceToTileAndGetObservers(mActivity, mFragment, mForceRoundedIcon,
+                preference, tile, "123", Preference.DEFAULT_ORDER);
+
+        assertThat(preference.getFragment()).isNull();
+        assertThat(preference.getOnPreferenceClickListener()).isNotNull();
+        assertThat(preference.getOrder()).isEqualTo(tile.getOrder());
+    }
+
+    @Test
     public void bindPreference_noFragmentMetadata_shouldBindIntent() {
-        final Preference preference = new Preference(RuntimeEnvironment.application);
+        final Preference preference = new Preference(mApplication);
         mActivityInfo.metaData.putInt(META_DATA_KEY_ORDER, 10);
         final Tile tile = new ActivityTile(mActivityInfo, CategoryKey.CATEGORY_HOMEPAGE);
 
-        mImpl.bindPreferenceToTileAndGetObservers(mActivity, mForceRoundedIcon,
-                MetricsEvent.SETTINGS_GESTURES, preference, tile, "123", Preference.DEFAULT_ORDER);
+        mImpl.bindPreferenceToTileAndGetObservers(mActivity, mFragment, mForceRoundedIcon,
+                preference, tile, "123", Preference.DEFAULT_ORDER);
 
         assertThat(preference.getFragment()).isNull();
         assertThat(preference.getOnPreferenceClickListener()).isNotNull();
@@ -208,14 +244,14 @@ public class DashboardFeatureProviderImplTest {
 
     @Test
     public void bindPreference_noFragmentMetadata_shouldBindToProfileSelector() {
-        final Preference preference = new Preference(RuntimeEnvironment.application);
+        final Preference preference = new Preference(mApplication);
         final Tile tile = new ActivityTile(mActivityInfo, CategoryKey.CATEGORY_HOMEPAGE);
         tile.userHandle = new ArrayList<>();
         tile.userHandle.add(mock(UserHandle.class));
         tile.userHandle.add(mock(UserHandle.class));
 
-        mImpl.bindPreferenceToTileAndGetObservers(mActivity, mForceRoundedIcon,
-                MetricsEvent.SETTINGS_GESTURES, preference, tile, "123", Preference.DEFAULT_ORDER);
+        mImpl.bindPreferenceToTileAndGetObservers(mActivity, mFragment, mForceRoundedIcon,
+                preference, tile, "123", Preference.DEFAULT_ORDER);
         preference.getOnPreferenceClickListener().onPreferenceClick(null);
 
         verify(mActivity).getSupportFragmentManager();
@@ -223,7 +259,7 @@ public class DashboardFeatureProviderImplTest {
 
     @Test
     public void bindPreference_noFragmentMetadataSingleUser_shouldBindToDirectLaunchIntent() {
-        final Preference preference = new Preference(RuntimeEnvironment.application);
+        final Preference preference = new Preference(mApplication);
         final Tile tile = new ActivityTile(mActivityInfo, CategoryKey.CATEGORY_HOMEPAGE);
         tile.userHandle = new ArrayList<>();
         tile.userHandle.add(mock(UserHandle.class));
@@ -231,50 +267,50 @@ public class DashboardFeatureProviderImplTest {
         when(mActivity.getSystemService(Context.USER_SERVICE))
                 .thenReturn(mUserManager);
 
-        mImpl.bindPreferenceToTileAndGetObservers(mActivity, mForceRoundedIcon,
-                MetricsEvent.SETTINGS_GESTURES, preference, tile, "123", Preference.DEFAULT_ORDER);
+        mImpl.bindPreferenceToTileAndGetObservers(mActivity, mFragment, mForceRoundedIcon,
+                preference, tile, "123", Preference.DEFAULT_ORDER);
         preference.getOnPreferenceClickListener().onPreferenceClick(null);
 
         verify(mFeatureFactory.metricsFeatureProvider).logStartedIntent(
                 any(Intent.class),
                 eq(MetricsEvent.SETTINGS_GESTURES));
         verify(mActivity)
-                .startActivityForResultAsUser(any(Intent.class), anyInt(), any(UserHandle.class));
+                .startActivityAsUser(any(Intent.class), any(UserHandle.class));
     }
 
     @Test
     public void bindPreference_toInternalSettingActivity_shouldBindToDirectLaunchIntentAndNotLog() {
-        final Preference preference = new Preference(RuntimeEnvironment.application);
-        mActivityInfo.packageName = RuntimeEnvironment.application.getPackageName();
+        final Preference preference = new Preference(mApplication);
+        mActivityInfo.packageName = mApplication.getPackageName();
         final Tile tile = new ActivityTile(mActivityInfo, CategoryKey.CATEGORY_HOMEPAGE);
         tile.userHandle = new ArrayList<>();
         tile.userHandle.add(mock(UserHandle.class));
 
-        mImpl.bindPreferenceToTileAndGetObservers(mActivity, mForceRoundedIcon,
-                MetricsEvent.SETTINGS_GESTURES, preference, tile, "123", Preference.DEFAULT_ORDER);
+        mImpl.bindPreferenceToTileAndGetObservers(mActivity, mFragment, mForceRoundedIcon,
+                preference, tile, "123", Preference.DEFAULT_ORDER);
         preference.getOnPreferenceClickListener().onPreferenceClick(null);
         verify(mFeatureFactory.metricsFeatureProvider).logStartedIntent(
                 any(Intent.class),
                 anyInt());
         verify(mActivity)
-                .startActivityForResultAsUser(any(Intent.class), anyInt(), any(UserHandle.class));
+                .startActivityAsUser(any(Intent.class), any(UserHandle.class));
     }
 
     @Test
     public void bindPreference_nullPreference_shouldIgnore() {
         final Tile tile = mock(Tile.class);
-        mImpl.bindPreferenceToTileAndGetObservers(mActivity, mForceRoundedIcon,
-                MetricsEvent.VIEW_UNKNOWN, null, tile, "123", Preference.DEFAULT_ORDER);
+        mImpl.bindPreferenceToTileAndGetObservers(mActivity, mFragment, mForceRoundedIcon,
+                null /* keys */, tile, "123", Preference.DEFAULT_ORDER);
 
-        verifyZeroInteractions(tile);
+        verifyNoInteractions(tile);
     }
 
     @Test
     public void bindPreference_withNullKeyNullPriority_shouldGenerateKeyAndPriority() {
-        final Preference preference = new Preference(RuntimeEnvironment.application);
+        final Preference preference = new Preference(mApplication);
         final Tile tile = new ActivityTile(mActivityInfo, CategoryKey.CATEGORY_HOMEPAGE);
-        mImpl.bindPreferenceToTileAndGetObservers(mActivity, mForceRoundedIcon,
-                MetricsEvent.VIEW_UNKNOWN, preference, tile, null /*key */,
+        mImpl.bindPreferenceToTileAndGetObservers(mActivity, mFragment, mForceRoundedIcon,
+                preference, tile, null /* key */,
                 Preference.DEFAULT_ORDER);
 
         assertThat(preference.getKey()).isNotNull();
@@ -283,14 +319,13 @@ public class DashboardFeatureProviderImplTest {
 
     @Test
     public void bindPreference_noSummary_shouldSetNullSummary() {
-        final Preference preference = new Preference(RuntimeEnvironment.application);
+        final Preference preference = new Preference(mApplication);
         mActivityInfo.metaData.remove(META_DATA_PREFERENCE_SUMMARY);
 
         final Tile tile = new ActivityTile(mActivityInfo, CategoryKey.CATEGORY_HOMEPAGE);
 
-        mImpl.bindPreferenceToTileAndGetObservers(mActivity, mForceRoundedIcon,
-                MetricsEvent.VIEW_UNKNOWN, preference, tile, null /*key */,
-                Preference.DEFAULT_ORDER);
+        mImpl.bindPreferenceToTileAndGetObservers(mActivity, mFragment, mForceRoundedIcon,
+                preference, tile, null /* key */, Preference.DEFAULT_ORDER);
 
         assertThat(preference.getSummary()).isNull();
     }
@@ -298,47 +333,54 @@ public class DashboardFeatureProviderImplTest {
     @Test
     @Config(shadows = {ShadowTileUtils.class})
     public void bindPreference_hasSummaryUri_shouldLoadSummaryFromContentProviderAndHaveObserver() {
-        final Preference preference = new Preference(RuntimeEnvironment.application);
+        final Preference preference = new Preference(mApplication);
         final Tile tile = new ActivityTile(mActivityInfo, CategoryKey.CATEGORY_HOMEPAGE);
         final String uriString = "content://com.android.settings/tile_summary";
         mActivityInfo.metaData.putString(TileUtils.META_DATA_PREFERENCE_SUMMARY_URI, uriString);
 
         final List<DynamicDataObserver> observers = mImpl.bindPreferenceToTileAndGetObservers(
-                mActivity, mForceRoundedIcon, MetricsEvent.VIEW_UNKNOWN, preference, tile,
-                null /*key */, Preference.DEFAULT_ORDER);
+                mActivity, mFragment, mForceRoundedIcon, preference, tile, null /* key */,
+                Preference.DEFAULT_ORDER);
 
-        assertThat(preference.getSummary()).isEqualTo(ShadowTileUtils.MOCK_SUMMARY);
         assertThat(observers.get(0).getUri().toString()).isEqualTo(uriString);
+        assertThat(preference.getSummary()).isNotEqualTo(ShadowTileUtils.MOCK_TEXT);
+
+        observers.get(0).updateUi();
+
+        assertThat(preference.getSummary()).isEqualTo(ShadowTileUtils.MOCK_TEXT);
     }
 
     @Test
     @Config(shadows = {ShadowTileUtils.class})
     public void bindPreference_hasTitleUri_shouldLoadFromContentProviderAndHaveObserver() {
-        final Preference preference = new Preference(RuntimeEnvironment.application);
+        final Preference preference = new Preference(mApplication);
         final Tile tile = new ActivityTile(mActivityInfo, CategoryKey.CATEGORY_HOMEPAGE);
         final String uriString =  "content://com.android.settings/tile_title";
         mActivityInfo.metaData.putString(TileUtils.META_DATA_PREFERENCE_TITLE_URI, uriString);
 
         final List<DynamicDataObserver> observers = mImpl.bindPreferenceToTileAndGetObservers(
-                mActivity, mForceRoundedIcon, MetricsEvent.VIEW_UNKNOWN, preference, tile,
-                null /*key */, Preference.DEFAULT_ORDER);
+                mActivity, mFragment, mForceRoundedIcon, preference, tile, null /* key */,
+                Preference.DEFAULT_ORDER);
 
-        assertThat(preference.getTitle()).isEqualTo(ShadowTileUtils.MOCK_SUMMARY);
         assertThat(observers.get(0).getUri().toString()).isEqualTo(uriString);
+        assertThat(preference.getTitle()).isNotEqualTo(ShadowTileUtils.MOCK_TEXT);
+
+        observers.get(0).updateUi();
+
+        assertThat(preference.getTitle()).isEqualTo(ShadowTileUtils.MOCK_TEXT);
     }
 
     @Test
     @Config(shadows = {ShadowTileUtils.class})
     public void bindPreference_onCheckedChanged_shouldPutStateToContentProvider() {
-        final SwitchPreference preference = new SwitchPreference(RuntimeEnvironment.application);
+        final SwitchPreference preference = new SwitchPreference(mApplication);
         final Tile tile = new ProviderTile(mProviderInfo, CategoryKey.CATEGORY_HOMEPAGE,
                 mSwitchMetaData);
         final Bundle bundle = new Bundle();
         bundle.putBoolean(EXTRA_SWITCH_SET_CHECKED_ERROR, false);
         ShadowTileUtils.setResultBundle(bundle);
-        mImpl.bindPreferenceToTileAndGetObservers(mActivity, mForceRoundedIcon,
-                MetricsEvent.VIEW_UNKNOWN, preference, tile, null /*key */,
-                Preference.DEFAULT_ORDER);
+        mImpl.bindPreferenceToTileAndGetObservers(mActivity, mFragment, mForceRoundedIcon,
+                preference, tile, null /* key */, Preference.DEFAULT_ORDER);
 
         preference.callChangeListener(false);
 
@@ -352,15 +394,14 @@ public class DashboardFeatureProviderImplTest {
     @Test
     @Config(shadows = {ShadowTileUtils.class})
     public void bindPreference_onCheckedChangedError_shouldRevertCheckedState() {
-        final SwitchPreference preference = new SwitchPreference(RuntimeEnvironment.application);
+        final SwitchPreference preference = new SwitchPreference(mApplication);
         final Tile tile = new ProviderTile(mProviderInfo, CategoryKey.CATEGORY_HOMEPAGE,
                 mSwitchMetaData);
         final Bundle bundle = new Bundle();
         bundle.putBoolean(EXTRA_SWITCH_SET_CHECKED_ERROR, true);
         ShadowTileUtils.setResultBundle(bundle);
-        mImpl.bindPreferenceToTileAndGetObservers(mActivity, mForceRoundedIcon,
-                MetricsEvent.VIEW_UNKNOWN, preference, tile, null /*key */,
-                Preference.DEFAULT_ORDER);
+        mImpl.bindPreferenceToTileAndGetObservers(mActivity, mFragment, mForceRoundedIcon,
+                preference, tile, null /* key */, Preference.DEFAULT_ORDER);
 
         preference.callChangeListener(true);
 
@@ -374,12 +415,13 @@ public class DashboardFeatureProviderImplTest {
     @Test
     @Config(shadows = {ShadowTileUtils.class})
     public void bindPreference_callbackOnChanged_shouldLoadFromContentProvider() {
-        final SwitchPreference preference = new SwitchPreference(RuntimeEnvironment.application);
+        final SwitchPreference preference = new SwitchPreference(mApplication);
         final Tile tile = new ProviderTile(mProviderInfo, CategoryKey.CATEGORY_HOMEPAGE,
                 mSwitchMetaData);
         final List<DynamicDataObserver> observers = mImpl.bindPreferenceToTileAndGetObservers(
-                mActivity, mForceRoundedIcon, MetricsEvent.VIEW_UNKNOWN, preference, tile,
-                null /*key */, Preference.DEFAULT_ORDER);
+                mActivity, mFragment, mForceRoundedIcon, preference, tile, null /* key */,
+                Preference.DEFAULT_ORDER);
+        observers.get(0).updateUi();
 
         ShadowTileUtils.setProviderChecked(false);
         observers.get(0).onDataChanged();
@@ -394,20 +436,19 @@ public class DashboardFeatureProviderImplTest {
 
     @Test
     public void bindPreference_withNullKeyTileKey_shouldUseTileKey() {
-        final Preference preference = new Preference(RuntimeEnvironment.application);
+        final Preference preference = new Preference(mApplication);
         mActivityInfo.metaData.putString(META_DATA_PREFERENCE_KEYHINT, "key");
         final Tile tile = new ActivityTile(mActivityInfo, CategoryKey.CATEGORY_HOMEPAGE);
-        mImpl.bindPreferenceToTileAndGetObservers(mActivity, mForceRoundedIcon,
-                MetricsEvent.VIEW_UNKNOWN, preference, tile, null /* key */,
-                Preference.DEFAULT_ORDER);
+        mImpl.bindPreferenceToTileAndGetObservers(mActivity, mFragment, mForceRoundedIcon,
+                preference, tile, null /* key */, Preference.DEFAULT_ORDER);
 
         assertThat(preference.getKey()).isEqualTo(tile.getKey(mContext));
     }
 
     @Test
     public void bindIcon_withStaticIcon_shouldLoadStaticIcon() {
-        final Preference preference = new Preference(RuntimeEnvironment.application);
-        mActivityInfo.packageName = RuntimeEnvironment.application.getPackageName();
+        final Preference preference = new Preference(mApplication);
+        mActivityInfo.packageName = mApplication.getPackageName();
         final Tile tile = new ActivityTile(mActivityInfo, CategoryKey.CATEGORY_HOMEPAGE);
         mActivityInfo.metaData.putString(META_DATA_PREFERENCE_KEYHINT, "key");
         mActivityInfo.metaData.putInt(META_DATA_PREFERENCE_ICON, R.drawable.ic_add_40dp);
@@ -424,8 +465,8 @@ public class DashboardFeatureProviderImplTest {
     @Test
     @Config(shadows = {ShadowTileUtils.class})
     public void bindIcon_withIconUri_shouldLoadIconFromContentProvider() {
-        final Preference preference = new Preference(RuntimeEnvironment.application);
-        mActivityInfo.packageName = RuntimeEnvironment.application.getPackageName();
+        final Preference preference = new Preference(mApplication);
+        mActivityInfo.packageName = mApplication.getPackageName();
         final Tile tile = new ActivityTile(mActivityInfo, CategoryKey.CATEGORY_HOMEPAGE);
         mActivityInfo.metaData.putString(META_DATA_PREFERENCE_KEYHINT, "key");
         mActivityInfo.metaData.putString(META_DATA_PREFERENCE_ICON_URI,
@@ -439,8 +480,8 @@ public class DashboardFeatureProviderImplTest {
     @Test
     @Config(shadows = {ShadowTileUtils.class})
     public void bindIcon_withStaticIconAndIconUri_shouldLoadIconFromContentProvider() {
-        final Preference preference = new Preference(RuntimeEnvironment.application);
-        mActivityInfo.packageName = RuntimeEnvironment.application.getPackageName();
+        final Preference preference = new Preference(mApplication);
+        mActivityInfo.packageName = mApplication.getPackageName();
         final Tile tile = new ActivityTile(mActivityInfo, CategoryKey.CATEGORY_HOMEPAGE);
         mActivityInfo.metaData.putString(META_DATA_PREFERENCE_KEYHINT, "key");
         mActivityInfo.metaData.putInt(META_DATA_PREFERENCE_ICON, R.drawable.ic_add_40dp);
@@ -466,8 +507,8 @@ public class DashboardFeatureProviderImplTest {
     @Test
     @Config(shadows = {ShadowTileUtils.class})
     public void bindIcon_noIcon_shouldNotLoadIcon() {
-        final Preference preference = new Preference(RuntimeEnvironment.application);
-        mActivityInfo.packageName = RuntimeEnvironment.application.getPackageName();
+        final Preference preference = new Preference(mApplication);
+        mActivityInfo.packageName = mApplication.getPackageName();
         final Tile tile = new ActivityTile(mActivityInfo, CategoryKey.CATEGORY_HOMEPAGE);
         mActivityInfo.metaData.putString(META_DATA_PREFERENCE_KEYHINT, "key");
 
@@ -479,37 +520,37 @@ public class DashboardFeatureProviderImplTest {
     @Test
     public void bindPreference_withBaseOrder_shouldOffsetOrder() {
         final int baseOrder = 100;
-        final Preference preference = new Preference(RuntimeEnvironment.application);
+        final Preference preference = new Preference(mApplication);
         mActivityInfo.metaData.putInt(META_DATA_KEY_ORDER, 10);
         final Tile tile = new ActivityTile(mActivityInfo, CategoryKey.CATEGORY_HOMEPAGE);
 
-        mImpl.bindPreferenceToTileAndGetObservers(mActivity, mForceRoundedIcon,
-                MetricsEvent.VIEW_UNKNOWN, preference, tile, "123", baseOrder);
+        mImpl.bindPreferenceToTileAndGetObservers(mActivity, mFragment, mForceRoundedIcon,
+                preference, tile, "123", baseOrder);
 
         assertThat(preference.getOrder()).isEqualTo(tile.getOrder() + baseOrder);
     }
 
     @Test
     public void bindPreference_withOrderMetadata_shouldUseOrderInMetadata() {
-        final Preference preference = new Preference(RuntimeEnvironment.application);
+        final Preference preference = new Preference(mApplication);
         final int testOrder = -30;
         mActivityInfo.metaData.putInt(META_DATA_KEY_ORDER, 10);
         final Tile tile = new ActivityTile(mActivityInfo, CategoryKey.CATEGORY_HOMEPAGE);
         mActivityInfo.metaData.putInt(META_DATA_KEY_ORDER, testOrder);
-        mImpl.bindPreferenceToTileAndGetObservers(mActivity, mForceRoundedIcon,
-                MetricsEvent.VIEW_UNKNOWN, preference, tile, "123", Preference.DEFAULT_ORDER);
+        mImpl.bindPreferenceToTileAndGetObservers(mActivity, mFragment, mForceRoundedIcon,
+                preference, tile, "123", Preference.DEFAULT_ORDER);
 
         assertThat(preference.getOrder()).isEqualTo(testOrder);
     }
 
     @Test
     public void bindPreference_invalidOrderMetadata_shouldIgnore() {
-        final Preference preference = new Preference(RuntimeEnvironment.application);
+        final Preference preference = new Preference(mApplication);
         final Tile tile = new ActivityTile(mActivityInfo, CategoryKey.CATEGORY_HOMEPAGE);
         mActivityInfo.metaData.putString(META_DATA_KEY_ORDER, "hello");
 
-        mImpl.bindPreferenceToTileAndGetObservers(mActivity, mForceRoundedIcon,
-                MetricsEvent.VIEW_UNKNOWN, preference, tile, "123", Preference.DEFAULT_ORDER);
+        mImpl.bindPreferenceToTileAndGetObservers(mActivity, mFragment, mForceRoundedIcon,
+                preference, tile, "123", Preference.DEFAULT_ORDER);
 
         assertThat(preference.getOrder()).isEqualTo(Preference.DEFAULT_ORDER);
     }
@@ -517,13 +558,13 @@ public class DashboardFeatureProviderImplTest {
     @Test
     public void bindPreference_withIntentActionMetadata_shouldSetLaunchAction() {
         FragmentActivity activity = Robolectric.buildActivity(FragmentActivity.class).get();
-        final Preference preference = new Preference(RuntimeEnvironment.application);
+        final Preference preference = new Preference(mApplication);
         final Tile tile = new ActivityTile(mActivityInfo, CategoryKey.CATEGORY_HOMEPAGE);
         mActivityInfo.metaData.putString(META_DATA_PREFERENCE_KEYHINT, "key");
         mActivityInfo.metaData.putString("com.android.settings.intent.action", "TestAction");
         tile.userHandle = null;
-        mImpl.bindPreferenceToTileAndGetObservers(activity, mForceRoundedIcon,
-                MetricsEvent.SETTINGS_GESTURES, preference, tile, "123", Preference.DEFAULT_ORDER);
+        mImpl.bindPreferenceToTileAndGetObservers(activity, mFragment, mForceRoundedIcon,
+                preference, tile, "123", Preference.DEFAULT_ORDER);
         preference.performClick();
         ShadowActivity shadowActivity = Shadows.shadowOf(activity);
 
@@ -535,25 +576,136 @@ public class DashboardFeatureProviderImplTest {
                 .isEqualTo(MetricsEvent.SETTINGS_GESTURES);
     }
 
+    /** This test is for large screen devices Activity embedding. */
+    @Test
+    @Config(shadows = {ShadowActivityEmbeddingUtils.class, ShadowSplitController.class})
+    public void bindPreference_clickHighlightedPreference_shouldNotStartActivity() {
+        ShadowSplitController.setIsActivityEmbedded(true);
+        ShadowActivityEmbeddingUtils.setIsEmbeddingActivityEnabled(true);
+        mFeatureFactory.searchFeatureProvider = new SearchFeatureProviderImpl();
+
+        String clickPrefKey = "highlight_pref_key";
+        String highlightMixinPrefKey = "highlight_pref_key";
+        FragmentActivity activity = Robolectric.buildActivity(FragmentActivity.class).get();
+        Preference preference = new Preference(mApplication);
+        Tile tile = new ActivityTile(mActivityInfo, CategoryKey.CATEGORY_HOMEPAGE);
+        mActivityInfo.metaData.putString(META_DATA_PREFERENCE_KEYHINT, "key");
+        mActivityInfo.metaData.putString("com.android.settings.intent.action", "TestAction");
+        tile.userHandle = null;
+
+        TopLevelSettings largeScreenTopLevelSettings = spy(new TopLevelSettings(
+                new TestTopLevelHighlightMixin(highlightMixinPrefKey,
+                true /* activityEmbedded */)));
+        doReturn(true).when(largeScreenTopLevelSettings).isActivityEmbedded();
+        largeScreenTopLevelSettings.setHighlightPreferenceKey(clickPrefKey);
+
+        mImpl.bindPreferenceToTileAndGetObservers(activity, largeScreenTopLevelSettings,
+                mForceRoundedIcon, preference, tile, clickPrefKey, Preference.DEFAULT_ORDER);
+        preference.performClick();
+
+        ShadowActivity shadowActivity = Shadows.shadowOf(activity);
+        assertThat(shadowActivity.getNextStartedActivityForResult()).isEqualTo(null);
+    }
+
+    /** This test is for large screen devices Activity embedding. */
+    @Test
+    @Config(shadows = {ShadowActivityEmbeddingUtils.class, ShadowSplitController.class})
+    public void bindPreference_clickNotHighlightedPreference_shouldStartActivity() {
+        ShadowSplitController.setIsActivityEmbedded(true);
+        ShadowActivityEmbeddingUtils.setIsEmbeddingActivityEnabled(true);
+        mFeatureFactory.searchFeatureProvider = new SearchFeatureProviderImpl();
+
+        String clickPrefKey = "not_highlight_pref_key";
+        String highlightMixinPrefKey = "highlight_pref_key";
+        FragmentActivity activity = Robolectric.buildActivity(FragmentActivity.class).get();
+        Preference preference = new Preference(mApplication);
+        Tile tile = new ActivityTile(mActivityInfo, CategoryKey.CATEGORY_HOMEPAGE);
+        mActivityInfo.metaData.putString(META_DATA_PREFERENCE_KEYHINT, "key");
+        mActivityInfo.metaData.putString("com.android.settings.intent.action", "TestAction");
+        tile.userHandle = null;
+
+        TopLevelSettings largeScreenTopLevelSettings = spy(new TopLevelSettings(
+                new TestTopLevelHighlightMixin(highlightMixinPrefKey,
+                true /* activityEmbedded */)));
+        doReturn(true).when(largeScreenTopLevelSettings).isActivityEmbedded();
+        largeScreenTopLevelSettings.setHighlightPreferenceKey(clickPrefKey);
+
+        mImpl.bindPreferenceToTileAndGetObservers(activity, largeScreenTopLevelSettings,
+                mForceRoundedIcon, preference, tile, clickPrefKey, Preference.DEFAULT_ORDER);
+        preference.performClick();
+
+        Intent launchIntent = Shadows.shadowOf(activity).getNextStartedActivityForResult().intent;
+        assertThat(launchIntent.getAction()).isEqualTo("TestAction");
+    }
+
     @Test
     public void clickPreference_withUnresolvableIntent_shouldNotLaunchAnything() {
         ReflectionHelpers.setField(
-                mImpl, "mPackageManager", RuntimeEnvironment.application.getPackageManager());
+                mImpl, "mPackageManager", mApplication.getPackageManager());
         FragmentActivity activity = Robolectric.buildActivity(FragmentActivity.class).get();
-        final Preference preference = new Preference(RuntimeEnvironment.application);
+        final Preference preference = new Preference(mApplication);
         final Tile tile = new ActivityTile(mActivityInfo, CategoryKey.CATEGORY_HOMEPAGE);
         mActivityInfo.metaData.putString(META_DATA_PREFERENCE_KEYHINT, "key");
         mActivityInfo.metaData.putString("com.android.settings.intent.action", "TestAction");
         tile.userHandle = null;
 
-        mImpl.bindPreferenceToTileAndGetObservers(activity, mForceRoundedIcon,
-                MetricsEvent.SETTINGS_GESTURES, preference, tile, "123", Preference.DEFAULT_ORDER);
+        mImpl.bindPreferenceToTileAndGetObservers(activity, mFragment, mForceRoundedIcon,
+                preference, tile, "123", Preference.DEFAULT_ORDER);
         preference.performClick();
 
         final ShadowActivity.IntentForResult launchIntent =
                 Shadows.shadowOf(activity).getNextStartedActivityForResult();
 
         assertThat(launchIntent).isNull();
+    }
+
+    @Test
+    public void clickPreference_providerTileWithPendingIntent_singleUser_executesPendingIntent() {
+        final Preference preference = new SwitchPreference(mApplication);
+        Bundle metaData = new Bundle();
+        metaData.putInt(META_DATA_PREFERENCE_TITLE, R.string.settings_label);
+        metaData.putInt(META_DATA_PREFERENCE_SUMMARY, R.string.about_settings_summary);
+        metaData.putInt(META_DATA_KEY_ORDER, 10);
+        metaData.putString(META_DATA_PREFERENCE_KEYHINT, KEY);
+        final Tile tile = new ProviderTile(mProviderInfo, CategoryKey.CATEGORY_HOMEPAGE, metaData);
+        PendingIntent pendingIntent =
+                PendingIntent.getActivity(mApplication, 0, new Intent("test"), 0);
+        tile.pendingIntentMap.put(UserHandle.CURRENT, pendingIntent);
+
+        mImpl.bindPreferenceToTileAndGetObservers(mActivity, mFragment, mForceRoundedIcon,
+                preference, tile, "123", Preference.DEFAULT_ORDER);
+        preference.performClick();
+
+        Intent nextStartedActivity =
+                Shadows.shadowOf(mApplication).peekNextStartedActivity();
+        assertThat(nextStartedActivity).isNotNull();
+        assertThat(nextStartedActivity.getAction()).isEqualTo("test");
+    }
+
+    @Test
+    public void clickPreference_providerTileWithPendingIntent_multiUser_showsProfileDialog() {
+        final Preference preference = new SwitchPreference(mApplication);
+        Bundle metaData = new Bundle();
+        metaData.putInt(META_DATA_PREFERENCE_TITLE, R.string.settings_label);
+        metaData.putInt(META_DATA_PREFERENCE_SUMMARY, R.string.about_settings_summary);
+        metaData.putInt(META_DATA_KEY_ORDER, 10);
+        metaData.putString(META_DATA_PREFERENCE_KEYHINT, KEY);
+        final Tile tile = new ProviderTile(mProviderInfo, CategoryKey.CATEGORY_HOMEPAGE, metaData);
+        PendingIntent pendingIntent =
+                PendingIntent.getActivity(mApplication, 0, new Intent("test"), 0);
+        tile.pendingIntentMap.put(UserHandle.CURRENT, pendingIntent);
+        tile.pendingIntentMap.put(new UserHandle(10), pendingIntent);
+
+        mImpl.bindPreferenceToTileAndGetObservers(mActivity, mFragment, mForceRoundedIcon,
+                preference, tile, "123", Preference.DEFAULT_ORDER);
+        preference.performClick();
+
+        Fragment dialogFragment =
+                mActivity.getSupportFragmentManager().findFragmentByTag("select_profile");
+        assertThat(dialogFragment).isNotNull();
+        Intent nextStartedActivity =
+                Shadows.shadowOf(mApplication).peekNextStartedActivity();
+        assertThat(nextStartedActivity).isNull();
     }
 
     @Test
@@ -568,7 +720,7 @@ public class DashboardFeatureProviderImplTest {
         mImpl.openTileIntent(mActivity, tile);
 
         verify(mActivity, never())
-                .startActivityForResult(any(Intent.class), eq(0));
+                .startActivity(any(Intent.class));
         verify(mActivity).getSupportFragmentManager();
     }
 
@@ -585,7 +737,7 @@ public class DashboardFeatureProviderImplTest {
         mImpl.openTileIntent(mActivity, tile);
 
         verify(mActivity, never())
-                .startActivityForResult(any(Intent.class), eq(0));
+                .startActivity(any(Intent.class));
         verify(mActivity).getSupportFragmentManager();
     }
 
@@ -602,7 +754,7 @@ public class DashboardFeatureProviderImplTest {
         mImpl.openTileIntent(mActivity, tile);
 
         verify(mActivity)
-                .startActivityForResult(any(Intent.class), eq(0));
+                .startActivity(any(Intent.class));
         verify(mActivity, never()).getSupportFragmentManager();
     }
 
@@ -623,7 +775,7 @@ public class DashboardFeatureProviderImplTest {
 
         final ArgumentCaptor<UserHandle> argument = ArgumentCaptor.forClass(UserHandle.class);
         verify(mActivity)
-                .startActivityForResultAsUser(any(Intent.class), anyInt(), argument.capture());
+                .startActivityAsUser(any(Intent.class), argument.capture());
         assertThat(argument.getValue().getIdentifier()).isEqualTo(userId);
         verify(mActivity, never()).getSupportFragmentManager();
     }
@@ -642,7 +794,7 @@ public class DashboardFeatureProviderImplTest {
         mImpl.openTileIntent(mActivity, tile);
 
         verify(mActivity, never())
-                .startActivityForResultAsUser(any(Intent.class), anyInt(), any(UserHandle.class));
+                .startActivityAsUser(any(Intent.class), any(UserHandle.class));
         verify(mActivity).getSupportFragmentManager();
     }
 
@@ -665,8 +817,41 @@ public class DashboardFeatureProviderImplTest {
 
         final ArgumentCaptor<UserHandle> argument = ArgumentCaptor.forClass(UserHandle.class);
         verify(mActivity)
-                .startActivityForResultAsUser(any(Intent.class), anyInt(), argument.capture());
+                .startActivityAsUser(any(Intent.class), argument.capture());
         assertThat(argument.getValue().getIdentifier()).isEqualTo(0);
         verify(mActivity, never()).getSupportFragmentManager();
+    }
+
+    private static class TestFragment extends DashboardFragment {
+
+        @Override
+        public int getMetricsCategory() {
+            return MetricsEvent.SETTINGS_GESTURES;
+        }
+
+        @Override
+        protected int getPreferenceScreenResId() {
+            return R.xml.gestures;
+        }
+
+        @Override
+        protected String getLogTag() {
+            return "TestFragment";
+        }
+    }
+
+    private static class TestTopLevelHighlightMixin extends TopLevelHighlightMixin {
+        private final String mHighlightPreferenceKey;
+
+        TestTopLevelHighlightMixin(String highlightPreferenceKey,
+                boolean activityEmbedded) {
+            super(activityEmbedded);
+            mHighlightPreferenceKey = highlightPreferenceKey;
+        }
+
+        @Override
+        public String getHighlightPreferenceKey() {
+            return mHighlightPreferenceKey;
+        }
     }
 }

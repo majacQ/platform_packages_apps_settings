@@ -22,28 +22,24 @@ import android.content.Context;
 import android.content.SharedPreferences;
 
 import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
 import androidx.fragment.app.Fragment;
 
 import com.android.settings.Settings.NightDisplaySuggestionActivity;
 import com.android.settings.biometrics.fingerprint.FingerprintEnrollSuggestionActivity;
 import com.android.settings.biometrics.fingerprint.FingerprintSuggestionActivity;
 import com.android.settings.display.NightDisplayPreferenceController;
+import com.android.settings.flags.Flags;
 import com.android.settings.notification.zen.ZenOnboardingActivity;
 import com.android.settings.notification.zen.ZenSuggestionActivity;
-import com.android.settings.overlay.FeatureFactory;
 import com.android.settings.password.ScreenLockSuggestionActivity;
 import com.android.settings.wallpaper.StyleSuggestionActivity;
 import com.android.settings.wallpaper.WallpaperSuggestionActivity;
 import com.android.settings.wifi.calling.WifiCallingSuggestionActivity;
-import com.android.settingslib.core.instrumentation.MetricsFeatureProvider;
 
 public class SuggestionFeatureProviderImpl implements SuggestionFeatureProvider {
 
-    private static final String TAG = "SuggestionFeature";
-
     private static final String SHARED_PREF_FILENAME = "suggestions";
-
-    private final MetricsFeatureProvider mMetricsFeatureProvider;
 
     @Override
     public boolean isSuggestionEnabled(Context context) {
@@ -87,14 +83,13 @@ public class SuggestionFeatureProviderImpl implements SuggestionFeatureProvider 
         return context.getSharedPreferences(SHARED_PREF_FILENAME, Context.MODE_PRIVATE);
     }
 
+    @Nullable
     @Override
-    public Class<? extends Fragment> getContextualSuggestionFragment() {
-        return null;
-    }
-
-    public SuggestionFeatureProviderImpl(Context context) {
-        final Context appContext = context.getApplicationContext();
-        mMetricsFeatureProvider = FeatureFactory.getFactory(appContext)
-                .getMetricsFeatureProvider();
+    public Class<? extends Fragment> getSuggestionFragment() {
+        if (Flags.updatedSuggestionCardAosp()) {
+            return SuggestionFragment.class;
+        } else {
+            return null;
+        }
     }
 }

@@ -23,6 +23,7 @@ import static com.google.common.truth.Truth.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
@@ -38,15 +39,18 @@ import static org.mockito.Mockito.when;
 import android.app.ActivityManager;
 import android.app.admin.DevicePolicyManager;
 import android.app.settings.SettingsEnums;
+import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.om.OverlayInfo;
 import android.content.om.OverlayManager;
 import android.content.pm.ApplicationInfo;
+import android.content.pm.Flags;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.os.RemoteException;
 import android.os.UserManager;
+import android.platform.test.annotations.RequiresFlagsEnabled;
 import android.util.ArraySet;
 import android.view.View;
 
@@ -85,10 +89,8 @@ import java.util.Set;
 public class AppButtonsPreferenceControllerTest {
 
     private static final String PACKAGE_NAME = "com.android.settings";
-    private static final String RRO_PACKAGE_NAME = "com.android.settings.overlay";
     private static final String RESOURCE_STRING = "string";
     private static final boolean ALL_USERS = false;
-    private static final boolean DISABLE_AFTER_INSTALL = true;
     private static final int REQUEST_UNINSTALL = 0;
     private static final int REQUEST_REMOVE_DEVICE_ADMIN = 1;
     private static final OverlayInfo OVERLAY_DISABLED = createFakeOverlay("overlay", false, 1);
@@ -109,7 +111,7 @@ public class AppButtonsPreferenceControllerTest {
     @Mock
     private OverlayManager mOverlayManager;
     @Mock
-    private PackageManager mPackageManger;
+    private PackageManager mPackageManager;
     @Mock
     private DevicePolicyManager mDpm;
     @Mock
@@ -134,7 +136,7 @@ public class AppButtonsPreferenceControllerTest {
         mContext = RuntimeEnvironment.application;
         doReturn(mDpm).when(mSettingsActivity).getSystemService(Context.DEVICE_POLICY_SERVICE);
         doReturn(mUserManager).when(mSettingsActivity).getSystemService(Context.USER_SERVICE);
-        doReturn(mPackageManger).when(mSettingsActivity).getPackageManager();
+        doReturn(mPackageManager).when(mSettingsActivity).getPackageManager();
         doReturn(mAm).when(mSettingsActivity).getSystemService(Context.ACTIVITY_SERVICE);
         doReturn(mOverlayManager).when(mSettingsActivity).
                 getSystemService(OverlayManager.class);
@@ -186,7 +188,7 @@ public class AppButtonsPreferenceControllerTest {
     @Test
     public void retrieveAppEntry_hasAppEntry_notNull()
             throws PackageManager.NameNotFoundException {
-        doReturn(mPackageInfo).when(mPackageManger).getPackageInfo(anyString(), anyInt());
+        doReturn(mPackageInfo).when(mPackageManager).getPackageInfo(anyString(), anyInt());
 
         mController.retrieveAppEntry();
 
@@ -197,7 +199,7 @@ public class AppButtonsPreferenceControllerTest {
     @Test
     public void retrieveAppEntry_noAppEntry_null() throws PackageManager.NameNotFoundException {
         doReturn(null).when(mState).getEntry(eq(PACKAGE_NAME), anyInt());
-        doReturn(mPackageInfo).when(mPackageManger).getPackageInfo(anyString(), anyInt());
+        doReturn(mPackageInfo).when(mPackageManager).getPackageInfo(anyString(), anyInt());
 
         mController.retrieveAppEntry();
 
@@ -209,7 +211,7 @@ public class AppButtonsPreferenceControllerTest {
     public void retrieveAppEntry_throwException_null() throws
             PackageManager.NameNotFoundException {
         doReturn(mAppEntry).when(mState).getEntry(anyString(), anyInt());
-        doThrow(new PackageManager.NameNotFoundException()).when(mPackageManger).getPackageInfo(
+        doThrow(new PackageManager.NameNotFoundException()).when(mPackageManager).getPackageInfo(
                 anyString(), anyInt());
 
         mController.retrieveAppEntry();
@@ -227,7 +229,7 @@ public class AppButtonsPreferenceControllerTest {
 
     @Test
     public void updateOpenButton_haveLaunchIntent_buttonShouldBeEnable() {
-        doReturn(new Intent()).when(mPackageManger).getLaunchIntentForPackage(anyString());
+        doReturn(new Intent()).when(mPackageManager).getLaunchIntentForPackage(anyString());
 
         mController.updateOpenButton();
 
@@ -349,6 +351,35 @@ public class AppButtonsPreferenceControllerTest {
     }
 
     @Test
+    @RequiresFlagsEnabled(Flags.FLAG_IMPROVE_HOME_APP_BEHAVIOR)
+    public void updateUninstallButton_isNotSystemAndIsCurrentHomeAndHasOneHome_setButtonDisable() {
+        doReturn(false).when(mController).isSystemPackage(any(), any(), any());
+        doReturn(new ComponentName(PACKAGE_NAME, "cls")).when(mPackageManager).getHomeActivities(
+                anyList());
+
+        mController.mHomePackages.add(PACKAGE_NAME);
+
+        mController.updateUninstallButton();
+
+        verify(mButtonPrefs).setButton2Enabled(false);
+    }
+
+    @Test
+    @RequiresFlagsEnabled(Flags.FLAG_IMPROVE_HOME_APP_BEHAVIOR)
+    public void updateUninstallButton_isNotSystemAndIsCurrentHomeAndHasOtherHome_setButtonEnable() {
+        doReturn(false).when(mController).isSystemPackage(any(), any(), any());
+        doReturn(new ComponentName(PACKAGE_NAME, "cls")).when(mPackageManager).getHomeActivities(
+                anyList());
+
+        mController.mHomePackages.add(PACKAGE_NAME);
+        mController.mHomePackages.add("com.android.home.fake");
+
+        mController.updateUninstallButton();
+
+        verify(mButtonPrefs).setButton2Enabled(true);
+    }
+
+    @Test
     public void updateUninstallButton_isSystemRro_setButtonDisable() {
         mAppInfo.flags |= ApplicationInfo.FLAG_SYSTEM;
 
@@ -401,14 +432,13 @@ public class AppButtonsPreferenceControllerTest {
 
     @Test
     public void uninstallPkg_intentSent() {
-        mController.uninstallPkg(PACKAGE_NAME, ALL_USERS, DISABLE_AFTER_INSTALL);
+        mController.uninstallPkg(PACKAGE_NAME, ALL_USERS);
 
         verify(mFragment).startActivityForResult(any(), eq(REQUEST_UNINSTALL));
         assertThat(
                 mUninstallIntent.getBooleanExtra(Intent.EXTRA_UNINSTALL_ALL_USERS, true))
                 .isEqualTo(ALL_USERS);
         assertThat(mUninstallIntent.getAction()).isEqualTo(Intent.ACTION_UNINSTALL_PACKAGE);
-        assertThat(mController.mDisableAfterUninstall).isEqualTo(DISABLE_AFTER_INSTALL);
     }
 
     @Test
@@ -480,7 +510,7 @@ public class AppButtonsPreferenceControllerTest {
             throws PackageManager.NameNotFoundException {
         doReturn(AppButtonsPreferenceController.AVAILABLE)
                 .when(mController).getAvailabilityStatus();
-        doReturn(mPackageInfo).when(mPackageManger).getPackageInfo(anyString(), anyInt());
+        doReturn(mPackageInfo).when(mPackageManager).getPackageInfo(anyString(), anyInt());
         doReturn(mButtonPrefs).when(mScreen).findPreference(anyString());
         mController.displayPreference(mScreen);
         mController.mButtonsPref = null;

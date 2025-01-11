@@ -33,7 +33,7 @@
         <item name="preferenceTheme">@style/PreferenceTheme.SetupWizard</item>
 
         <!-- LockPatternView colors -->
-        <item name="*android:lockPatternStyle">@style/LockPatternStyle.Setup</item>
+        <item name="*android:lockPatternStyle">@style/LockPatternStyle</item>
     </style>
 
     <style name="GlifTheme.Light" parent="SudThemeGlif.Light">
@@ -51,7 +51,7 @@
         <item name="preferenceBackgroundColor">?android:attr/colorBackground</item>
         <item name="preferenceTheme">@style/PreferenceTheme.SetupWizard</item>
 
-        <item name="*android:lockPatternStyle">@style/LockPatternStyle.Setup</item>
+        <item name="*android:lockPatternStyle">@style/LockPatternStyle</item>
     </style>
 
     <style name="GlifV2Theme" parent="SudThemeGlifV2.DayNight">
@@ -70,7 +70,7 @@
         <item name="preferenceTheme">@style/PreferenceTheme.SetupWizard</item>
 
         <!-- LockPatternView colors -->
-        <item name="*android:lockPatternStyle">@style/LockPatternStyle.Setup</item>
+        <item name="*android:lockPatternStyle">@style/LockPatternStyle</item>
     </style>
 
     <style name="GlifV2Theme.Light" parent="SudThemeGlifV2.Light">
@@ -88,7 +88,7 @@
         <item name="preferenceBackgroundColor">?android:attr/colorBackground</item>
         <item name="preferenceTheme">@style/PreferenceTheme.SetupWizard</item>
 
-        <item name="*android:lockPatternStyle">@style/LockPatternStyle.Setup</item>
+        <item name="*android:lockPatternStyle">@style/LockPatternStyle</item>
     </style>
 
     <style name="GlifV3Theme" parent="SudThemeGlifV3.DayNight">
@@ -107,7 +107,7 @@
         <item name="preferenceTheme">@style/PreferenceTheme.SetupWizard</item>
 
         <!-- LockPatternView colors -->
-        <item name="*android:lockPatternStyle">@style/LockPatternStyle.Setup</item>
+        <item name="*android:lockPatternStyle">@style/LockPatternStyle</item>
     </style>
 
     <style name="GlifV3Theme.Footer" parent="@style/SudThemeGlifV3.DayNight">
@@ -130,7 +130,44 @@
         <item name="preferenceBackgroundColor">?android:attr/colorBackground</item>
         <item name="preferenceTheme">@style/PreferenceTheme.SetupWizard</item>
 
-        <item name="*android:lockPatternStyle">@style/LockPatternStyle.Setup</item>
+        <item name="*android:lockPatternStyle">@style/LockPatternStyle</item>
+    </style>
+
+    <style name="GlifV4Theme" parent="SudThemeGlifV4.DayNight">
+        <!-- For all AndroidX Alert Dialogs -->
+        <item name="alertDialogTheme">@style/GlifV2ThemeAlertDialog</item>
+        <item name="android:windowBackground">?android:attr/colorBackground</item>
+        <item name="*android:preferencePanelStyle">@*android:style/PreferencePanel.Dialog</item>
+        <item name="fingerprint_layout_theme">@style/FingerprintLayoutTheme</item>
+        <item name="face_layout_theme">@style/FaceLayoutTheme</item>
+        <item name="ic_menu_moreoverflow">@*android:drawable/ic_menu_moreoverflow_material</item>
+        <item name="side_margin">0dip</item>
+        <item name="wifi_signal_color">@color/setup_wizard_wifi_color_dark</item>
+        <item name="wifi_signal">@drawable/wifi_signal</item>
+        <item name="wifi_friction">@drawable/wifi_friction</item>
+        <item name="preferenceBackgroundColor">?android:attr/colorBackground</item>
+        <item name="preferenceTheme">@style/PreferenceTheme.SetupWizard</item>
+
+        <!-- LockPatternView colors -->
+        <item name="*android:lockPatternStyle">@style/LockPatternStyle</item>
+    </style>
+
+    <style name="GlifV4Theme.Light" parent="SudThemeGlifV4.Light">
+        <!-- For all AndroidX Alert Dialogs -->
+        <item name="alertDialogTheme">@style/GlifV2ThemeAlertDialog.Light</item>
+        <item name="android:windowBackground">?android:attr/colorBackground</item>
+        <item name="*android:preferencePanelStyle">@*android:style/PreferencePanel.Dialog</item>
+        <item name="fingerprint_layout_theme">@style/FingerprintLayoutTheme</item>
+        <item name="face_layout_theme">@style/FaceLayoutTheme</item>
+        <item name="ic_menu_moreoverflow">@*android:drawable/ic_menu_moreoverflow_material</item>
+        <item name="side_margin">0dip</item>
+        <item name="wifi_signal_color">@color/setup_wizard_wifi_color_light</item>
+        <item name="wifi_signal">@drawable/wifi_signal</item>
+        <item name="wifi_friction">@drawable/wifi_friction</item>
+        <item name="preferenceBackgroundColor">?android:attr/colorBackground</item>
+        <item name="preferenceTheme">@style/PreferenceTheme.SetupWizard</item>
+
+        <item name="*android:lockPatternStyle">@style/LockPatternStyle</item>
     </style>
 
     <style name="GlifV3Theme.Light.NoActionBar" parent="GlifV3Theme.Light">
@@ -191,19 +228,10 @@
         <item name="android:windowAnimationStyle">@null</item>
     </style>
 
-    <!-- Accessibility portion of Setup Wizard -->
-    <style name="SetupWizardAccessibilityTheme" parent="Theme.SettingsBase">
-        <item name="android:colorPrimary">@color/material_grey_100</item>
-        <item name="android:colorAccent">@color/material_blue_700</item>
-        <item name="android:titleTextColor">@color/material_blue_700</item>
-        <item name="preferenceTheme">@style/SettingsPreferenceTheme</item>
-        <item name="switchBarTheme">@style/ThemeOverlay.SwitchBar.Settings</item>
-    </style>
-
     <style name="SuwAlertDialogThemeCompat" parent="@style/Theme.AppCompat.Dialog.Alert">
         <!-- Referenced SudThemeGlifV3 style -->
         <item name="android:textAllCaps">false</item>
-
+        <item name="android:colorBackground">@android:color/system_neutral1_900</item>
         <item name="android:windowSoftInputMode">adjustResize</item>
         <!-- copied from Theme.DeviceDefault.Dialog.Alert -->
         <item name="colorAccent">@*android:color/accent_device_default_dark</item>
@@ -215,7 +243,7 @@
     <style name="SuwAlertDialogThemeCompat.Light" parent="@style/Theme.AppCompat.Light.Dialog.Alert">
         <!-- Referenced SudThemeGlifV3.Light style -->
         <item name="android:textAllCaps">false</item>
-
+        <item name="android:colorBackground">@android:color/system_neutral1_50</item>
         <item name="android:windowSoftInputMode">adjustResize</item>
         <!-- copied from Theme.DeviceDefault.Light.Dialog.Alert -->
         <item name="colorAccent">@*android:color/accent_device_default_light</item>
@@ -225,30 +253,21 @@
     </style>
 
     <!-- This theme was applied to Settings pages which are running under SUW. -->
-    <style name="SubSettings.SetupWizard" parent="SudThemeGlifV3.Light" />
-
-    <!-- This theme was applied to Settings pages which are running under SUW with DynamicColor. -->
-    <style name="SudDynamicColorThemeSettings.SetupWizard" parent="SudDynamicColorThemeGlifV3.Light">
+    <style name="SettingsPreferenceTheme.SetupWizard" parent="@style/PreferenceTheme.SettingsLib">
+        <item name="android:clipToPadding">true</item>
+        <item name="android:clipChildren">true</item>
         <item name="android:textAppearanceListItem">@style/TextAppearance.PreferenceTitle.SettingsLib</item>
-        <item name="android:listPreferredItemPaddingStart">24dp</item>
-        <item name="android:listPreferredItemPaddingEnd">16dp</item>
         <item name="preferenceTheme">@style/PreferenceTheme.SettingsLib</item>
         <item name="android:switchStyle">@style/Switch.SettingsLib</item>
-    </style>
-
-    <!-- This theme was applied to Settings pages which are running under SUW with DynamicColor. -->
-    <style name="SudDynamicColorThemeSettings.SetupWizard.DayNight" parent="SudDynamicColorThemeGlifV3.DayNight">
-        <item name="android:textAppearanceListItem">@style/TextAppearance.PreferenceTitle.SettingsLib</item>
-        <item name="android:listPreferredItemPaddingStart">24dp</item>
-        <item name="android:listPreferredItemPaddingEnd">16dp</item>
-        <item name="preferenceTheme">@style/PreferenceTheme.SettingsLib</item>
-        <item name="android:switchStyle">@style/Switch.SettingsLib</item>
+        <item name="switchStyle">@style/SwitchCompat.SettingsLib</item>
+        <item name="preferenceFragmentCompatStyle">@style/SetupWizardPreferenceFragmentStyle</item>
     </style>
 
     <!-- DayNight themes -->
     <style name="GlifTheme.DayNight" parent="GlifTheme.Light" />
     <style name="GlifV2Theme.DayNight" parent="GlifV2Theme.Light" />
     <style name="GlifV3Theme.DayNight" parent="GlifV3Theme.Light" />
+    <style name="GlifV4Theme.DayNight" parent="GlifV4Theme.Light" />
     <style name="GlifV3Theme.DayNight.NoActionBar" parent="GlifV3Theme.Light.NoActionBar" />
     <style name="GlifV2Theme.DayNight.Transparent" parent="GlifV2Theme.Light.Transparent" />
     <style name="GlifV3Theme.DayNight.Transparent" parent="GlifV3Theme.Light.Transparent" />

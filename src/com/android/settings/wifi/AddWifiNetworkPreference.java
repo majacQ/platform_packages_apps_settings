@@ -19,34 +19,43 @@ package com.android.settings.wifi;
 import android.content.Context;
 import android.content.res.Resources;
 import android.graphics.drawable.Drawable;
+import android.os.UserManager;
+import android.util.AttributeSet;
 import android.util.Log;
 import android.widget.ImageButton;
 
 import androidx.annotation.DrawableRes;
-import androidx.preference.Preference;
+import androidx.annotation.Nullable;
+import androidx.annotation.VisibleForTesting;
 import androidx.preference.PreferenceViewHolder;
 
 import com.android.settings.R;
 import com.android.settings.wifi.dpp.WifiDppUtils;
+import com.android.settingslib.RestrictedPreference;
+import com.android.settingslib.wifi.WifiEnterpriseRestrictionUtils;
 
 /**
  * The Preference for users to add Wi-Fi networks in WifiSettings
  */
-public class AddWifiNetworkPreference extends Preference {
+public class AddWifiNetworkPreference extends RestrictedPreference {
 
     private static final String TAG = "AddWifiNetworkPreference";
 
     private final Drawable mScanIconDrawable;
 
     public AddWifiNetworkPreference(Context context) {
-        super(context);
+        this(context, null);
+    }
 
+    public AddWifiNetworkPreference(Context context, @Nullable AttributeSet attrs) {
+        super(context, attrs);
         setLayoutResource(com.android.settingslib.R.layout.preference_access_point);
         setWidgetLayoutResource(R.layout.wifi_button_preference_widget);
         setIcon(R.drawable.ic_add_24dp);
         setTitle(R.string.wifi_add_network);
 
         mScanIconDrawable = getDrawable(R.drawable.ic_scan_24dp);
+        checkRestrictionAndSetDisabled();
     }
 
     @Override
@@ -59,7 +68,7 @@ public class AddWifiNetworkPreference extends Preference {
                 getContext().getString(R.string.wifi_dpp_scan_qr_code));
         scanButton.setOnClickListener(view -> {
             getContext().startActivity(
-                WifiDppUtils.getEnrolleeQrCodeScannerIntent(/* ssid */ null));
+                    WifiDppUtils.getEnrolleeQrCodeScannerIntent(getContext(), /* ssid */ null));
         });
     }
 
@@ -72,5 +81,16 @@ public class AddWifiNetworkPreference extends Preference {
             Log.e(TAG, "Resource does not exist: " + iconResId);
         }
         return buttonIcon;
+    }
+
+    @VisibleForTesting
+    void checkRestrictionAndSetDisabled() {
+        checkRestrictionAndSetDisabled(UserManager.DISALLOW_ADD_WIFI_CONFIG);
+        if (isDisabledByAdmin()) {
+            return;
+        }
+        if (!WifiEnterpriseRestrictionUtils.isAddWifiConfigAllowed(getContext())) {
+            setEnabled(false);
+        }
     }
 }

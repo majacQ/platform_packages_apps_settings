@@ -18,6 +18,14 @@ package com.android.settings.password;
 
 import static android.app.admin.DevicePolicyManager.PASSWORD_COMPLEXITY_NONE;
 import static android.app.admin.DevicePolicyManager.PASSWORD_QUALITY_NUMERIC;
+import static android.app.admin.DevicePolicyResources.Strings.Settings.PASSWORD_RECENTLY_USED;
+import static android.app.admin.DevicePolicyResources.Strings.Settings.PIN_RECENTLY_USED;
+import static android.app.admin.DevicePolicyResources.Strings.Settings.REENTER_WORK_PROFILE_PASSWORD_HEADER;
+import static android.app.admin.DevicePolicyResources.Strings.Settings.REENTER_WORK_PROFILE_PIN_HEADER;
+import static android.app.admin.DevicePolicyResources.Strings.Settings.SET_WORK_PROFILE_PASSWORD_HEADER;
+import static android.app.admin.DevicePolicyResources.Strings.Settings.SET_WORK_PROFILE_PIN_HEADER;
+import static android.app.admin.DevicePolicyResources.UNDEFINED;
+import static android.view.View.ACCESSIBILITY_LIVE_REGION_POLITE;
 
 import static com.android.internal.widget.LockPatternUtils.CREDENTIAL_TYPE_NONE;
 import static com.android.internal.widget.PasswordValidationError.CONTAINS_INVALID_CHARACTERS;
@@ -32,6 +40,7 @@ import static com.android.internal.widget.PasswordValidationError.NOT_ENOUGH_UPP
 import static com.android.internal.widget.PasswordValidationError.RECENTLY_USED;
 import static com.android.internal.widget.PasswordValidationError.TOO_LONG;
 import static com.android.internal.widget.PasswordValidationError.TOO_SHORT;
+import static com.android.internal.widget.PasswordValidationError.TOO_SHORT_WHEN_ALL_NUMERIC;
 import static com.android.settings.password.ChooseLockSettingsHelper.EXTRA_KEY_UNIFICATION_PROFILE_CREDENTIAL;
 import static com.android.settings.password.ChooseLockSettingsHelper.EXTRA_KEY_UNIFICATION_PROFILE_ID;
 
@@ -56,16 +65,19 @@ import android.text.Spannable;
 import android.text.TextUtils;
 import android.text.TextWatcher;
 import android.util.Log;
-import android.util.Pair;
 import android.view.KeyEvent;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.WindowManager;
 import android.view.inputmethod.EditorInfo;
+import android.widget.CheckBox;
 import android.widget.ImeAwareEditText;
+import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.TextView.OnEditorActionListener;
 
+import androidx.annotation.Nullable;
 import androidx.annotation.StringRes;
 import androidx.fragment.app.Fragment;
 import androidx.recyclerview.widget.LinearLayoutManager;
@@ -76,14 +88,13 @@ import com.android.internal.widget.LockPatternUtils;
 import com.android.internal.widget.LockscreenCredential;
 import com.android.internal.widget.PasswordValidationError;
 import com.android.internal.widget.TextViewInputDisabler;
-import com.android.internal.widget.VerifyCredentialResponse;
-import com.android.settings.EncryptionInterstitial;
 import com.android.settings.R;
 import com.android.settings.SettingsActivity;
 import com.android.settings.SetupWizardUtils;
 import com.android.settings.Utils;
 import com.android.settings.core.InstrumentedFragment;
 import com.android.settings.notification.RedactionInterstitial;
+import com.android.settingslib.utils.StringUtil;
 
 import com.google.android.setupcompat.template.FooterBarMixin;
 import com.google.android.setupcompat.template.FooterButton;
@@ -92,7 +103,9 @@ import com.google.android.setupdesign.util.ThemeHelper;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 public class ChooseLockPassword extends SettingsActivity {
     private static final String TAG = "ChooseLockPassword";
@@ -114,7 +127,6 @@ public class ChooseLockPassword extends SettingsActivity {
         public IntentBuilder(Context context) {
             mIntent = new Intent(context, ChooseLockPassword.class);
             mIntent.putExtra(ChooseLockGeneric.CONFIRM_CREDENTIALS, false);
-            mIntent.putExtra(EncryptionInterstitial.EXTRA_REQUIRE_PASSWORD, false);
         }
 
         /**
@@ -205,6 +217,7 @@ public class ChooseLockPassword extends SettingsActivity {
         ThemeHelper.trySetDynamicColor(this);
         super.onCreate(savedInstanceState);
         findViewById(R.id.content_parent).setFitsSystemWindows(false);
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);
     }
 
     public static class ChooseLockPasswordFragment extends InstrumentedFragment
@@ -213,10 +226,15 @@ public class ChooseLockPassword extends SettingsActivity {
         private static final String KEY_UI_STAGE = "ui_stage";
         private static final String KEY_CURRENT_CREDENTIAL = "current_credential";
         private static final String FRAGMENT_TAG_SAVE_AND_FINISH = "save_and_finish_worker";
+        private static final String KEY_IS_AUTO_CONFIRM_CHECK_MANUALLY_CHANGED =
+                "auto_confirm_option_set_manually";
+
+        private static final int MIN_AUTO_PIN_REQUIREMENT_LENGTH = 6;
 
         private LockscreenCredential mCurrentCredential;
         private LockscreenCredential mChosenPassword;
         private boolean mRequestGatekeeperPassword;
+        private boolean mRequestWriteRepairModePassword;
         private ImeAwareEditText mPasswordEntry;
         private TextViewInputDisabler mPasswordEntryInputDisabler;
 
@@ -242,15 +260,27 @@ public class ChooseLockPassword extends SettingsActivity {
         private LockscreenCredential mFirstPassword;
         private RecyclerView mPasswordRestrictionView;
         protected boolean mIsAlphaMode;
-        protected boolean mIsManagedProfile;
         protected FooterButton mSkipOrClearButton;
         private FooterButton mNextButton;
         private TextView mMessage;
+        protected CheckBox mAutoPinConfirmOption;
+        protected TextView mAutoConfirmSecurityMessage;
+        protected boolean mIsAutoPinConfirmOptionSetManually;
 
         private TextChangedHandler mTextChangedHandler;
 
         private static final int CONFIRM_EXISTING_REQUEST = 58;
         static final int RESULT_FINISHED = RESULT_FIRST_USER;
+        private boolean mIsErrorTooShort = true;
+
+        /** Used to store the profile type for which pin/password is being set */
+        protected enum ProfileType {
+            None,
+            Managed,
+            Private,
+            Other
+        };
+        protected ProfileType mProfileType;
 
         /**
          * Keep track internally of where the user is in choosing a pattern.
@@ -259,87 +289,96 @@ public class ChooseLockPassword extends SettingsActivity {
 
             Introduction(
                     R.string.lockpassword_choose_your_password_header, // password
+                    SET_WORK_PROFILE_PASSWORD_HEADER,
                     R.string.lockpassword_choose_your_profile_password_header,
                     R.string.lockpassword_choose_your_password_header_for_fingerprint,
                     R.string.lockpassword_choose_your_password_header_for_face,
                     R.string.lockpassword_choose_your_password_header_for_biometrics,
+                    R.string.private_space_choose_your_password_header, // private space password
                     R.string.lockpassword_choose_your_pin_header, // pin
+                    SET_WORK_PROFILE_PIN_HEADER,
                     R.string.lockpassword_choose_your_profile_pin_header,
                     R.string.lockpassword_choose_your_pin_header_for_fingerprint,
                     R.string.lockpassword_choose_your_pin_header_for_face,
                     R.string.lockpassword_choose_your_pin_header_for_biometrics,
-                    R.string.lockpassword_choose_password_description,
+                    R.string.private_space_choose_your_pin_header, // private space pin
                     R.string.lock_settings_picker_biometrics_added_security_message,
-                    R.string.lockpassword_choose_pin_description,
                     R.string.lock_settings_picker_biometrics_added_security_message,
                     R.string.next_label),
 
             NeedToConfirm(
                     R.string.lockpassword_confirm_your_password_header,
+                    REENTER_WORK_PROFILE_PASSWORD_HEADER,
                     R.string.lockpassword_reenter_your_profile_password_header,
                     R.string.lockpassword_confirm_your_password_header,
                     R.string.lockpassword_confirm_your_password_header,
                     R.string.lockpassword_confirm_your_password_header,
+                    R.string.lockpassword_confirm_your_password_header,
                     R.string.lockpassword_confirm_your_pin_header,
+                    REENTER_WORK_PROFILE_PIN_HEADER,
                     R.string.lockpassword_reenter_your_profile_pin_header,
                     R.string.lockpassword_confirm_your_pin_header,
                     R.string.lockpassword_confirm_your_pin_header,
                     R.string.lockpassword_confirm_your_pin_header,
-                    0,
-                    0,
+                    R.string.lockpassword_confirm_your_pin_header,
                     0,
                     0,
                     R.string.lockpassword_confirm_label),
 
             ConfirmWrong(
                     R.string.lockpassword_confirm_passwords_dont_match,
+                    UNDEFINED,
                     R.string.lockpassword_confirm_passwords_dont_match,
                     R.string.lockpassword_confirm_passwords_dont_match,
                     R.string.lockpassword_confirm_passwords_dont_match,
                     R.string.lockpassword_confirm_passwords_dont_match,
+                    R.string.lockpassword_confirm_passwords_dont_match,
+                    R.string.lockpassword_confirm_pins_dont_match,
+                    UNDEFINED,
                     R.string.lockpassword_confirm_pins_dont_match,
                     R.string.lockpassword_confirm_pins_dont_match,
                     R.string.lockpassword_confirm_pins_dont_match,
                     R.string.lockpassword_confirm_pins_dont_match,
                     R.string.lockpassword_confirm_pins_dont_match,
-                    0,
-                    0,
                     0,
                     0,
                     R.string.lockpassword_confirm_label);
 
             Stage(int hintInAlpha,
+                    String hintOverrideInAlphaForProfile,
                     int hintInAlphaForProfile,
                     int hintInAlphaForFingerprint,
                     int hintInAlphaForFace,
                     int hintInAlphaForBiometrics,
+                    int hintInAlphaForPrivateProfile,
                     int hintInNumeric,
+                    String hintOverrideInNumericForProfile,
                     int hintInNumericForProfile,
                     int hintInNumericForFingerprint,
                     int hintInNumericForFace,
                     int hintInNumericForBiometrics,
-                    int messageInAlpha,
+                    int hintInNumericForPrivateProfile,
                     int messageInAlphaForBiometrics,
-                    int messageInNumeric,
                     int messageInNumericForBiometrics,
                     int nextButtonText) {
 
                 this.alphaHint = hintInAlpha;
-                this.alphaHintForProfile = hintInAlphaForProfile;
+                this.alphaHintOverrideForProfile = hintOverrideInAlphaForProfile;
+                this.alphaHintForManagedProfile = hintInAlphaForProfile;
                 this.alphaHintForFingerprint = hintInAlphaForFingerprint;
                 this.alphaHintForFace = hintInAlphaForFace;
                 this.alphaHintForBiometrics = hintInAlphaForBiometrics;
+                this.alphaHintForPrivateProfile = hintInAlphaForPrivateProfile;
 
                 this.numericHint = hintInNumeric;
-                this.numericHintForProfile = hintInNumericForProfile;
+                this.numericHintOverrideForProfile = hintOverrideInNumericForProfile;
+                this.numericHintForManagedProfile = hintInNumericForProfile;
                 this.numericHintForFingerprint = hintInNumericForFingerprint;
                 this.numericHintForFace = hintInNumericForFace;
                 this.numericHintForBiometrics = hintInNumericForBiometrics;
+                this.numericHintForPrivateProfile = hintInNumericForPrivateProfile;
 
-                this.alphaMessage = messageInAlpha;
                 this.alphaMessageForBiometrics = messageInAlphaForBiometrics;
-
-                this.numericMessage = messageInNumeric;
                 this.numericMessageForBiometrics = messageInNumericForBiometrics;
 
                 this.buttonText = nextButtonText;
@@ -352,48 +391,66 @@ public class ChooseLockPassword extends SettingsActivity {
 
             // Password header
             public final int alphaHint;
-            public final int alphaHintForProfile;
+            public final int alphaHintForPrivateProfile;
+            public final String alphaHintOverrideForProfile;
+            public final int alphaHintForManagedProfile;
             public final int alphaHintForFingerprint;
             public final int alphaHintForFace;
             public final int alphaHintForBiometrics;
 
             // PIN header
             public final int numericHint;
-            public final int numericHintForProfile;
+            public final int numericHintForPrivateProfile;
+            public final String numericHintOverrideForProfile;
+            public final int numericHintForManagedProfile;
             public final int numericHintForFingerprint;
             public final int numericHintForFace;
             public final int numericHintForBiometrics;
 
             // Password description
-            public final int alphaMessage;
             public final int alphaMessageForBiometrics;
 
             // PIN description
-            public final int numericMessage;
             public final int numericMessageForBiometrics;
 
             public final int buttonText;
 
-            public @StringRes int getHint(boolean isAlpha, int type, boolean isProfile) {
+            public String getHint(Context context, boolean isAlpha, int type, ProfileType profile) {
                 if (isAlpha) {
-                    if (type == TYPE_FINGERPRINT) {
-                        return alphaHintForFingerprint;
+                    if (android.os.Flags.allowPrivateProfile()
+                            && android.multiuser.Flags.enablePrivateSpaceFeatures()
+                            && profile.equals(ProfileType.Private)) {
+                        return context.getString(alphaHintForPrivateProfile);
+                    } else if (type == TYPE_FINGERPRINT) {
+                        return context.getString(alphaHintForFingerprint);
                     } else if (type == TYPE_FACE) {
-                        return alphaHintForFace;
+                        return context.getString(alphaHintForFace);
                     } else if (type == TYPE_BIOMETRIC) {
-                        return alphaHintForBiometrics;
+                        return context.getString(alphaHintForBiometrics);
+                    } else if (profile.equals(ProfileType.Managed)) {
+                        return context.getSystemService(DevicePolicyManager.class).getResources()
+                                .getString(alphaHintOverrideForProfile,
+                                        () -> context.getString(alphaHintForManagedProfile));
                     } else {
-                        return isProfile ? alphaHintForProfile : alphaHint;
+                        return context.getString(alphaHint);
                     }
                 } else {
-                    if (type == TYPE_FINGERPRINT) {
-                        return numericHintForFingerprint;
+                    if (android.os.Flags.allowPrivateProfile()
+                            && android.multiuser.Flags.enablePrivateSpaceFeatures()
+                            && profile.equals(ProfileType.Private)) {
+                        return context.getString(numericHintForPrivateProfile);
+                    } else if (type == TYPE_FINGERPRINT) {
+                        return context.getString(numericHintForFingerprint);
                     } else if (type == TYPE_FACE) {
-                        return numericHintForFace;
+                        return context.getString(numericHintForFace);
                     } else if (type == TYPE_BIOMETRIC) {
-                        return numericHintForBiometrics;
+                        return context.getString(numericHintForBiometrics);
+                    } else if (profile.equals(ProfileType.Managed)) {
+                        return context.getSystemService(DevicePolicyManager.class).getResources()
+                                .getString(numericHintOverrideForProfile,
+                                        () -> context.getString(numericHintForManagedProfile));
                     } else {
-                        return isProfile ? numericHintForProfile : numericHint;
+                        return context.getString(numericHint);
                     }
                 }
             }
@@ -407,7 +464,7 @@ public class ChooseLockPassword extends SettingsActivity {
 
                     case TYPE_NONE:
                     default:
-                        return isAlpha ? alphaMessage : numericMessage;
+                        return 0;
                 }
             }
         }
@@ -427,7 +484,7 @@ public class ChooseLockPassword extends SettingsActivity {
             }
             // Only take this argument into account if it belongs to the current profile.
             mUserId = Utils.getUserIdFromBundle(getActivity(), intent.getExtras());
-            mIsManagedProfile = UserManager.get(getActivity()).isManagedProfile(mUserId);
+            mProfileType = getProfileType();
             mForFingerprint = intent.getBooleanExtra(
                     ChooseLockSettingsHelper.EXTRA_KEY_FOR_FINGERPRINT, false);
             mForFace = intent.getBooleanExtra(ChooseLockSettingsHelper.EXTRA_KEY_FOR_FACE, false);
@@ -443,21 +500,6 @@ public class ChooseLockPassword extends SettingsActivity {
             mMinMetrics = intent.getParcelableExtra(EXTRA_KEY_MIN_METRICS);
             if (mMinMetrics == null) mMinMetrics = new PasswordMetrics(CREDENTIAL_TYPE_NONE);
 
-            if (intent.getBooleanExtra(
-                    ChooseLockSettingsHelper.EXTRA_KEY_FOR_CHANGE_CRED_REQUIRED_FOR_BOOT, false)) {
-                SaveAndFinishWorker w = new SaveAndFinishWorker();
-                final boolean required = getActivity().getIntent().getBooleanExtra(
-                        EncryptionInterstitial.EXTRA_REQUIRE_PASSWORD, true);
-                LockscreenCredential currentCredential = intent.getParcelableExtra(
-                        ChooseLockSettingsHelper.EXTRA_KEY_PASSWORD);
-
-                final LockPatternUtils utils = new LockPatternUtils(getActivity());
-
-                w.setBlocking(true);
-                w.setListener(this);
-                w.start(utils, required, false /* requestGatekeeperPassword */, currentCredential,
-                        currentCredential, mUserId);
-            }
             mTextChangedHandler = new TextChangedHandler();
         }
 
@@ -484,7 +526,8 @@ public class ChooseLockPassword extends SettingsActivity {
                             .setText(R.string.lockpassword_clear_label)
                             .setListener(this::onSkipOrClearButtonClick)
                             .setButtonType(FooterButton.ButtonType.SKIP)
-                            .setTheme(R.style.SudGlifButton_Secondary)
+                            .setTheme(
+                                    com.google.android.setupdesign.R.style.SudGlifButton_Secondary)
                             .build()
             );
             mixin.setPrimaryButton(
@@ -492,7 +535,7 @@ public class ChooseLockPassword extends SettingsActivity {
                             .setText(R.string.next_label)
                             .setListener(this::onNextButtonClick)
                             .setButtonType(FooterButton.ButtonType.NEXT)
-                            .setTheme(R.style.SudGlifButton_Primary)
+                            .setTheme(com.google.android.setupdesign.R.style.SudGlifButton_Primary)
                             .build()
             );
             mSkipOrClearButton = mixin.getSecondaryButton();
@@ -505,7 +548,9 @@ public class ChooseLockPassword extends SettingsActivity {
                     || DevicePolicyManager.PASSWORD_QUALITY_ALPHANUMERIC == mPasswordType
                     || DevicePolicyManager.PASSWORD_QUALITY_COMPLEX == mPasswordType;
 
-            setupPasswordRequirementsView(view);
+            final LinearLayout headerLayout = view.findViewById(
+                    com.google.android.setupdesign.R.id.sud_layout_header);
+            setupPasswordRequirementsView(headerLayout);
 
             mPasswordRestrictionView.setLayoutManager(new LinearLayoutManager(getActivity()));
             mPasswordEntry = view.findViewById(R.id.password_entry);
@@ -513,6 +558,17 @@ public class ChooseLockPassword extends SettingsActivity {
             mPasswordEntry.addTextChangedListener(this);
             mPasswordEntry.requestFocus();
             mPasswordEntryInputDisabler = new TextViewInputDisabler(mPasswordEntry);
+
+            // Fetch the AutoPinConfirmOption
+            mAutoPinConfirmOption = view.findViewById(R.id.auto_pin_confirm_enabler);
+            mAutoConfirmSecurityMessage = view.findViewById(R.id.auto_pin_confirm_security_message);
+            mIsAutoPinConfirmOptionSetManually = false;
+            setOnAutoConfirmOptionClickListener();
+            if (mAutoPinConfirmOption != null) {
+                mAutoPinConfirmOption.setAccessibilityLiveRegion(ACCESSIBILITY_LIVE_REGION_POLITE);
+                mAutoPinConfirmOption.setVisibility(View.GONE);
+                mAutoPinConfirmOption.setChecked(false);
+            }
 
             final Activity activity = getActivity();
 
@@ -538,6 +594,8 @@ public class ChooseLockPassword extends SettingsActivity {
                     ChooseLockSettingsHelper.EXTRA_KEY_PASSWORD);
             mRequestGatekeeperPassword = intent.getBooleanExtra(
                     ChooseLockSettingsHelper.EXTRA_KEY_REQUEST_GK_PW_HANDLE, false);
+            mRequestWriteRepairModePassword = intent.getBooleanExtra(
+                    ChooseLockSettingsHelper.EXTRA_KEY_REQUEST_WRITE_REPAIR_MODE_PW, false);
             if (savedInstanceState == null) {
                 updateStage(Stage.Introduction);
                 if (confirmCredentials) {
@@ -547,6 +605,7 @@ public class ChooseLockPassword extends SettingsActivity {
                             .setTitle(getString(R.string.unlock_set_unlock_launch_picker_title))
                             .setReturnCredentials(true)
                             .setRequestGatekeeperPasswordHandle(mRequestGatekeeperPassword)
+                            .setRequestWriteRepairModePassword(mRequestWriteRepairModePassword)
                             .setUserId(mUserId)
                             .show();
                 }
@@ -559,6 +618,8 @@ public class ChooseLockPassword extends SettingsActivity {
                     mUiStage = Stage.valueOf(state);
                     updateStage(mUiStage);
                 }
+                mIsAutoPinConfirmOptionSetManually =
+                        savedInstanceState.getBoolean(KEY_IS_AUTO_CONFIRM_CHECK_MANUALLY_CHANGED);
 
                 mCurrentCredential = savedInstanceState.getParcelable(KEY_CURRENT_CREDENTIAL);
 
@@ -569,8 +630,8 @@ public class ChooseLockPassword extends SettingsActivity {
 
             if (activity instanceof SettingsActivity) {
                 final SettingsActivity sa = (SettingsActivity) activity;
-                int title = Stage.Introduction.getHint(mIsAlphaMode, getStageType(),
-                        mIsManagedProfile);
+                String title = Stage.Introduction.getHint(
+                        getContext(), mIsAlphaMode, getStageType(), mProfileType);
                 sa.setTitle(title);
                 mLayout.setHeaderText(title);
             }
@@ -601,11 +662,38 @@ public class ChooseLockPassword extends SettingsActivity {
             }
         }
 
-        private void setupPasswordRequirementsView(View view) {
-            mPasswordRestrictionView = view.findViewById(R.id.password_requirements_view);
+        private void setupPasswordRequirementsView(@Nullable ViewGroup view) {
+            if (view == null) {
+                return;
+            }
+
+            createHintMessageView(view);
             mPasswordRestrictionView.setLayoutManager(new LinearLayoutManager(getActivity()));
-            mPasswordRequirementAdapter = new PasswordRequirementAdapter();
+            mPasswordRequirementAdapter = new PasswordRequirementAdapter(getActivity());
             mPasswordRestrictionView.setAdapter(mPasswordRequirementAdapter);
+            view.addView(mPasswordRestrictionView);
+        }
+
+        @VisibleForTesting
+        View getPasswordRequirementsView() {
+            return mPasswordRestrictionView;
+        }
+
+        private void createHintMessageView(ViewGroup view) {
+            if (mPasswordRestrictionView != null) {
+                return;
+            }
+
+            final TextView sucTitleView = view.findViewById(R.id.suc_layout_title);
+            final ViewGroup.MarginLayoutParams titleLayoutParams =
+                    (ViewGroup.MarginLayoutParams) sucTitleView.getLayoutParams();
+            mPasswordRestrictionView = new RecyclerView(getActivity());
+            final LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT);
+            lp.setMargins(titleLayoutParams.leftMargin, getResources().getDimensionPixelSize(
+                    R.dimen.password_requirement_view_margin_top), titleLayoutParams.leftMargin, 0);
+            mPasswordRestrictionView.setLayoutParams(lp);
         }
 
         @Override
@@ -641,6 +729,8 @@ public class ChooseLockPassword extends SettingsActivity {
             if (mCurrentCredential != null) {
                 outState.putParcelable(KEY_CURRENT_CREDENTIAL, mCurrentCredential.duplicate());
             }
+            outState.putBoolean(KEY_IS_AUTO_CONFIRM_CHECK_MANUALLY_CHANGED,
+                    mIsAutoPinConfirmOptionSetManually);
         }
 
         @Override
@@ -678,18 +768,17 @@ public class ChooseLockPassword extends SettingsActivity {
 
         /**
          * Validates PIN/Password and returns the validation result and updates mValidationErrors
-         * and mPasswordReused to reflect validation results.
+         * to reflect validation results.
          *
          * @param credential credential the user typed in.
          * @return whether password satisfies all the requirements.
          */
         @VisibleForTesting
         boolean validatePassword(LockscreenCredential credential) {
-            final byte[] password = credential.getCredential();
-            mValidationErrors = PasswordMetrics.validatePassword(
-                    mMinMetrics, mMinComplexity, !mIsAlphaMode, password);
-            if (mValidationErrors.isEmpty() &&  mLockPatternUtils.checkPasswordHistory(
-                        password, getPasswordHistoryHashFactor(), mUserId)) {
+            mValidationErrors = PasswordMetrics.validateCredential(mMinMetrics, mMinComplexity,
+                    credential);
+            if (mValidationErrors.isEmpty() && mLockPatternUtils.checkPasswordHistory(
+                        credential.getCredential(), getPasswordHistoryHashFactor(), mUserId)) {
                 mValidationErrors =
                         Collections.singletonList(new PasswordValidationError(RECENTLY_USED));
             }
@@ -773,67 +862,87 @@ public class ChooseLockPassword extends SettingsActivity {
          */
         String[] convertErrorCodeToMessages() {
             List<String> messages = new ArrayList<>();
+            mIsErrorTooShort = false;
             for (PasswordValidationError error : mValidationErrors) {
                 switch (error.errorCode) {
                     case CONTAINS_INVALID_CHARACTERS:
                         messages.add(getString(R.string.lockpassword_illegal_character));
                         break;
                     case NOT_ENOUGH_UPPER_CASE:
-                        messages.add(getResources().getQuantityString(
-                                R.plurals.lockpassword_password_requires_uppercase,
-                                error.requirement, error.requirement));
+                        messages.add(StringUtil.getIcuPluralsString(getContext(), error.requirement,
+                                R.string.lockpassword_password_requires_uppercase));
                         break;
                     case NOT_ENOUGH_LOWER_CASE:
-                        messages.add(getResources().getQuantityString(
-                                R.plurals.lockpassword_password_requires_lowercase,
-                                error.requirement, error.requirement));
+                        messages.add(StringUtil.getIcuPluralsString(getContext(), error.requirement,
+                                R.string.lockpassword_password_requires_lowercase));
                         break;
                     case NOT_ENOUGH_LETTERS:
-                        messages.add(getResources().getQuantityString(
-                                R.plurals.lockpassword_password_requires_letters,
-                                error.requirement, error.requirement));
+                        messages.add(StringUtil.getIcuPluralsString(getContext(), error.requirement,
+                                R.string.lockpassword_password_requires_letters));
                         break;
                     case NOT_ENOUGH_DIGITS:
-                        messages.add(getResources().getQuantityString(
-                                R.plurals.lockpassword_password_requires_numeric,
-                                error.requirement, error.requirement));
+                        messages.add(StringUtil.getIcuPluralsString(getContext(), error.requirement,
+                                R.string.lockpassword_password_requires_numeric));
                         break;
                     case NOT_ENOUGH_SYMBOLS:
-                        messages.add(getResources().getQuantityString(
-                                R.plurals.lockpassword_password_requires_symbols,
-                                error.requirement, error.requirement));
+                        messages.add(StringUtil.getIcuPluralsString(getContext(), error.requirement,
+                                R.string.lockpassword_password_requires_symbols));
                         break;
                     case NOT_ENOUGH_NON_LETTER:
-                        messages.add(getResources().getQuantityString(
-                                R.plurals.lockpassword_password_requires_nonletter,
-                                error.requirement, error.requirement));
+                        messages.add(StringUtil.getIcuPluralsString(getContext(), error.requirement,
+                                R.string.lockpassword_password_requires_nonletter));
                         break;
                     case NOT_ENOUGH_NON_DIGITS:
-                        messages.add(getResources().getQuantityString(
-                                R.plurals.lockpassword_password_requires_nonnumerical,
-                                error.requirement, error.requirement));
+                        messages.add(StringUtil.getIcuPluralsString(getContext(), error.requirement,
+                                R.string.lockpassword_password_requires_nonnumerical));
                         break;
                     case TOO_SHORT:
-                        messages.add(getResources().getQuantityString(
+                        mIsErrorTooShort = true;
+                        String message = StringUtil.getIcuPluralsString(getContext(),
+                                error.requirement,
                                 mIsAlphaMode
-                                        ? R.plurals.lockpassword_password_too_short
-                                        : R.plurals.lockpassword_pin_too_short,
-                                error.requirement, error.requirement));
+                                        ? R.string.lockpassword_password_too_short
+                                        : R.string.lockpassword_pin_too_short);
+                        if (LockPatternUtils.isAutoPinConfirmFeatureAvailable()
+                                && !mIsAlphaMode
+                                && error.requirement < MIN_AUTO_PIN_REQUIREMENT_LENGTH) {
+                            Map<String, Object> arguments = new HashMap<>();
+                            arguments.put("count", error.requirement);
+                            arguments.put("minAutoConfirmLen", MIN_AUTO_PIN_REQUIREMENT_LENGTH);
+                            message = StringUtil.getIcuPluralsString(getContext(),
+                                    arguments,
+                                    R.string.lockpassword_pin_too_short_autoConfirm_extra_message);
+                        }
+                        messages.add(message);
+                        break;
+                    case TOO_SHORT_WHEN_ALL_NUMERIC:
+                        messages.add(
+                                StringUtil.getIcuPluralsString(getContext(), error.requirement,
+                                        R.string.lockpassword_password_too_short_all_numeric));
                         break;
                     case TOO_LONG:
-                        messages.add(getResources().getQuantityString(
-                                mIsAlphaMode
-                                        ? R.plurals.lockpassword_password_too_long
-                                        : R.plurals.lockpassword_pin_too_long,
-                                error.requirement + 1, error.requirement + 1));
+                        messages.add(StringUtil.getIcuPluralsString(getContext(),
+                                error.requirement + 1, mIsAlphaMode
+                                        ? R.string.lockpassword_password_too_long
+                                        : R.string.lockpassword_pin_too_long));
                         break;
                     case CONTAINS_SEQUENCE:
-                        messages.add(getString(R.string.lockpassword_pin_no_sequential_digits));
+                        messages.add(getString(mIsAlphaMode
+                                ? R.string.lockpassword_password_no_sequential_characters
+                                : R.string.lockpassword_pin_no_sequential_digits));
                         break;
                     case RECENTLY_USED:
-                        messages.add(getString(mIsAlphaMode
-                                ? R.string.lockpassword_password_recently_used
-                                : R.string.lockpassword_pin_recently_used));
+                        DevicePolicyManager devicePolicyManager =
+                                getContext().getSystemService(DevicePolicyManager.class);
+                        if (mIsAlphaMode) {
+                            messages.add(devicePolicyManager.getResources().getString(
+                                    PASSWORD_RECENTLY_USED,
+                                    () -> getString(R.string.lockpassword_password_recently_used)));
+                        } else {
+                            messages.add(devicePolicyManager.getResources().getString(
+                                    PIN_RECENTLY_USED,
+                                    () -> getString(R.string.lockpassword_pin_recently_used)));
+                        }
                         break;
                     default:
                         Log.wtf(TAG, "unknown error validating password: " + error);
@@ -850,31 +959,43 @@ public class ChooseLockPassword extends SettingsActivity {
             final boolean canInput = mSaveAndFinishWorker == null;
 
             LockscreenCredential password = mIsAlphaMode
-                    ? LockscreenCredential.createPasswordOrNone(mPasswordEntry.getText())
-                    : LockscreenCredential.createPinOrNone(mPasswordEntry.getText());
+                    ? LockscreenCredential.createPassword(mPasswordEntry.getText())
+                    : LockscreenCredential.createPin(mPasswordEntry.getText());
             final int length = password.size();
+
             if (mUiStage == Stage.Introduction) {
                 mPasswordRestrictionView.setVisibility(View.VISIBLE);
                 final boolean passwordCompliant = validatePassword(password);
                 String[] messages = convertErrorCodeToMessages();
                 // Update the fulfillment of requirements.
-                mPasswordRequirementAdapter.setRequirements(messages);
+                mPasswordRequirementAdapter.setRequirements(messages, mIsErrorTooShort);
+                // set the visibility of pin_auto_confirm option accordingly
+                setAutoPinConfirmOption(passwordCompliant, length);
                 // Enable/Disable the next button accordingly.
                 setNextEnabled(passwordCompliant);
             } else {
                 // Hide password requirement view when we are just asking user to confirm the pw.
                 mPasswordRestrictionView.setVisibility(View.GONE);
-                setHeaderText(getString(mUiStage.getHint(mIsAlphaMode, getStageType(),
-                        mIsManagedProfile)));
+                setHeaderText(mUiStage.getHint(getContext(), mIsAlphaMode, getStageType(),
+                        mProfileType));
                 setNextEnabled(canInput && length >= LockPatternUtils.MIN_LOCK_PASSWORD_SIZE);
                 mSkipOrClearButton.setVisibility(toVisibility(canInput && length > 0));
+
+                // Hide the pin_confirm option when we are just asking user to confirm the pwd.
+                mAutoPinConfirmOption.setVisibility(View.GONE);
+                mAutoConfirmSecurityMessage.setVisibility(View.GONE);
             }
-            int message = mUiStage.getMessage(mIsAlphaMode, getStageType());
-            if (message != 0) {
-                mMessage.setVisibility(View.VISIBLE);
-                mMessage.setText(message);
+            final int stage = getStageType();
+            if (getStageType() != Stage.TYPE_NONE) {
+                int message = mUiStage.getMessage(mIsAlphaMode, stage);
+                if (message != 0) {
+                    mMessage.setVisibility(View.VISIBLE);
+                    mMessage.setText(message);
+                } else {
+                    mMessage.setVisibility(View.INVISIBLE);
+                }
             } else {
-                mMessage.setVisibility(View.INVISIBLE);
+                mMessage.setVisibility(View.GONE);
             }
 
             setNextText(mUiStage.buttonText);
@@ -884,6 +1005,36 @@ public class ChooseLockPassword extends SettingsActivity {
 
         protected int toVisibility(boolean visibleOrGone) {
             return visibleOrGone ? View.VISIBLE : View.GONE;
+        }
+
+        private void setAutoPinConfirmOption(boolean enabled, int length) {
+            if (!LockPatternUtils.isAutoPinConfirmFeatureAvailable()
+                    || mAutoPinConfirmOption == null) {
+                return;
+            }
+            if (enabled && !mIsAlphaMode && isAutoPinConfirmPossible(length)) {
+                mAutoPinConfirmOption.setVisibility(View.VISIBLE);
+                mAutoConfirmSecurityMessage.setVisibility(View.VISIBLE);
+                if (!mIsAutoPinConfirmOptionSetManually) {
+                    mAutoPinConfirmOption.setChecked(length == MIN_AUTO_PIN_REQUIREMENT_LENGTH);
+                }
+            } else {
+                mAutoPinConfirmOption.setVisibility(View.GONE);
+                mAutoConfirmSecurityMessage.setVisibility(View.GONE);
+                mAutoPinConfirmOption.setChecked(false);
+            }
+        }
+
+        private boolean isAutoPinConfirmPossible(int currentPinLength) {
+            return currentPinLength >= MIN_AUTO_PIN_REQUIREMENT_LENGTH;
+        }
+
+        private void setOnAutoConfirmOptionClickListener() {
+            if (mAutoPinConfirmOption != null) {
+                mAutoPinConfirmOption.setOnClickListener((v) -> {
+                    mIsAutoPinConfirmOptionSetManually = true;
+                });
+            }
         }
 
         private void setHeaderText(String text) {
@@ -918,19 +1069,21 @@ public class ChooseLockPassword extends SettingsActivity {
                 return;
             }
 
-            mPasswordEntryInputDisabler.setInputEnabled(false);
-            setNextEnabled(false);
+            ConfirmDeviceCredentialUtils.hideImeImmediately(
+                    getActivity().getWindow().getDecorView());
 
+            mPasswordEntryInputDisabler.setInputEnabled(false);
             mSaveAndFinishWorker = new SaveAndFinishWorker();
-            mSaveAndFinishWorker.setListener(this);
+            mSaveAndFinishWorker
+                    .setListener(this)
+                    .setRequestGatekeeperPasswordHandle(mRequestGatekeeperPassword)
+                    .setRequestWriteRepairModePassword(mRequestWriteRepairModePassword);
 
             getFragmentManager().beginTransaction().add(mSaveAndFinishWorker,
                     FRAGMENT_TAG_SAVE_AND_FINISH).commit();
             getFragmentManager().executePendingTransactions();
 
             final Intent intent = getActivity().getIntent();
-            final boolean required = intent.getBooleanExtra(
-                    EncryptionInterstitial.EXTRA_REQUIRE_PASSWORD, true);
             if (mUnificationProfileId != UserHandle.USER_NULL) {
                 try (LockscreenCredential profileCredential = (LockscreenCredential)
                         intent.getParcelableExtra(EXTRA_KEY_UNIFICATION_PROFILE_CREDENTIAL)) {
@@ -938,7 +1091,13 @@ public class ChooseLockPassword extends SettingsActivity {
                             profileCredential);
                 }
             }
-            mSaveAndFinishWorker.start(mLockPatternUtils, required, mRequestGatekeeperPassword,
+            // update the setting before triggering the password save workflow,
+            // so that pinLength information is stored accordingly when setting is turned on.
+            mLockPatternUtils.setAutoPinConfirm(
+                    (mAutoPinConfirmOption != null && mAutoPinConfirmOption.isChecked()),
+                    mUserId);
+
+            mSaveAndFinishWorker.start(mLockPatternUtils,
                     mChosenPassword, mCurrentCredential, mUserId);
         }
 
@@ -964,6 +1123,12 @@ public class ChooseLockPassword extends SettingsActivity {
                     startActivity(intent);
                 }
             }
+
+            if (mLayout != null) {
+                mLayout.announceForAccessibility(
+                        getString(R.string.accessibility_setup_password_complete));
+            }
+
             getActivity().finish();
         }
 
@@ -990,51 +1155,20 @@ public class ChooseLockPassword extends SettingsActivity {
                 }
             }
         }
-    }
 
-    public static class SaveAndFinishWorker extends SaveChosenLockWorkerBase {
-
-        private LockscreenCredential mChosenPassword;
-        private LockscreenCredential mCurrentCredential;
-
-        public void start(LockPatternUtils utils, boolean required,
-                boolean requestGatekeeperPassword, LockscreenCredential chosenPassword,
-                LockscreenCredential currentCredential, int userId) {
-            prepare(utils, required, requestGatekeeperPassword, userId);
-
-            mChosenPassword = chosenPassword;
-            mCurrentCredential = currentCredential != null ? currentCredential
-                    : LockscreenCredential.createNone();
-            mUserId = userId;
-
-            start();
-        }
-
-        @Override
-        protected Pair<Boolean, Intent> saveAndVerifyInBackground() {
-            final boolean success = mUtils.setLockCredential(
-                    mChosenPassword, mCurrentCredential, mUserId);
-            if (success) {
-                unifyProfileCredentialIfRequested();
+        private ProfileType getProfileType() {
+            UserManager userManager = getContext().createContextAsUser(UserHandle.of(mUserId),
+                    /*flags=*/0).getSystemService(UserManager.class);
+            if (userManager.isManagedProfile()) {
+                return ProfileType.Managed;
+            } else if (android.os.Flags.allowPrivateProfile()
+                    && android.multiuser.Flags.enablePrivateSpaceFeatures()
+                    && userManager.isPrivateProfile()) {
+                return ProfileType.Private;
+            } else if (userManager.isProfile()) {
+                return ProfileType.Other;
             }
-            Intent result = null;
-            if (success && mRequestGatekeeperPassword) {
-                // If a Gatekeeper Password was requested, invoke the LockSettingsService code
-                // path to return a Gatekeeper Password based on the credential that the user
-                // chose. This should only be run if the credential was successfully set.
-                final VerifyCredentialResponse response = mUtils.verifyCredential(mChosenPassword,
-                        mUserId, LockPatternUtils.VERIFY_FLAG_REQUEST_GK_PW_HANDLE);
-
-                if (!response.isMatched() || !response.containsGatekeeperPasswordHandle()) {
-                    Log.e(TAG, "critical: bad response or missing GK PW handle for known good"
-                            + " password: " + response.toString());
-                }
-
-                result = new Intent();
-                result.putExtra(ChooseLockSettingsHelper.EXTRA_KEY_GK_PW_HANDLE,
-                        response.getGatekeeperPasswordHandle());
-            }
-            return Pair.create(success, result);
+            return ProfileType.None;
         }
     }
 }

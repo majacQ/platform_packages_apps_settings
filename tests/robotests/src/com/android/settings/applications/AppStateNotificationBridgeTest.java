@@ -18,16 +18,11 @@ package com.android.settings.applications;
 
 import static android.text.format.DateUtils.DAY_IN_MILLIS;
 
-import static com.android.settings.applications.AppStateNotificationBridge
-        .FILTER_APP_NOTIFICATION_BLOCKED;
-import static com.android.settings.applications.AppStateNotificationBridge
-        .FILTER_APP_NOTIFICATION_FREQUENCY;
-import static com.android.settings.applications.AppStateNotificationBridge
-        .FILTER_APP_NOTIFICATION_RECENCY;
-import static com.android.settings.applications.AppStateNotificationBridge
-        .FREQUENCY_NOTIFICATION_COMPARATOR;
-import static com.android.settings.applications.AppStateNotificationBridge
-        .RECENT_NOTIFICATION_COMPARATOR;
+import static com.android.settings.applications.AppStateNotificationBridge.FILTER_APP_NOTIFICATION_BLOCKED;
+import static com.android.settings.applications.AppStateNotificationBridge.FILTER_APP_NOTIFICATION_FREQUENCY;
+import static com.android.settings.applications.AppStateNotificationBridge.FILTER_APP_NOTIFICATION_RECENCY;
+import static com.android.settings.applications.AppStateNotificationBridge.FREQUENCY_NOTIFICATION_COMPARATOR;
+import static com.android.settings.applications.AppStateNotificationBridge.RECENT_NOTIFICATION_COMPARATOR;
 
 import static com.google.common.truth.Truth.assertThat;
 
@@ -47,12 +42,12 @@ import android.app.usage.UsageEvents;
 import android.app.usage.UsageEvents.Event;
 import android.content.Context;
 import android.content.pm.ApplicationInfo;
+import android.content.pm.UserInfo;
 import android.os.Looper;
 import android.os.Parcel;
 import android.os.RemoteException;
 import android.os.UserHandle;
 import android.os.UserManager;
-import android.view.ViewGroup;
 import android.widget.CompoundButton;
 import android.widget.Switch;
 
@@ -71,6 +66,7 @@ import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 
@@ -99,7 +95,7 @@ public class AppStateNotificationBridgeTest {
         when(mState.newSession(any())).thenReturn(mSession);
         when(mState.getBackgroundLooper()).thenReturn(mock(Looper.class));
         when(mBackend.getNotificationsBanned(anyString(), anyInt())).thenReturn(true);
-        when(mBackend.isSystemApp(any(), any())).thenReturn(true);
+        when(mBackend.enableSwitch(any(), any())).thenReturn(true);
         // most tests assume no work profile
         when(mUserManager.getProfileIdsWithDisabled(anyInt())).thenReturn(new int[]{});
         mContext = RuntimeEnvironment.application.getApplicationContext();
@@ -245,7 +241,6 @@ public class AppStateNotificationBridgeTest {
         assertThat(((NotificationsSentState) apps.get(0).extraInfo).avgSentDaily).isEqualTo(1);
         assertThat(((NotificationsSentState) apps.get(0).extraInfo).avgSentWeekly).isEqualTo(0);
         assertThat(((NotificationsSentState) apps.get(0).extraInfo).blocked).isTrue();
-        assertThat(((NotificationsSentState) apps.get(0).extraInfo).systemApp).isTrue();
         assertThat(((NotificationsSentState) apps.get(0).extraInfo).blockable).isTrue();
     }
 
@@ -289,7 +284,8 @@ public class AppStateNotificationBridgeTest {
     @Test
     public void testLoadAllExtraInfo_multipleUsers() throws RemoteException {
         // has work profile
-        when(mUserManager.getProfileIdsWithDisabled(anyInt())).thenReturn(new int[]{1});
+        when(mUserManager.getProfiles(anyInt())).thenReturn(Arrays.asList(
+                new UserInfo(1, "", UserInfo.FLAG_MANAGED_PROFILE | UserInfo.FLAG_PROFILE)));
         mBridge = new AppStateNotificationBridge(mContext, mState,
                 mock(AppStateBaseBridge.Callback.class), mUsageStats, mUserManager, mBackend);
 
@@ -376,7 +372,6 @@ public class AppStateNotificationBridgeTest {
         assertThat(((NotificationsSentState) entry.extraInfo).avgSentDaily).isEqualTo(2);
         assertThat(((NotificationsSentState) entry.extraInfo).avgSentWeekly).isEqualTo(0);
         assertThat(((NotificationsSentState) entry.extraInfo).blocked).isTrue();
-        assertThat(((NotificationsSentState) entry.extraInfo).systemApp).isTrue();
         assertThat(((NotificationsSentState) entry.extraInfo).blockable).isTrue();
     }
 
@@ -563,11 +558,11 @@ public class AppStateNotificationBridgeTest {
         entry.extraInfo = new NotificationsSentState();
 
         CompoundButton.OnCheckedChangeListener listener = mBridge.getSwitchOnCheckedListener(entry);
-        listener.onCheckedChanged(toggle, true);
+        listener.onCheckedChanged(toggle, false);
 
         verify(mBackend).setNotificationsEnabledForPackage(
-                entry.info.packageName, entry.info.uid, true);
-        assertThat(((NotificationsSentState) entry.extraInfo).blocked).isFalse();
+                entry.info.packageName, entry.info.uid, false);
+        assertThat(((NotificationsSentState) entry.extraInfo).blocked).isTrue();
     }
 
     @Test

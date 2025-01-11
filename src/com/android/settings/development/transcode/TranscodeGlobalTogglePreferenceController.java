@@ -19,7 +19,9 @@ package com.android.settings.development.transcode;
 import android.content.Context;
 import android.os.SystemProperties;
 
+import com.android.settings.R;
 import com.android.settings.core.TogglePreferenceController;
+import com.android.settingslib.development.DevelopmentSettingsEnabler;
 
 /**
  * The controller for the "Enabling transcoding for all apps" switch on the transcode settings
@@ -36,7 +38,11 @@ public class TranscodeGlobalTogglePreferenceController extends TogglePreferenceC
 
     @Override
     public int getAvailabilityStatus() {
-        return AVAILABLE;
+        if (DevelopmentSettingsEnabler.isDevelopmentSettingsEnabled(mContext)) {
+            return AVAILABLE;
+        } else {
+            return CONDITIONALLY_UNAVAILABLE;
+        }
     }
 
     @Override
@@ -48,5 +54,10 @@ public class TranscodeGlobalTogglePreferenceController extends TogglePreferenceC
     public boolean setChecked(boolean isChecked) {
         SystemProperties.set(TRANSCODE_ENABLED_PROP_KEY, String.valueOf(isChecked));
         return true;
+    }
+
+    @Override
+    public int getSliceHighlightMenuRes() {
+        return R.string.menu_key_system;
     }
 }

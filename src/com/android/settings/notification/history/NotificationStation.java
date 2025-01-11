@@ -436,7 +436,7 @@ public class NotificationStation extends SettingsPreferenceFragment {
         }
         mRanking.getRanking(info.key, rank);
         info.alerted = rank.getLastAudiblyAlertedMillis() > 0;
-        info.visuallyInterruptive = rank.visuallyInterruptive();
+        info.visuallyInterruptive = rank.isTextChanged();
         info.channel = rank.getChannel();
         info.rankingExtra = generateRankingExtraText(info);
     }
@@ -581,7 +581,7 @@ public class NotificationStation extends SettingsPreferenceFragment {
                         .append(bold(getString(
                                 R.string.notification_log_details_title)))
                         .append(delim)
-                        .append(action.title);
+                        .append(action.title != null ? action.title : "");
                 if (action.actionIntent != null) {
                     sb.append("\n    ")
                             .append(bold(getString(
@@ -751,6 +751,7 @@ public class NotificationStation extends SettingsPreferenceFragment {
         @Override
         public void performClick() {
             Intent intent =  new Intent(Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS)
+                    .setPackage(mContext.getPackageName())
                     .putExtra(EXTRA_APP_PACKAGE, mInfo.pkg)
                     .putExtra(EXTRA_CHANNEL_ID,
                             mInfo.channel != null ? mInfo.channel.getId() : mInfo.channelId);

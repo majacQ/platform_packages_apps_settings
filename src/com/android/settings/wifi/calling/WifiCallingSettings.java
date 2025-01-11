@@ -27,19 +27,20 @@ import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.ViewStub;
 
 import androidx.annotation.VisibleForTesting;
 import androidx.fragment.app.Fragment;
-import androidx.fragment.app.FragmentActivity;
 import androidx.fragment.app.FragmentManager;
 import androidx.fragment.app.FragmentPagerAdapter;
 
 import com.android.internal.util.CollectionUtils;
 import com.android.settings.R;
-import com.android.settings.core.InstrumentedFragment;
+import com.android.settings.SettingsPreferenceFragment;
 import com.android.settings.network.ActiveSubscriptionsListener;
 import com.android.settings.network.SubscriptionUtil;
 import com.android.settings.network.ims.WifiCallingQueryImsState;
+import com.android.settings.network.telephony.MobileNetworkUtils;
 import com.android.settings.search.actionbar.SearchMenuController;
 import com.android.settings.support.actionbar.HelpResourceProvider;
 import com.android.settings.widget.RtlCompatibleViewPager;
@@ -54,7 +55,8 @@ import java.util.List;
  * "Wi-Fi Calling settings" screen. This is the container fragment which holds
  * {@link WifiCallingSettingsForSub} fragments.
  */
-public class WifiCallingSettings extends InstrumentedFragment implements HelpResourceProvider {
+public class WifiCallingSettings extends SettingsPreferenceFragment
+        implements HelpResourceProvider {
     private static final String TAG = "WifiCallingSettings";
     private int mConstructionSubId;
     private List<SubscriptionInfo> mSil;
@@ -92,6 +94,9 @@ public class WifiCallingSettings extends InstrumentedFragment implements HelpRes
     @Override
     public View onCreateView(LayoutInflater inflater, ViewGroup container,
             Bundle savedInstanceState) {
+        if (MobileNetworkUtils.isMobileNetworkUserRestricted(getActivity())) {
+            return new ViewStub(getActivity());
+        }
         final View view = inflater.inflate(R.layout.wifi_calling_settings_tabs, container, false);
 
         mTabLayout = view.findViewById(R.id.sliding_tabs);
@@ -138,6 +143,10 @@ public class WifiCallingSettings extends InstrumentedFragment implements HelpRes
     public void onCreate(Bundle icicle) {
         mConstructionSubId = getConstructionSubId(icicle);
         super.onCreate(icicle);
+        if (MobileNetworkUtils.isMobileNetworkUserRestricted(getActivity())) {
+            finish();
+            return;
+        }
         Log.d(TAG, "SubId=" + mConstructionSubId);
 
         if (mConstructionSubId != SubscriptionManager.INVALID_SUBSCRIPTION_ID) {
@@ -248,7 +257,10 @@ public class WifiCallingSettings extends InstrumentedFragment implements HelpRes
         for (SubscriptionInfo subInfo : subInfoList) {
             int subId = subInfo.getSubscriptionId();
             try {
-                if (queryImsState(subId).isWifiCallingProvisioned()) {
+                if (MobileNetworkUtils.isWifiCallingEnabled(
+                        getContext(),
+                        subId,
+                        queryImsState(subId))) {
                     selectedList.add(subInfo);
                 }
             } catch (Exception exception) {}
@@ -317,17 +329,7 @@ public class WifiCallingSettings extends InstrumentedFragment implements HelpRes
         }
 
         // close this fragment
-        finish();
-    }
-
-    protected void finish() {
-        FragmentActivity activity = getActivity();
-        if (activity == null) return;
-        if (getFragmentManager().getBackStackEntryCount() > 0) {
-            getFragmentManager().popBackStack();
-        } else {
-            activity.finish();
-        }
+        finishFragment();
     }
 
     protected int [] subscriptionIdList(List<SubscriptionInfo> subInfoList) {

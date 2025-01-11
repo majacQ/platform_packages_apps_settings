@@ -16,8 +16,7 @@
 
 package com.android.settings.notification.zen;
 
-import android.annotation.Nullable;
-import android.app.ActivityManager;
+import android.app.Flags;
 import android.app.NotificationManager;
 import android.app.settings.SettingsEnums;
 import android.content.Context;
@@ -28,9 +27,10 @@ import android.os.Bundle;
 import android.os.UserHandle;
 import android.os.UserManager;
 import android.util.ArraySet;
-import android.view.View;
 import android.util.Log;
+import android.view.View;
 
+import androidx.annotation.Nullable;
 import androidx.preference.PreferenceScreen;
 
 import com.android.settings.R;
@@ -40,8 +40,8 @@ import com.android.settings.applications.specialaccess.zenaccess.ZenAccessDetail
 import com.android.settings.applications.specialaccess.zenaccess.ZenAccessSettingObserverMixin;
 import com.android.settings.search.BaseSearchIndexProvider;
 import com.android.settings.widget.EmptyTextSettings;
+import com.android.settings.widget.RestrictedAppPreference;
 import com.android.settingslib.search.SearchIndexable;
-import com.android.settingslib.widget.AppPreference;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -69,6 +69,9 @@ public class ZenAccessSettings extends EmptyTextSettings implements
         mContext = getActivity();
         mPkgMan = mContext.getPackageManager();
         mNoMan = mContext.getSystemService(NotificationManager.class);
+        requireActivity().setTitle(Flags.modesApi() && Flags.modesUi()
+                ? R.string.manage_zen_modes_access_title
+                : R.string.manage_zen_access_title);
         getSettingsLifecycle().addObserver(
                 new ZenAccessSettingObserverMixin(getContext(), this /* listener */));
     }
@@ -76,7 +79,9 @@ public class ZenAccessSettings extends EmptyTextSettings implements
     @Override
     public void onViewCreated(View view, @Nullable Bundle savedInstanceState) {
         super.onViewCreated(view, savedInstanceState);
-        setEmptyText(R.string.zen_access_empty_text);
+        setEmptyText(Flags.modesApi() && Flags.modesUi()
+                ? R.string.zen_modes_access_empty_text
+                : R.string.zen_access_empty_text);
     }
 
     @Override
@@ -123,7 +128,7 @@ public class ZenAccessSettings extends EmptyTextSettings implements
         for (ApplicationInfo app : apps) {
             final String pkg = app.packageName;
             final CharSequence label = app.loadLabel(mPkgMan);
-            final AppPreference pref = new AppPreference(getPrefContext());
+            final RestrictedAppPreference pref = new RestrictedAppPreference(getPrefContext());
             pref.setKey(pkg);
             pref.setIcon(app.loadIcon(mPkgMan));
             pref.setTitle(label);
@@ -134,11 +139,15 @@ public class ZenAccessSettings extends EmptyTextSettings implements
             } else {
                 // Not auto approved, update summary according to notification backend.
                 pref.setSummary(getPreferenceSummary(pkg));
+                pref.checkEcmRestrictionAndSetDisabled(
+                        android.Manifest.permission.MANAGE_NOTIFICATIONS, app.packageName);
             }
             pref.setOnPreferenceClickListener(preference -> {
                 AppInfoBase.startAppInfoFragment(
                         ZenAccessDetails.class  /* fragment */,
-                        R.string.manage_zen_access_title /* titleRes */,
+                        getString(Flags.modesApi() && Flags.modesUi()
+                                ? R.string.manage_zen_modes_access_title
+                                : R.string.manage_zen_access_title),
                         pkg,
                         app.uid,
                         this /* source */,
@@ -153,7 +162,7 @@ public class ZenAccessSettings extends EmptyTextSettings implements
 
     /**
      * @return the summary for the current state of whether the app associated with the given
-     * {@param packageName} is allowed to enter picture-in-picture.
+     * {@param packageName} is allowed to manage DND / Priority Modes.
      */
     private int getPreferenceSummary(String packageName) {
         final boolean enabled = ZenAccessController.hasAccess(getContext(), packageName);

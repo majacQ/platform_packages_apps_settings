@@ -33,7 +33,6 @@ import static android.telephony.TelephonyManager.EXTRA_SUBSCRIPTION_ID;
 import static android.telephony.data.ApnSetting.TYPE_MMS;
 
 import static com.android.settings.Utils.SETTINGS_PACKAGE_NAME;
-import static com.android.settings.sim.SimDialogActivity.PICK_DISMISS;
 
 import android.app.Notification;
 import android.app.NotificationChannel;
@@ -49,14 +48,28 @@ import android.telephony.SubscriptionManager;
 import android.telephony.TelephonyManager;
 import android.util.Log;
 
+import androidx.annotation.NonNull;
+import androidx.annotation.WorkerThread;
+
 import com.android.internal.annotations.VisibleForTesting;
 import com.android.settings.HelpTrampoline;
 import com.android.settings.R;
+import com.android.settings.network.SatelliteRepository;
 import com.android.settings.network.SubscriptionUtil;
-import com.android.settings.network.telephony.MobileNetworkActivity;
+
+import com.google.common.util.concurrent.ListenableFuture;
+
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executor;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 public class SimSelectNotification extends BroadcastReceiver {
     private static final String TAG = "SimSelectNotification";
+
+    private static final int DEFAULT_TIMEOUT_MS = 1000;
+
     @VisibleForTesting
     public static final int SIM_SELECT_NOTIFICATION_ID = 1;
     @VisibleForTesting
@@ -78,6 +91,10 @@ public class SimSelectNotification extends BroadcastReceiver {
 
     @Override
     public void onReceive(Context context, Intent intent) {
+        if (!SubscriptionUtil.isSimHardwareVisible(context)) {
+            Log.w(TAG, "Received unexpected intent with null action.");
+            return;
+        }
         String action = intent.getAction();
 
         if (action == null) {
@@ -87,7 +104,7 @@ public class SimSelectNotification extends BroadcastReceiver {
 
         switch (action) {
             case TelephonyManager.ACTION_PRIMARY_SUBSCRIPTION_LIST_CHANGED:
-                onPrimarySubscriptionListChanged(context, intent);
+                PrimarySubscriptionListChangedService.scheduleJob(context, intent);
                 break;
             case Settings.ACTION_ENABLE_MMS_DATA_REQUEST:
                 onEnableMmsDataRequest(context, intent);
@@ -147,12 +164,41 @@ public class SimSelectNotification extends BroadcastReceiver {
         createEnableMmsNotification(context, notificationTitle, notificationSummary, subId);
     }
 
-    private void onPrimarySubscriptionListChanged(Context context, Intent intent) {
-        startSimSelectDialogIfNeeded(context, intent);
-        sendSimCombinationWarningIfNeeded(context, intent);
+    /**
+     * Handles changes to the primary subscription list, performing actions only
+     * if the device is not currently in a satellite session. This method is
+     * intended to be executed on a worker thread.
+     *
+     * @param context The application context
+     * @param intent  The intent signaling a primary subscription change
+     */
+    @WorkerThread
+    public static void onPrimarySubscriptionListChanged(@NonNull Context context,
+            @NonNull Intent intent) {
+        Log.d(TAG, "Checking satellite enabled status");
+        Executor executor = Executors.newSingleThreadExecutor();
+        ListenableFuture<Boolean> isSatelliteSessionStartedFuture =
+                new SatelliteRepository(context).requestIsSessionStarted(executor);
+        boolean isSatelliteSessionStarted = false;
+        try {
+            isSatelliteSessionStarted =
+                    isSatelliteSessionStartedFuture.get(DEFAULT_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+        } catch (InterruptedException | ExecutionException | TimeoutException e) {
+            Log.w(TAG, "Can't get satellite session status", e);
+        } finally {
+            if (isSatelliteSessionStarted) {
+                Log.i(TAG, "Device is in a satellite session.g Unable to handle primary"
+                        + " subscription list changes");
+            } else {
+                Log.i(TAG, "Device is not in a satellite session. Handle primary"
+                        + " subscription list changes");
+                startSimSelectDialogIfNeeded(context, intent);
+                sendSimCombinationWarningIfNeeded(context, intent);
+            }
+        }
     }
 
-    private void startSimSelectDialogIfNeeded(Context context, Intent intent) {
+    private static void startSimSelectDialogIfNeeded(Context context, Intent intent) {
         int dialogType = intent.getIntExtra(EXTRA_DEFAULT_SUBSCRIPTION_SELECT_TYPE,
                 EXTRA_DEFAULT_SUBSCRIPTION_SELECT_TYPE_NONE);
 
@@ -165,10 +211,7 @@ public class SimSelectNotification extends BroadcastReceiver {
 
         // If the dialog type is to dismiss.
         if (dialogType == EXTRA_DEFAULT_SUBSCRIPTION_SELECT_TYPE_DISMISS) {
-            Intent newIntent = new Intent(context, SimDialogActivity.class);
-            newIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            newIntent.putExtra(SimDialogActivity.DIALOG_TYPE_KEY, PICK_DISMISS);
-            context.startActivity(newIntent);
+            SimDialogProhibitService.dismissDialog(context);
             return;
         }
 
@@ -195,7 +238,7 @@ public class SimSelectNotification extends BroadcastReceiver {
         }
     }
 
-    private void sendSimCombinationWarningIfNeeded(Context context, Intent intent) {
+    private static void sendSimCombinationWarningIfNeeded(Context context, Intent intent) {
         final int warningType = intent.getIntExtra(EXTRA_SIM_COMBINATION_WARNING_TYPE,
                 EXTRA_SIM_COMBINATION_WARNING_TYPE_NONE);
 
@@ -208,7 +251,7 @@ public class SimSelectNotification extends BroadcastReceiver {
         }
     }
 
-    private void createSimSelectNotification(Context context){
+    private static void createSimSelectNotification(Context context) {
         final Resources resources = context.getResources();
 
         NotificationChannel notificationChannel = new NotificationChannel(
@@ -218,11 +261,11 @@ public class SimSelectNotification extends BroadcastReceiver {
 
         Notification.Builder builder =
                 new Notification.Builder(context, SIM_SELECT_NOTIFICATION_CHANNEL)
-                .setSmallIcon(R.drawable.ic_sim_alert)
-                .setColor(context.getColor(R.color.sim_noitification))
-                .setContentTitle(resources.getText(R.string.sim_notification_title))
-                .setContentText(resources.getText(R.string.sim_notification_summary))
-                .setAutoCancel(true);
+                        .setSmallIcon(R.drawable.ic_sim_alert)
+                        .setColor(context.getColor(R.color.sim_noitification))
+                        .setContentTitle(resources.getText(R.string.sim_notification_title))
+                        .setContentText(resources.getText(R.string.sim_notification_summary))
+                        .setAutoCancel(true);
         Intent resultIntent = new Intent(Settings.ACTION_WIRELESS_SETTINGS);
         resultIntent.setPackage(SETTINGS_PACKAGE_NAME);
         resultIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
@@ -261,9 +304,8 @@ public class SimSelectNotification extends BroadcastReceiver {
 
         // Create the pending intent that will lead to the subscription setting page.
         Intent resultIntent = new Intent(Settings.ACTION_MMS_MESSAGE_SETTING);
-        resultIntent.setClass(context, MobileNetworkActivity.class);
+        resultIntent.setPackage(SETTINGS_PACKAGE_NAME);
         resultIntent.putExtra(Settings.EXTRA_SUB_ID, subId);
-        resultIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         PendingIntent resultPendingIntent = PendingIntent.getActivity(context, 0, resultIntent,
                 PendingIntent.FLAG_CANCEL_CURRENT | PendingIntent.FLAG_IMMUTABLE);
         builder.setContentIntent(resultPendingIntent);
@@ -281,7 +323,7 @@ public class SimSelectNotification extends BroadcastReceiver {
         notificationManager.cancel(ENABLE_MMS_NOTIFICATION_ID);
     }
 
-    private void createSimCombinationWarningNotification(Context context, Intent intent){
+    private static void createSimCombinationWarningNotification(Context context, Intent intent) {
         final Resources resources = context.getResources();
         final String simNames = intent.getStringExtra(EXTRA_SIM_COMBINATION_NAMES);
 

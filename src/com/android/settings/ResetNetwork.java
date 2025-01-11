@@ -16,16 +16,15 @@
 
 package com.android.settings;
 
-import android.annotation.Nullable;
 import android.app.Activity;
 import android.app.settings.SettingsEnums;
+import android.content.BroadcastReceiver;
 import android.content.ContentResolver;
 import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.res.Resources;
 import android.os.Bundle;
-import android.os.UserHandle;
-import android.os.UserManager;
 import android.provider.Settings;
 import android.provider.Settings.Global;
 import android.telephony.SubscriptionInfo;
@@ -42,16 +41,21 @@ import android.widget.Button;
 import android.widget.CheckBox;
 import android.widget.Spinner;
 
+import androidx.activity.result.ActivityResult;
+import androidx.activity.result.ActivityResultLauncher;
+import androidx.activity.result.contract.ActivityResultContracts;
+import androidx.annotation.Nullable;
 import androidx.annotation.VisibleForTesting;
 
+import com.android.internal.telephony.flags.Flags;
 import com.android.settings.core.InstrumentedFragment;
 import com.android.settings.core.SubSettingLauncher;
-import com.android.settings.enterprise.ActionDisabledByAdminDialogHelper;
+import com.android.settings.network.ResetNetworkRestrictionViewBuilder;
 import com.android.settings.network.SubscriptionUtil;
+import com.android.settings.network.telephony.EuiccRacConnectivityDialogActivity;
 import com.android.settings.password.ChooseLockSettingsHelper;
 import com.android.settings.password.ConfirmLockPattern;
-import com.android.settingslib.RestrictedLockUtils.EnforcedAdmin;
-import com.android.settingslib.RestrictedLockUtilsInternal;
+import com.android.settings.system.reset.ResetNetworkConfirm;
 import com.android.settingslib.development.DevelopmentSettingsEnabler;
 
 import java.util.ArrayList;
@@ -65,7 +69,7 @@ import java.util.Optional;
  * prompt, followed by a keyguard pattern trace if the user has defined one, followed by a final
  * strongly-worded "THIS WILL RESET EVERYTHING" prompt.  If at any time the phone is allowed to go
  * to sleep, is locked, et cetera, then the confirmation sequence is abandoned.
- *
+ * <p>
  * This is the initial screen.
  */
 public class ResetNetwork extends InstrumentedFragment {
@@ -74,23 +78,41 @@ public class ResetNetwork extends InstrumentedFragment {
     // Arbitrary to avoid conficts
     private static final int KEYGUARD_REQUEST = 55;
 
+    private ActivityResultLauncher mActivityResultLauncher;
     private List<SubscriptionInfo> mSubscriptions;
 
     private View mContentView;
     private Spinner mSubscriptionSpinner;
     private Button mInitiateButton;
-    @VisibleForTesting View mEsimContainer;
-    @VisibleForTesting CheckBox mEsimCheckbox;
+    @VisibleForTesting
+    View mEsimContainer;
+    @VisibleForTesting
+    CheckBox mEsimCheckbox;
+
+    private BroadcastReceiver mDefaultSubChangeReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            if (intent.getAction() != SubscriptionManager.ACTION_DEFAULT_SUBSCRIPTION_CHANGED) {
+                return;
+            }
+            establishInitialState(getActiveSubscriptionInfoList());
+        }
+    };
 
     @Override
     public void onCreate(@Nullable Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        getActivity().setTitle(R.string.reset_network_title);
+        getActivity().setTitle(R.string.reset_mobile_network_settings_title);
+
+        mActivityResultLauncher = registerForActivityResult(
+                new ActivityResultContracts.StartActivityForResult(),
+                result -> onActivityLauncherResult(result));
     }
 
     /**
      * Keyguard validation is run using the standard {@link ConfirmLockPattern}
      * component as a subactivity
+     *
      * @param request the request code to be returned once confirmation finishes
      * @return true if confirmation launched
      */
@@ -99,23 +121,17 @@ public class ResetNetwork extends InstrumentedFragment {
         final ChooseLockSettingsHelper.Builder builder =
                 new ChooseLockSettingsHelper.Builder(getActivity(), this);
         return builder.setRequestCode(request)
-                .setTitle(res.getText(R.string.reset_network_title))
+                .setTitle(res.getText(R.string.reset_mobile_network_settings_title))
+                .setActivityResultLauncher(mActivityResultLauncher)
                 .show();
     }
 
-    @Override
-    public void onActivityResult(int requestCode, int resultCode, Intent data) {
-        super.onActivityResult(requestCode, resultCode, data);
-
-        if (requestCode != KEYGUARD_REQUEST) {
-            return;
-        }
-
+    public void onActivityLauncherResult(ActivityResult result) {
         // If the user entered a valid keyguard trace, present the final
         // confirmation prompt; otherwise, go back to the initial state.
-        if (resultCode == Activity.RESULT_OK) {
+        if (result.getResultCode() == Activity.RESULT_OK) {
             showFinalConfirmation();
-        } else {
+        } else if (mContentView != null) {
             establishInitialState(getActiveSubscriptionInfoList());
         }
     }
@@ -123,20 +139,47 @@ public class ResetNetwork extends InstrumentedFragment {
     @VisibleForTesting
     void showFinalConfirmation() {
         Bundle args = new Bundle();
+        Context context = getContext();
+        boolean resetSims = false;
+
+        // TODO(b/317276437) Simplify the logic once flag is released
+        int resetOptions = ResetNetworkRequest.RESET_CONNECTIVITY_MANAGER
+                        | ResetNetworkRequest.RESET_VPN_MANAGER;
+        if (Flags.resetMobileNetworkSettings()) {
+            resetOptions |= ResetNetworkRequest.RESET_IMS_STACK;
+            resetOptions |= ResetNetworkRequest.RESET_PHONE_PROCESS;
+        }
+        ResetNetworkRequest request = new ResetNetworkRequest(resetOptions);
         if (mSubscriptions != null && mSubscriptions.size() > 0) {
             int selectedIndex = mSubscriptionSpinner.getSelectedItemPosition();
             SubscriptionInfo subscription = mSubscriptions.get(selectedIndex);
-            args.putInt(SubscriptionManager.EXTRA_SUBSCRIPTION_INDEX,
-                    subscription.getSubscriptionId());
+            int subId = subscription.getSubscriptionId();
+            request.setResetTelephonyAndNetworkPolicyManager(subId)
+                    .setResetApn(subId);
+            if (Flags.resetMobileNetworkSettings()) {
+                request.setResetImsSubId(subId);
+            }
         }
-        args.putBoolean(MainClear.ERASE_ESIMS_EXTRA,
-                mEsimContainer.getVisibility() == View.VISIBLE && mEsimCheckbox.isChecked());
-        new SubSettingLauncher(getContext())
-                .setDestination(ResetNetworkConfirm.class.getName())
-                .setArguments(args)
-                .setTitleRes(R.string.reset_network_confirm_title)
-                .setSourceMetricsCategory(getMetricsCategory())
-                .launch();
+        if (mEsimContainer.getVisibility() == View.VISIBLE && mEsimCheckbox.isChecked()) {
+            resetSims = true;
+            request.setResetEsim(context.getPackageName()).writeIntoBundle(args);
+        } else {
+            request.writeIntoBundle(args);
+        }
+
+        SubSettingLauncher launcher =
+                new SubSettingLauncher(context)
+                        .setDestination(ResetNetworkConfirm.class.getName())
+                        .setArguments(args)
+                        .setTitleRes(R.string.reset_mobile_network_settings_confirm_title)
+                        .setSourceMetricsCategory(getMetricsCategory());
+
+        if (resetSims && SubscriptionUtil.shouldShowRacDialogWhenErasingAllEsims(context)) {
+            context.startActivity(
+                    EuiccRacConnectivityDialogActivity.getIntent(context, launcher.toIntent()));
+        } else {
+            launcher.launch();
+        }
     }
 
     /**
@@ -188,7 +231,6 @@ public class ResetNetwork extends InstrumentedFragment {
             }
 
             int selectedIndex = 0;
-            int size = mSubscriptions.size();
             List<String> subscriptionNames = new ArrayList<>();
             for (SubscriptionInfo record : mSubscriptions) {
                 if (record.getSubscriptionId() == defaultSubscription) {
@@ -201,7 +243,8 @@ public class ResetNetwork extends InstrumentedFragment {
                     name = record.getNumber();
                 }
                 if (TextUtils.isEmpty(name)) {
-                    name = record.getCarrierName().toString();
+                    CharSequence carrierName = record.getCarrierName();
+                    name = TextUtils.isEmpty(carrierName) ? "" : carrierName.toString();
                 }
                 if (TextUtils.isEmpty(name)) {
                     name = String.format("MCC:%s MNC:%s Slot:%s Id:%s", record.getMcc(),
@@ -238,6 +281,9 @@ public class ResetNetwork extends InstrumentedFragment {
     }
 
     private List<SubscriptionInfo> getActiveSubscriptionInfoList() {
+        if (!SubscriptionUtil.isSimHardwareVisible(getActivity())) {
+            return Collections.emptyList();
+        }
         SubscriptionManager mgr = getActivity().getSystemService(SubscriptionManager.class);
         if (mgr == null) {
             Log.w(TAG, "No SubscriptionManager");
@@ -250,6 +296,12 @@ public class ResetNetwork extends InstrumentedFragment {
     @Override
     public void onResume() {
         super.onResume();
+        getContext().registerReceiver(mDefaultSubChangeReceiver,
+                new IntentFilter(SubscriptionManager.ACTION_DEFAULT_SUBSCRIPTION_CHANGED));
+
+        if (mContentView == null) {
+            return;
+        }
 
         // update options if subcription has been changed
         List<SubscriptionInfo> updatedSubscriptions = getActiveSubscriptionInfoList();
@@ -262,10 +314,19 @@ public class ResetNetwork extends InstrumentedFragment {
         establishInitialState(updatedSubscriptions);
     }
 
+    @Override
+    public void onPause() {
+        super.onPause();
+        getContext().unregisterReceiver(mDefaultSubChangeReceiver);
+    }
+
     private boolean showEuiccSettings(Context context) {
+        if (!SubscriptionUtil.isSimHardwareVisible(context)) {
+            return false;
+        }
         EuiccManager euiccManager =
                 (EuiccManager) context.getSystemService(Context.EUICC_SERVICE);
-        if (!euiccManager.isEnabled()) {
+        if (euiccManager == null || !euiccManager.isEnabled()) {
             return false;
         }
         ContentResolver resolver = context.getContentResolver();
@@ -276,21 +337,13 @@ public class ResetNetwork extends InstrumentedFragment {
     @Override
     public View onCreateView(LayoutInflater inflater, ViewGroup container,
             Bundle savedInstanceState) {
-        final UserManager um = UserManager.get(getActivity());
-        final EnforcedAdmin admin = RestrictedLockUtilsInternal.checkIfRestrictionEnforced(
-                getActivity(), UserManager.DISALLOW_NETWORK_RESET, UserHandle.myUserId());
-        if (!um.isAdminUser() || RestrictedLockUtilsInternal.hasBaseUserRestriction(getActivity(),
-                UserManager.DISALLOW_NETWORK_RESET, UserHandle.myUserId())) {
-            return inflater.inflate(R.layout.network_reset_disallowed_screen, null);
-        } else if (admin != null) {
-            new ActionDisabledByAdminDialogHelper(getActivity())
-                    .prepareDialogBuilder(UserManager.DISALLOW_NETWORK_RESET, admin)
-                    .setOnDismissListener(__ -> getActivity().finish())
-                    .show();
-            return new View(getContext());
+        View view = (new ResetNetworkRestrictionViewBuilder(getActivity())).build();
+        if (view != null) {
+            Log.w(TAG, "Access deny.");
+            return view;
         }
 
-        mContentView = inflater.inflate(R.layout.reset_network, null);
+        mContentView = inflater.inflate(R.layout.reset_mobile_network_settings, null);
 
         establishInitialState(getActiveSubscriptionInfoList());
         return mContentView;

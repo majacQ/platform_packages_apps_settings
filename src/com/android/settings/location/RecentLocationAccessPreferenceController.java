@@ -20,16 +20,19 @@ import android.content.Intent;
 import android.icu.text.RelativeDateTimeFormatter;
 import android.os.UserHandle;
 import android.os.UserManager;
+import android.provider.DeviceConfig;
+import android.provider.Settings;
 
 import androidx.annotation.VisibleForTesting;
 import androidx.preference.Preference;
 import androidx.preference.PreferenceCategory;
 import androidx.preference.PreferenceScreen;
 
+import com.android.internal.config.sysui.SystemUiDeviceConfigFlags;
 import com.android.settings.R;
 import com.android.settings.dashboard.DashboardFragment;
 import com.android.settings.dashboard.profileselector.ProfileSelectFragment;
-import com.android.settingslib.location.RecentLocationAccesses;
+import com.android.settingslib.applications.RecentAppOpsAccess;
 import com.android.settingslib.utils.StringUtil;
 import com.android.settingslib.widget.AppPreference;
 
@@ -42,9 +45,11 @@ import java.util.List;
 public class RecentLocationAccessPreferenceController extends LocationBasePreferenceController {
     public static final int MAX_APPS = 3;
     @VisibleForTesting
-    RecentLocationAccesses mRecentLocationApps;
+    RecentAppOpsAccess mRecentLocationApps;
     private PreferenceCategory mCategoryRecentLocationRequests;
     private int mType = ProfileSelectFragment.ProfileType.ALL;
+    private boolean mShowSystem = false;
+    private boolean mSystemSettingChanged = false;
 
     private static class PackageEntryClickedListener implements
             Preference.OnPreferenceClickListener {
@@ -62,6 +67,7 @@ public class RecentLocationAccessPreferenceController extends LocationBasePrefer
         @Override
         public boolean onPreferenceClick(Preference preference) {
             final Intent intent = new Intent(Intent.ACTION_MANAGE_APP_PERMISSION);
+            intent.setPackage(mContext.getPackageManager().getPermissionControllerPackageName());
             intent.putExtra(Intent.EXTRA_PERMISSION_GROUP_NAME, LOCATION);
             intent.putExtra(Intent.EXTRA_PACKAGE_NAME, mPackage);
             intent.putExtra(Intent.EXTRA_USER, mUserHandle);
@@ -71,25 +77,44 @@ public class RecentLocationAccessPreferenceController extends LocationBasePrefer
     }
 
     public RecentLocationAccessPreferenceController(Context context, String key) {
-        this(context, key, new RecentLocationAccesses(context));
+        this(context, key, RecentAppOpsAccess.createForLocation(context));
     }
 
     @VisibleForTesting
     public RecentLocationAccessPreferenceController(Context context, String key,
-            RecentLocationAccesses recentLocationApps) {
+            RecentAppOpsAccess recentLocationApps) {
         super(context, key);
         mRecentLocationApps = recentLocationApps;
+        mShowSystem = DeviceConfig.getBoolean(DeviceConfig.NAMESPACE_PRIVACY,
+                SystemUiDeviceConfigFlags.PROPERTY_LOCATION_INDICATORS_SMALL_ENABLED, false)
+                ? Settings.Secure.getInt(mContext.getContentResolver(),
+                Settings.Secure.LOCATION_SHOW_SYSTEM_OPS, 0) == 1
+                : false;
     }
 
     @Override
     public void displayPreference(PreferenceScreen screen) {
         super.displayPreference(screen);
         mCategoryRecentLocationRequests = screen.findPreference(getPreferenceKey());
+        mLocationEnabler.refreshLocationMode();
+        loadRecentAccesses();
+    }
+
+    @Override
+    public void updateState(Preference preference) {
+        // Only reload the recent accesses in updateState if the system setting has changed.
+        if (mSystemSettingChanged) {
+            loadRecentAccesses();
+            mSystemSettingChanged = false;
+        }
+    }
+
+    private void loadRecentAccesses() {
+        mCategoryRecentLocationRequests.removeAll();
         final Context prefContext = mCategoryRecentLocationRequests.getContext();
-        final List<RecentLocationAccesses.Access> recentLocationAccesses = new ArrayList<>();
+        final List<RecentAppOpsAccess.Access> recentLocationAccesses = new ArrayList<>();
         final UserManager userManager = UserManager.get(mContext);
-        for (RecentLocationAccesses.Access access : mRecentLocationApps.getAppListSorted(
-                /* showSystemApps= */ false)) {
+        for (RecentAppOpsAccess.Access access : mRecentLocationApps.getAppListSorted(mShowSystem)) {
             if (isRequestMatchesProfileType(userManager, access, mType)) {
                 recentLocationAccesses.add(access);
                 if (recentLocationAccesses.size() == MAX_APPS) {
@@ -100,7 +125,7 @@ public class RecentLocationAccessPreferenceController extends LocationBasePrefer
 
         if (recentLocationAccesses.size() > 0) {
             // Add preferences to container in original order (already sorted by recency).
-            for (RecentLocationAccesses.Access access : recentLocationAccesses) {
+            for (RecentAppOpsAccess.Access access : recentLocationAccesses) {
                 mCategoryRecentLocationRequests.addPreference(
                         createAppPreference(prefContext, access, mFragment));
             }
@@ -120,6 +145,15 @@ public class RecentLocationAccessPreferenceController extends LocationBasePrefer
     }
 
     /**
+     * Clears the list of apps which recently accessed location from the screen.
+     */
+    public void clearPreferenceList() {
+        if (mCategoryRecentLocationRequests != null) {
+            mCategoryRecentLocationRequests.removeAll();
+        }
+    }
+
+    /**
      * Initialize {@link ProfileSelectFragment.ProfileType} of the controller
      *
      * @param type {@link ProfileSelectFragment.ProfileType} of the controller.
@@ -132,24 +166,24 @@ public class RecentLocationAccessPreferenceController extends LocationBasePrefer
      * Create a {@link AppPreference}
      */
     public static AppPreference createAppPreference(Context prefContext,
-            RecentLocationAccesses.Access access, DashboardFragment fragment) {
+            RecentAppOpsAccess.Access access, DashboardFragment fragment) {
         final AppPreference pref = new AppPreference(prefContext);
         pref.setIcon(access.icon);
         pref.setTitle(access.label);
         pref.setSummary(StringUtil.formatRelativeTime(prefContext,
                 System.currentTimeMillis() - access.accessFinishTime, false,
-                RelativeDateTimeFormatter.Style.SHORT));
+                RelativeDateTimeFormatter.Style.LONG));
         pref.setOnPreferenceClickListener(new PackageEntryClickedListener(
                 fragment.getContext(), access.packageName, access.userHandle));
         return pref;
     }
 
     /**
-     * Return if the {@link RecentLocationAccesses.Access} matches current UI
-     * {@ProfileSelectFragment.ProfileType}
+     * Return if the {@link RecentAppOpsAccess.Access} matches current UI
+     * {@link ProfileSelectFragment.ProfileType}
      */
     public static boolean isRequestMatchesProfileType(UserManager userManager,
-            RecentLocationAccesses.Access access, @ProfileSelectFragment.ProfileType int type) {
+            RecentAppOpsAccess.Access access, @ProfileSelectFragment.ProfileType int type) {
 
         final boolean isWorkProfile = userManager.isManagedProfile(
                 access.userHandle.getIdentifier());
@@ -160,5 +194,15 @@ public class RecentLocationAccessPreferenceController extends LocationBasePrefer
             return true;
         }
         return false;
+    }
+
+    /**
+     * Update the state of the showSystem setting flag and load the new results.
+     */
+    void updateShowSystem() {
+        mSystemSettingChanged = true;
+        mShowSystem = !mShowSystem;
+        clearPreferenceList();
+        loadRecentAccesses();
     }
 }

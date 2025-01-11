@@ -16,10 +16,18 @@
 
 package com.android.settings.location;
 
+import static android.app.admin.DevicePolicyResources.Strings.Settings.WORK_PROFILE_LOCATION_SWITCH_TITLE;
+
 import android.app.settings.SettingsEnums;
 import android.content.Context;
+import android.database.ContentObserver;
 import android.location.SettingInjectorService;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
+import android.os.SystemProperties;
+import android.provider.Settings;
+import android.util.Log;
 
 import androidx.preference.Preference;
 import androidx.preference.PreferenceGroup;
@@ -63,6 +71,15 @@ public class LocationSettings extends DashboardFragment implements
 
     private LocationSwitchBarController mSwitchBarController;
     private LocationEnabler mLocationEnabler;
+    private RecentLocationAccessPreferenceController mController;
+    private ContentObserver mContentObserver;
+
+    /**
+     * Read-only boot property used to enable/disable geolocation toggle as part of privacy hub
+     * feature for chrome.
+     */
+    private static final String RO_BOOT_ENABLE_PRIVACY_HUB_FOR_CHROME =
+            "ro.boot.enable_privacy_hub_for_chrome";
 
     @Override
     public int getMetricsCategory() {
@@ -75,10 +92,21 @@ public class LocationSettings extends DashboardFragment implements
         final SettingsActivity activity = (SettingsActivity) getActivity();
         final SettingsMainSwitchBar switchBar = activity.getSwitchBar();
         switchBar.setTitle(getContext().getString(R.string.location_settings_primary_switch_title));
+        updateChromeSwitchBarPreference(switchBar);
         switchBar.show();
         mSwitchBarController = new LocationSwitchBarController(activity, switchBar,
                 getSettingsLifecycle());
         mLocationEnabler = new LocationEnabler(getContext(), this, getSettingsLifecycle());
+        mContentObserver = new ContentObserver(new Handler(Looper.getMainLooper())) {
+            @Override
+            public void onChange(boolean selfChange) {
+                mController.updateShowSystem();
+            }
+        };
+        getContentResolver().registerContentObserver(
+                Settings.Secure.getUriFor(
+                        Settings.Secure.LOCATION_SHOW_SYSTEM_OPS), /* notifyForDescendants= */
+                false, mContentObserver);
     }
 
     @Override
@@ -86,15 +114,31 @@ public class LocationSettings extends DashboardFragment implements
         super.onAttach(context);
 
         use(AppLocationPermissionPreferenceController.class).init(this);
-        use(RecentLocationAccessPreferenceController.class).init(this);
+        mController = use(RecentLocationAccessPreferenceController.class);
+        mController.init(this);
         use(RecentLocationAccessSeeAllButtonPreferenceController.class).init(this);
         use(LocationForWorkPreferenceController.class).init(this);
         use(LocationSettingsFooterPreferenceController.class).init(this);
+        use(LocationForPrivateProfilePreferenceController.class).init(this);
+    }
+
+    @Override
+    public void onDestroy() {
+        super.onDestroy();
+        getContentResolver().unregisterContentObserver(mContentObserver);
     }
 
     @Override
     protected int getPreferenceScreenResId() {
         return R.xml.location_settings;
+    }
+
+    @Override
+    public void onCreate(Bundle icicle) {
+        super.onCreate(icicle);
+
+        replaceEnterpriseStringTitle("managed_profile_location_switch",
+                WORK_PROFILE_LOCATION_SWITCH_TITLE, R.string.managed_profile_location_switch_title);
     }
 
     @Override
@@ -128,4 +172,17 @@ public class LocationSettings extends DashboardFragment implements
      */
     public static final BaseSearchIndexProvider SEARCH_INDEX_DATA_PROVIDER =
             new BaseSearchIndexProvider(R.xml.location_settings);
+
+    /**
+     * Update switchbar config in case of Chrome devices and location is managed by chrome.
+     */
+    private void updateChromeSwitchBarPreference(final SettingsMainSwitchBar switchBar) {
+        if (getContext().getResources().getBoolean(R.bool.config_disable_location_toggle_for_chrome)
+                && SystemProperties.getBoolean(RO_BOOT_ENABLE_PRIVACY_HUB_FOR_CHROME, false)) {
+            Log.i(TAG, "Disabling location toggle for chrome devices");
+            switchBar.setClickable(false);
+            switchBar.setTooltipText(getResources().getString(
+                    R.string.location_settings_tooltip_text_for_chrome));
+        }
+    }
 }

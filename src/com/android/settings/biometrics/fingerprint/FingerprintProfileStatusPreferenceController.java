@@ -46,11 +46,16 @@ public class FingerprintProfileStatusPreferenceController
     @Override
     protected boolean isUserSupported() {
         return mProfileChallengeUserId != UserHandle.USER_NULL
-                && mLockPatternUtils.isSeparateProfileChallengeAllowed(mProfileChallengeUserId);
+                && mUm.isManagedProfile(mProfileChallengeUserId);
     }
 
     @Override
     protected int getUserId() {
         return mProfileChallengeUserId;
+    }
+
+    @Override
+    protected boolean isWorkProfileController() {
+        return true;
     }
 }

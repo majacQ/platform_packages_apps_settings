@@ -38,17 +38,20 @@ import android.util.Log;
 
 import androidx.annotation.VisibleForTesting;
 
-import com.android.settings.Settings.CreateShortcutActivity;
+import com.android.settings.activityembedding.ActivityEmbeddingUtils;
+import com.android.settings.homepage.DeepLinkHomepageActivity;
+import com.android.settings.search.SearchStateReceiver;
 import com.android.settingslib.utils.ThreadUtils;
 
 import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Listens to {@link Intent.ACTION_PRE_BOOT_COMPLETED} and {@link Intent.ACTION_USER_INITIALIZED}
+ * Listens to {@link Intent.ACTION_PRE_BOOT_COMPLETED} and {@link Intent.ACTION_USER_INITIALIZE}
  * performs setup steps for a managed profile (disables the launcher icon of the Settings app,
  * adds cross-profile intent filters for the appropriate Settings activities), disables the
- * webview setting for non-admin users, and updates the intent flags for any existing shortcuts.
+ * webview setting for non-admin users, updates the intent flags for any existing shortcuts and
+ * enables DeepLinkHomepageActivity for large screen devices.
  */
 public class SettingsInitialize extends BroadcastReceiver {
     private static final String TAG = "Settings";
@@ -62,8 +65,10 @@ public class SettingsInitialize extends BroadcastReceiver {
         UserInfo userInfo = um.getUserInfo(UserHandle.myUserId());
         final PackageManager pm = context.getPackageManager();
         managedProfileSetup(context, pm, broadcast, userInfo);
+        cloneProfileSetup(context, pm, userInfo);
         webviewSettingSetup(context, pm, userInfo);
         ThreadUtils.postOnBackgroundThread(() -> refreshExistingShortcuts(context));
+        enableTwoPaneDeepLinkActivityIfNecessary(pm, context);
     }
 
     private void managedProfileSetup(Context context, final PackageManager pm, Intent broadcast,
@@ -98,15 +103,15 @@ public class SettingsInitialize extends BroadcastReceiver {
             }
         }
 
-        // Disable launcher icon
-        ComponentName settingsComponentName = new ComponentName(context, Settings.class);
-        pm.setComponentEnabledSetting(settingsComponentName,
-                PackageManager.COMPONENT_ENABLED_STATE_DISABLED, PackageManager.DONT_KILL_APP);
-        // Disable shortcut picker.
-        ComponentName shortcutComponentName = new ComponentName(
-                context, CreateShortcutActivity.class);
-        pm.setComponentEnabledSetting(shortcutComponentName,
-                PackageManager.COMPONENT_ENABLED_STATE_DISABLED, PackageManager.DONT_KILL_APP);
+        Utils.disableComponentsToHideSettings(context, pm);
+    }
+
+    private void cloneProfileSetup(Context context, PackageManager pm, UserInfo userInfo) {
+        if (userInfo == null || !userInfo.isCloneProfile()) {
+            return;
+        }
+
+        Utils.disableComponentsToHideSettings(context, pm);
     }
 
     // Disable WebView Setting if the current user is not an admin
@@ -142,5 +147,18 @@ public class SettingsInitialize extends BroadcastReceiver {
             updates.add(updatedInfo);
         }
         shortcutManager.updateShortcuts(updates);
+    }
+
+    private void enableTwoPaneDeepLinkActivityIfNecessary(PackageManager pm, Context context) {
+        final ComponentName deepLinkHome = new ComponentName(context,
+                DeepLinkHomepageActivity.class);
+        final ComponentName searchStateReceiver = new ComponentName(context,
+                SearchStateReceiver.class);
+        final int enableState = ActivityEmbeddingUtils.isSettingsSplitEnabled(context)
+                ? PackageManager.COMPONENT_ENABLED_STATE_ENABLED
+                : PackageManager.COMPONENT_ENABLED_STATE_DISABLED;
+        pm.setComponentEnabledSetting(deepLinkHome, enableState, PackageManager.DONT_KILL_APP);
+        pm.setComponentEnabledSetting(searchStateReceiver, enableState,
+                PackageManager.DONT_KILL_APP);
     }
 }

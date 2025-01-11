@@ -16,10 +16,13 @@
 
 package com.android.settings.privacy;
 
-import android.annotation.NonNull;
 import android.content.Context;
-import android.provider.Settings;
+import android.os.UserHandle;
+import android.os.UserManager;
 
+import androidx.annotation.NonNull;
+
+import com.android.settings.R;
 import com.android.settings.core.TogglePreferenceController;
 import com.android.settings.utils.ContentCaptureUtils;
 
@@ -42,8 +45,19 @@ public final class EnableContentCapturePreferenceController extends TogglePrefer
 
     @Override
     public int getAvailabilityStatus() {
-        boolean available = ContentCaptureUtils.isFeatureAvailable()
-                && ContentCaptureUtils.getServiceSettingsComponentName() == null;
-        return available ? AVAILABLE : UNSUPPORTED_ON_DEVICE;
+        if (!ContentCaptureUtils.isFeatureAvailable()
+                || ContentCaptureUtils.getServiceSettingsComponentName() != null) {
+            return UNSUPPORTED_ON_DEVICE;
+        }
+        if (UserManager.get(mContext).hasUserRestrictionForUser(
+                UserManager.DISALLOW_CONTENT_CAPTURE, UserHandle.of(UserHandle.myUserId()))) {
+            return DISABLED_FOR_USER;
+        }
+        return AVAILABLE;
+    }
+
+    @Override
+    public int getSliceHighlightMenuRes() {
+        return R.string.menu_key_privacy;
     }
 }

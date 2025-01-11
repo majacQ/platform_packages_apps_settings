@@ -29,6 +29,7 @@ import com.android.internal.widget.LockPatternUtils;
 import com.android.settings.R;
 import com.android.settings.security.trustagent.TrustAgentManager.TrustAgentComponentInfo;
 import com.android.settings.testutils.FakeFeatureFactory;
+import com.android.settingslib.utils.StringUtil;
 
 import org.junit.Before;
 import org.junit.Test;
@@ -64,7 +65,7 @@ public class ManageTrustAgentsPreferenceControllerTest {
                 .thenReturn(mLockPatternUtils);
         when(mFeatureFactory.securityFeatureProvider.getTrustAgentManager())
                 .thenReturn(mTrustAgentManager);
-        mController = new ManageTrustAgentsPreferenceController(mContext);
+        mController = new ManageTrustAgentsPreferenceController(mContext, "key");
         mPreference = new Preference(mContext);
         mPreference.setKey(mController.getPreferenceKey());
     }
@@ -94,7 +95,7 @@ public class ManageTrustAgentsPreferenceControllerTest {
     @Test
     public void updateState_isSecure_noTrustAgent_shouldShowGenericSummary() {
         when(mLockPatternUtils.isSecure(anyInt())).thenReturn(true);
-        when(mTrustAgentManager.getActiveTrustAgents(mContext, mLockPatternUtils))
+        when(mTrustAgentManager.getActiveTrustAgents(mContext, mLockPatternUtils, false))
                 .thenReturn(new ArrayList<>());
 
         mController.updateState(mPreference);
@@ -107,20 +108,15 @@ public class ManageTrustAgentsPreferenceControllerTest {
     @Test
     public void updateState_isSecure_hasTrustAgent_shouldShowDetailedSummary() {
         when(mLockPatternUtils.isSecure(anyInt())).thenReturn(true);
-        when(mTrustAgentManager.getActiveTrustAgents(mContext, mLockPatternUtils))
+        when(mTrustAgentManager.getActiveTrustAgents(mContext, mLockPatternUtils, false))
                 .thenReturn(Collections.singletonList(new TrustAgentComponentInfo()));
 
         mController.updateState(mPreference);
 
         assertThat(mPreference.isEnabled()).isTrue();
         assertThat(mPreference.getSummary())
-                .isEqualTo(mContext.getResources().getQuantityString(
-                        R.plurals.manage_trust_agents_summary_on, 1, 1));
-    }
-
-    @Test
-    public void getPreferenceKey_byDefault_returnsDefaultValue() {
-        assertThat(mController.getPreferenceKey()).isEqualTo("manage_trust_agents");
+                .isEqualTo(StringUtil.getIcuPluralsString(mContext, 1,
+                        R.string.manage_trust_agents_summary_on));
     }
 
     @Test

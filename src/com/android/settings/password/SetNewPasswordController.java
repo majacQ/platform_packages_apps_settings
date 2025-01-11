@@ -21,8 +21,8 @@ import static android.app.admin.DevicePolicyManager.KEYGUARD_DISABLE_FACE;
 import static android.app.admin.DevicePolicyManager.KEYGUARD_DISABLE_FINGERPRINT;
 
 import static com.android.internal.util.Preconditions.checkNotNull;
+import static com.android.settings.password.ChooseLockSettingsHelper.EXTRA_KEY_FINGERPRINT_ENROLLMENT_ONLY;
 
-import android.annotation.Nullable;
 import android.app.ActivityManager;
 import android.app.admin.DevicePolicyManager;
 import android.content.Context;
@@ -34,9 +34,9 @@ import android.os.Bundle;
 import android.os.IBinder;
 import android.os.UserManager;
 
+import androidx.annotation.Nullable;
 import androidx.annotation.VisibleForTesting;
 
-import com.android.internal.widget.LockPatternUtils;
 import com.android.settings.Utils;
 
 /**
@@ -68,21 +68,22 @@ final class SetNewPasswordController {
     public static SetNewPasswordController create(Context context, Ui ui, Intent intent,
             IBinder activityToken) {
         // Trying to figure out which user is setting new password. If it is
-        // ACTION_SET_NEW_PARENT_PROFILE_PASSWORD or the calling user is not allowed to set
-        // separate profile challenge, it is the current user to set new password. Otherwise,
-        // it is the user who starts this activity setting new password.
-        int userId = ActivityManager.getCurrentUser();
+        // ACTION_SET_NEW_PARENT_PROFILE_PASSWORD, it is the current user to set
+        // new password. Otherwise, it is the user who starts this activity
+        // setting new password.
+        final int userId;
         if (ACTION_SET_NEW_PASSWORD.equals(intent.getAction())) {
-            final int callingUserId = Utils.getSecureTargetUser(activityToken,
+            userId = Utils.getSecureTargetUser(activityToken,
                     UserManager.get(context), null, intent.getExtras()).getIdentifier();
-            final LockPatternUtils lockPatternUtils = new LockPatternUtils(context);
-            if (lockPatternUtils.isSeparateProfileChallengeAllowed(callingUserId)) {
-                userId = callingUserId;
-            }
+        } else {
+            userId = ActivityManager.getCurrentUser();
         }
         // Create a wrapper of FingerprintManager for testing, see IFingerPrintManager for details.
         final FingerprintManager fingerprintManager = Utils.getFingerprintManagerOrNull(context);
-        final FaceManager faceManager = Utils.getFaceManagerOrNull(context);
+        final FaceManager faceManager =
+                !intent.getBooleanExtra(EXTRA_KEY_FINGERPRINT_ENROLLMENT_ONLY, false)
+                        ? Utils.getFaceManagerOrNull(context)
+                        : null;
         return new SetNewPasswordController(userId,
                 context.getPackageManager(),
                 fingerprintManager, faceManager,

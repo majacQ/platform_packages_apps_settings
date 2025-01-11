@@ -17,6 +17,7 @@ package com.android.settings.bluetooth;
 
 import android.bluetooth.BluetoothClass;
 import android.bluetooth.BluetoothDevice;
+import android.bluetooth.BluetoothProfile;
 import android.content.Context;
 import android.content.Intent;
 import android.text.Editable;
@@ -28,6 +29,7 @@ import androidx.annotation.VisibleForTesting;
 
 import com.android.settings.R;
 import com.android.settings.bluetooth.BluetoothPairingDialogFragment.BluetoothPairingDialogListener;
+import com.android.settingslib.bluetooth.BluetoothUtils;
 import com.android.settingslib.bluetooth.CachedBluetoothDevice;
 import com.android.settingslib.bluetooth.LocalBluetoothManager;
 import com.android.settingslib.bluetooth.LocalBluetoothProfile;
@@ -54,7 +56,7 @@ public class BluetoothPairingController implements OnCheckedChangeListener,
     private static final int BLUETOOTH_PASSKEY_MAX_LENGTH = 6;
 
     // Bluetooth dependencies for the connection we are trying to establish
-    private LocalBluetoothManager mBluetoothManager;
+    LocalBluetoothManager mBluetoothManager;
     private BluetoothDevice mDevice;
     @VisibleForTesting
     int mType;
@@ -66,6 +68,8 @@ public class BluetoothPairingController implements OnCheckedChangeListener,
     private LocalBluetoothProfile mPbapClientProfile;
     private boolean mPbapAllowed;
     private boolean mIsCoordinatedSetMember;
+    private boolean mIsLeAudio;
+    private boolean mIsLateBonding;
 
     /**
      * Creates an instance of a BluetoothPairingController.
@@ -92,10 +96,23 @@ public class BluetoothPairingController implements OnCheckedChangeListener,
         mDeviceName = mBluetoothManager.getCachedDeviceManager().getName(mDevice);
         mPbapClientProfile = mBluetoothManager.getProfileManager().getPbapClientProfile();
         mPasskeyFormatted = formatKey(mPasskey);
+        mIsLateBonding = mBluetoothManager.getCachedDeviceManager().isLateBonding(mDevice);
+
         final CachedBluetoothDevice cachedDevice =
                 mBluetoothManager.getCachedDeviceManager().findDevice(mDevice);
-        mIsCoordinatedSetMember = cachedDevice != null
-                ? cachedDevice.isCoordinatedSetMemberDevice() : false;
+
+        mIsCoordinatedSetMember = false;
+        mIsLeAudio = false;
+        if (cachedDevice != null) {
+            mIsCoordinatedSetMember = cachedDevice.isCoordinatedSetMemberDevice();
+
+            for (LocalBluetoothProfile profile : cachedDevice.getProfiles()) {
+                if (profile.getProfileId() == BluetoothProfile.LE_AUDIO) {
+                    mIsLeAudio = true;
+                }
+            }
+            Log.d(TAG, "isCooridnatedSetMember: " + mIsCoordinatedSetMember);
+        }
     }
 
     @Override
@@ -171,6 +188,15 @@ public class BluetoothPairingController implements OnCheckedChangeListener,
     }
 
     /**
+     * A method for querying if the bluetooth device from a coordinated set is bonding late.
+     *
+     * @return - A boolean indicating if the device is bonding late.
+     */
+    public boolean isLateBonding() {
+        return mIsLateBonding;
+    }
+
+    /**
      * A method for querying if the bluetooth device has a profile already set up on this device.
      *
      * @return - A boolean indicating if the device has previous knowledge of a profile for this
@@ -178,6 +204,20 @@ public class BluetoothPairingController implements OnCheckedChangeListener,
      */
     public boolean isProfileReady() {
         return mPbapClientProfile != null && mPbapClientProfile.isProfileReady();
+    }
+
+    @VisibleForTesting
+    boolean isLeAudio() {
+        return mIsLeAudio;
+    }
+
+    /**
+     * A method whether the device allows to show the le audio's contact sharing.
+     *
+     * @return A boolean whether the device allows to show the contact sharing.
+     */
+    public boolean isContactSharingVisible() {
+        return !isProfileReady();
     }
 
     /**
@@ -193,8 +233,8 @@ public class BluetoothPairingController implements OnCheckedChangeListener,
             case BluetoothDevice.ACCESS_REJECTED:
                 return false;
             default:
-                if (mDevice.getBluetoothClass().getDeviceClass()
-                        == BluetoothClass.Device.AUDIO_VIDEO_HANDSFREE) {
+                if (BluetoothUtils.isDeviceClassMatched(
+                        mDevice, BluetoothClass.Device.AUDIO_VIDEO_HANDSFREE)) {
                     return BluetoothDevice.EXTRA_PAIRING_INITIATOR_FOREGROUND == mInitiator;
                 }
                 return false;
@@ -205,11 +245,12 @@ public class BluetoothPairingController implements OnCheckedChangeListener,
      * Update Phone book permission
      *
      */
-     public void  setContactSharingState() {
+     public void setContactSharingState() {
          final int permission = mDevice.getPhonebookAccessPermission();
          if (permission == BluetoothDevice.ACCESS_ALLOWED
-                 || (permission == BluetoothDevice.ACCESS_UNKNOWN && mDevice.getBluetoothClass().
-                        getDeviceClass() == BluetoothClass.Device.AUDIO_VIDEO_HANDSFREE)) {
+                 || (permission == BluetoothDevice.ACCESS_UNKNOWN
+                 && BluetoothUtils.isDeviceClassMatched(mDevice,
+                 BluetoothClass.Device.AUDIO_VIDEO_HANDSFREE))) {
              onCheckedChanged(null, true);
          } else {
              onCheckedChanged(null, false);
@@ -387,7 +428,7 @@ public class BluetoothPairingController implements OnCheckedChangeListener,
         switch (mType) {
             case BluetoothDevice.PAIRING_VARIANT_PASSKEY_CONFIRMATION:
             case BluetoothDevice.PAIRING_VARIANT_DISPLAY_PASSKEY:
-                return String.format(Locale.US, "%06d", passkey);
+                return String.format(Locale.getDefault(), "%06d", passkey);
 
             case BluetoothDevice.PAIRING_VARIANT_DISPLAY_PIN:
                 return String.format("%04d", passkey);
@@ -435,7 +476,7 @@ public class BluetoothPairingController implements OnCheckedChangeListener,
      */
     public void onCancel() {
         Log.d(TAG, "Pairing dialog canceled");
-        mDevice.cancelPairing();
+        mDevice.cancelBondProcess();
     }
 
     /**
@@ -446,5 +487,10 @@ public class BluetoothPairingController implements OnCheckedChangeListener,
      */
     public boolean deviceEquals(BluetoothDevice device) {
         return mDevice == device;
+    }
+
+    @VisibleForTesting
+    void mockPbapClientProfile(LocalBluetoothProfile mockPbapClientProfile) {
+        mPbapClientProfile = mockPbapClientProfile;
     }
 }

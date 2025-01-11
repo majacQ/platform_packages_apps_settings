@@ -30,8 +30,10 @@ import android.content.pm.UserInfo;
 import android.database.Cursor;
 import android.net.Uri;
 import android.os.Bundle;
+import android.os.Environment;
 import android.os.UserHandle;
 import android.os.UserManager;
+import android.os.storage.StorageManager;
 import android.provider.MediaStore;
 import android.provider.MediaStore.Files.FileColumns;
 import android.provider.MediaStore.MediaColumns;
@@ -85,28 +87,41 @@ public class StorageAsyncLoader
 
         for (UserInfo info : infos) {
             final StorageResult result = getAppsAndGamesSize(info.id);
-
+            final Bundle media = new Bundle();
+            media.putString(ContentResolver.QUERY_ARG_SQL_SELECTION, MediaColumns.VOLUME_NAME
+                    + "= '" + MediaStore.VOLUME_EXTERNAL_PRIMARY + "'");
             result.imagesSize = getFilesSize(info.id, MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-                    null /* queryArgs */);
+                    media /* queryArgs */);
             result.videosSize = getFilesSize(info.id, MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
-                    null /* queryArgs */);
+                    media /* queryArgs */);
             result.audioSize = getFilesSize(info.id, MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
-                    null /* queryArgs */);
+                    media /* queryArgs */);
+            result.systemSize = getSystemSize();
 
-            final Bundle documentsAndOtherQueryArgs = new Bundle();
-            documentsAndOtherQueryArgs.putString(ContentResolver.QUERY_ARG_SQL_SELECTION,
+            final Bundle documentsQueryArgs = new Bundle();
+            documentsQueryArgs.putString(ContentResolver.QUERY_ARG_SQL_SELECTION,
+                    FileColumns.MEDIA_TYPE + "=" + FileColumns.MEDIA_TYPE_DOCUMENT);
+            result.documentsSize = getFilesSize(info.id,
+                    MediaStore.Files.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY),
+                    documentsQueryArgs);
+
+            final Bundle otherQueryArgs = new Bundle();
+            otherQueryArgs.putString(ContentResolver.QUERY_ARG_SQL_SELECTION,
                     FileColumns.MEDIA_TYPE + "!=" + FileColumns.MEDIA_TYPE_IMAGE
-                    + " AND " + FileColumns.MEDIA_TYPE + "!=" + FileColumns.MEDIA_TYPE_VIDEO
-                    + " AND " + FileColumns.MEDIA_TYPE + "!=" + FileColumns.MEDIA_TYPE_AUDIO
-                    + " AND " + FileColumns.MIME_TYPE + " IS NOT NULL");
-            result.documentsAndOtherSize = getFilesSize(info.id,
-                    MediaStore.Files.getContentUri(MediaStore.VOLUME_EXTERNAL),
-                    documentsAndOtherQueryArgs);
+                            + " AND " + FileColumns.MEDIA_TYPE + "!=" + FileColumns.MEDIA_TYPE_VIDEO
+                            + " AND " + FileColumns.MEDIA_TYPE + "!=" + FileColumns.MEDIA_TYPE_AUDIO
+                            + " AND " + FileColumns.MEDIA_TYPE + "!="
+                            + FileColumns.MEDIA_TYPE_DOCUMENT
+                            + " AND " + FileColumns.MIME_TYPE + " IS NOT NULL");
+            result.otherSize = getFilesSize(info.id,
+                    MediaStore.Files.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY),
+                    otherQueryArgs);
 
             final Bundle trashQueryArgs = new Bundle();
             trashQueryArgs.putInt(MediaStore.QUERY_ARG_MATCH_TRASHED, MediaStore.MATCH_ONLY);
             result.trashSize = getFilesSize(info.id,
-                    MediaStore.Files.getContentUri(MediaStore.VOLUME_EXTERNAL), trashQueryArgs);
+                    MediaStore.Files.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY),
+                    trashQueryArgs);
 
             results.put(info.id, result);
         }
@@ -134,6 +149,16 @@ public class StorageAsyncLoader
                 return 0L;
             }
             return cursor.moveToFirst() ? cursor.getLong(0) : 0L;
+        }
+    }
+
+    private long getSystemSize() {
+        try {
+            return mStatsManager.getTotalBytes(StorageManager.UUID_DEFAULT)
+                    - Environment.getDataDirectory().getTotalSpace();
+        } catch (IOException e) {
+            Log.e(TAG, "Exception in calculating System category size", e);
+            return 0;
         }
     }
 
@@ -220,8 +245,10 @@ public class StorageAsyncLoader
         public long audioSize;
         public long imagesSize;
         public long videosSize;
-        public long documentsAndOtherSize;
+        public long documentsSize;
+        public long otherSize;
         public long trashSize;
+        public long systemSize;
 
         public long cacheSize;
         public long duplicateCodeSize;

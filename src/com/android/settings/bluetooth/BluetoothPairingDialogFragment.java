@@ -32,6 +32,7 @@ import android.view.View;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.Button;
 import android.widget.CheckBox;
+import android.widget.CompoundButton;
 import android.widget.EditText;
 import android.widget.TextView;
 
@@ -40,6 +41,7 @@ import androidx.appcompat.app.AlertDialog;
 
 import com.android.settings.R;
 import com.android.settings.core.instrumentation.InstrumentedDialogFragment;
+import com.android.settings.flags.Flags;
 
 /**
  * A dialogFragment used by {@link BluetoothPairingDialog} to create an appropriately styled dialog
@@ -55,6 +57,7 @@ public class BluetoothPairingDialogFragment extends InstrumentedDialogFragment i
     private BluetoothPairingController mPairingController;
     private BluetoothPairingDialog mPairingDialogActivity;
     private EditText mPairingView;
+    private boolean mPositiveClicked = false;
     /**
      * The interface we expect a listener to implement. Typically this should be done by
      * the controller.
@@ -83,6 +86,21 @@ public class BluetoothPairingDialogFragment extends InstrumentedDialogFragment i
     }
 
     @Override
+    public void onDestroy() {
+        super.onDestroy();
+        /* Cancel pairing unless 1) explicitly accepted by user 2) the event is triggered by
+         * orientation change. */
+        boolean shouldCancelPairing =
+                Flags.disableBondingCancellationForOrientationChange()
+                        ? !mPositiveClicked && !getActivity().isChangingConfigurations()
+                        : !mPositiveClicked;
+        if (mPairingController.getDialogType() != BluetoothPairingController.DISPLAY_PASSKEY_DIALOG
+                && shouldCancelPairing) {
+            mPairingController.onCancel();
+        }
+    }
+
+    @Override
     public void beforeTextChanged(CharSequence s, int start, int count, int after) {
     }
 
@@ -104,6 +122,7 @@ public class BluetoothPairingDialogFragment extends InstrumentedDialogFragment i
     @Override
     public void onClick(DialogInterface dialog, int which) {
         if (which == DialogInterface.BUTTON_POSITIVE) {
+            mPositiveClicked = true;
             mPairingController.onDialogPositiveClick(this);
         } else if (which == DialogInterface.BUTTON_NEGATIVE) {
             mPairingController.onDialogNegativeClick(this);
@@ -236,12 +255,11 @@ public class BluetoothPairingDialogFragment extends InstrumentedDialogFragment i
         CheckBox alphanumericPin = (CheckBox) view.findViewById(R.id.alphanumeric_pin);
         CheckBox contactSharing = (CheckBox) view.findViewById(
                 R.id.phonebook_sharing_message_entry_pin);
-        contactSharing.setText(getString(R.string.bluetooth_pairing_shares_phonebook,
-                mPairingController.getDeviceName()));
+        contactSharing.setText(getString(R.string.bluetooth_pairing_shares_phonebook));
         EditText pairingView = (EditText) view.findViewById(R.id.text);
 
-        contactSharing.setVisibility(mPairingController.isProfileReady()
-                ? View.GONE : View.VISIBLE);
+        contactSharing.setVisibility(
+                mPairingController.isContactSharingVisible() ? View.VISIBLE : View.GONE);
         mPairingController.setContactSharingState();
         contactSharing.setOnCheckedChangeListener(mPairingController);
         contactSharing.setChecked(mPairingController.getContactSharingState());
@@ -287,8 +305,10 @@ public class BluetoothPairingDialogFragment extends InstrumentedDialogFragment i
         mBuilder.setTitle(getString(R.string.bluetooth_pairing_request,
                 mPairingController.getDeviceName()));
         mBuilder.setView(createView());
-        mBuilder.setPositiveButton(getString(R.string.bluetooth_pairing_accept), this);
-        mBuilder.setNegativeButton(getString(R.string.bluetooth_pairing_decline), this);
+        mBuilder.setPositiveButton(
+                getString(com.android.settingslib.R.string.bluetooth_pairing_accept), this);
+        mBuilder.setNegativeButton(
+                getString(com.android.settingslib.R.string.bluetooth_pairing_decline), this);
         AlertDialog dialog = mBuilder.create();
         return dialog;
     }
@@ -326,13 +346,10 @@ public class BluetoothPairingDialogFragment extends InstrumentedDialogFragment i
         TextView pairingViewCaption = (TextView) view.findViewById(R.id.pairing_caption);
         TextView pairingViewContent = (TextView) view.findViewById(R.id.pairing_subhead);
         TextView messagePairing = (TextView) view.findViewById(R.id.pairing_code_message);
-        CheckBox contactSharing = (CheckBox) view.findViewById(
-                R.id.phonebook_sharing_message_confirm_pin);
-        contactSharing.setText(getString(R.string.bluetooth_pairing_shares_phonebook,
-                mPairingController.getDeviceName()));
-
-        contactSharing.setVisibility(
-                mPairingController.isProfileReady() ? View.GONE : View.VISIBLE);
+        CompoundButton contactSharing =
+                view.findViewById(R.id.phonebook_sharing_message_confirm_pin);
+        view.findViewById(R.id.phonebook_sharing).setVisibility(
+                mPairingController.isContactSharingVisible() ? View.VISIBLE : View.GONE);
         mPairingController.setContactSharingState();
         contactSharing.setChecked(mPairingController.getContactSharingState());
         contactSharing.setOnCheckedChangeListener(mPairingController);
@@ -345,9 +362,14 @@ public class BluetoothPairingDialogFragment extends InstrumentedDialogFragment i
             pairingViewContent.setText(mPairingController.getPairingContent());
         }
         final TextView messagePairingSet = (TextView) view.findViewById(R.id.pairing_group_message);
-        messagePairingSet.setVisibility(mPairingController.isCoordinatedSetMemberDevice()
-                ? View.VISIBLE : View.GONE);
+        if (mPairingController.isLateBonding()) {
+            messagePairingSet.setText(getString(R.string.bluetooth_pairing_group_late_bonding));
+        }
+
+        boolean setPairingMessage =
+            mPairingController.isCoordinatedSetMemberDevice() || mPairingController.isLateBonding();
+
+        messagePairingSet.setVisibility(setPairingMessage ? View.VISIBLE : View.GONE);
         return view;
     }
-
 }

@@ -60,11 +60,13 @@ import com.android.settingslib.utils.ThreadUtils;
 
 import com.google.android.setupdesign.DividerItemDecoration;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+@Deprecated(forRemoval = true)
 public class PanelFragment extends Fragment {
 
     private static final String TAG = "PanelFragment";
@@ -100,10 +102,8 @@ public class PanelFragment extends Fragment {
     private TextView mHeaderTitle;
     private TextView mHeaderSubtitle;
     private int mMaxHeight;
-    private View mFooterDivider;
     private boolean mPanelCreating;
     private ProgressBar mProgressBar;
-    private View mHeaderDivider;
 
     private final Map<Uri, LiveData<Slice>> mSliceLiveData = new LinkedHashMap<>();
 
@@ -210,19 +210,19 @@ public class PanelFragment extends Fragment {
         mHeaderLayout = mLayoutView.findViewById(R.id.header_layout);
         mHeaderTitle = mLayoutView.findViewById(R.id.header_title);
         mHeaderSubtitle = mLayoutView.findViewById(R.id.header_subtitle);
-        mFooterDivider = mLayoutView.findViewById(R.id.footer_divider);
         mProgressBar = mLayoutView.findViewById(R.id.progress_bar);
-        mHeaderDivider = mLayoutView.findViewById(R.id.header_divider);
 
         // Make the panel layout gone here, to avoid janky animation when updating from old panel.
         // We will make it visible once the panel is ready to load.
         mPanelSlices.setVisibility(View.GONE);
+        // Remove the animator to avoid a RecyclerView crash.
+        mPanelSlices.setItemAnimator(null);
 
         final Bundle arguments = getArguments();
         final String callingPackageName =
                 arguments.getString(SettingsPanelActivity.KEY_CALLING_PACKAGE_NAME);
 
-        mPanel = FeatureFactory.getFactory(activity)
+        mPanel = FeatureFactory.getFeatureFactory()
                 .getPanelFeatureProvider()
                 .getPanel(activity, arguments);
 
@@ -236,7 +236,7 @@ public class PanelFragment extends Fragment {
             getLifecycle().addObserver((LifecycleObserver) mPanel);
         }
 
-        mMetricsProvider = FeatureFactory.getFactory(activity).getMetricsFeatureProvider();
+        mMetricsProvider = FeatureFactory.getFeatureFactory().getMetricsFeatureProvider();
 
         updateProgressBar();
 
@@ -256,8 +256,6 @@ public class PanelFragment extends Fragment {
         } else {
             enableTitle(title);
         }
-
-        mFooterDivider.setVisibility(View.GONE);
 
         mSeeMoreButton.setOnClickListener(getSeeMoreListener());
         mDoneButton.setOnClickListener(getCloseListener());
@@ -324,10 +322,8 @@ public class PanelFragment extends Fragment {
     private void updateProgressBar() {
         if (mPanel.isProgressBarVisible()) {
             mProgressBar.setVisibility(View.VISIBLE);
-            mHeaderDivider.setVisibility(View.GONE);
         } else {
             mProgressBar.setVisibility(View.GONE);
-            mHeaderDivider.setVisibility(View.VISIBLE);
         }
     }
 
@@ -347,8 +343,13 @@ public class PanelFragment extends Fragment {
             mSliceLiveData.put(uri, sliceLiveData);
 
             sliceLiveData.observe(getViewLifecycleOwner(), slice -> {
-                // If the Slice has already loaded, do nothing.
+
+                // If the Slice has already loaded, refresh list with slice data.
                 if (mPanelSlicesLoaderCountdownLatch.isSliceLoaded(uri)) {
+                    if (mAdapter != null) {
+                        int itemIndex = (new ArrayList<>(mSliceLiveData.keySet())).indexOf(uri);
+                        mAdapter.notifyItemChanged(itemIndex);
+                    }
                     return;
                 }
 
@@ -519,6 +520,7 @@ public class PanelFragment extends Fragment {
         return mPanel.getViewType();
     }
 
+    @Deprecated(forRemoval = true)
     class LocalPanelCallback implements PanelContentCallback {
 
         @Override

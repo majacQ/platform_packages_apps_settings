@@ -24,43 +24,37 @@ import com.android.settings.fuelgauge.batterytip.BatteryTipPolicy;
 import com.android.settings.fuelgauge.batterytip.tips.BatteryTip;
 import com.android.settings.fuelgauge.batterytip.tips.LowBatteryTip;
 
-import java.util.concurrent.TimeUnit;
-
-/**
- * Detect whether the battery is too low
- */
+/** Detect whether the battery is too low */
 public class LowBatteryDetector implements BatteryTipDetector {
-    private BatteryInfo mBatteryInfo;
-    private BatteryTipPolicy mPolicy;
-    private PowerManager mPowerManager;
-    private int mWarningLevel;
+    private final BatteryInfo mBatteryInfo;
+    private final BatteryTipPolicy mBatteryTipPolicy;
+    private final boolean mIsPowerSaveMode;
+    private final int mWarningLevel;
 
-    public LowBatteryDetector(Context context, BatteryTipPolicy policy, BatteryInfo batteryInfo) {
-        mPolicy = policy;
+    public LowBatteryDetector(
+            Context context, BatteryTipPolicy batteryTipPolicy, BatteryInfo batteryInfo) {
+        mBatteryTipPolicy = batteryTipPolicy;
         mBatteryInfo = batteryInfo;
-        mPowerManager = (PowerManager) context.getSystemService(Context.POWER_SERVICE);
-        mWarningLevel = context.getResources().getInteger(
-                com.android.internal.R.integer.config_lowBatteryWarningLevel);
+        mWarningLevel =
+                context.getResources()
+                        .getInteger(com.android.internal.R.integer.config_lowBatteryWarningLevel);
+        mIsPowerSaveMode = context.getSystemService(PowerManager.class).isPowerSaveMode();
     }
 
     @Override
     public BatteryTip detect() {
-        final boolean powerSaveModeOn = mPowerManager.isPowerSaveMode();
-        final boolean lowBattery = mBatteryInfo.batteryLevel <= mWarningLevel
-                || (mBatteryInfo.discharging && mBatteryInfo.remainingTimeUs != 0
-                && mBatteryInfo.remainingTimeUs < TimeUnit.HOURS.toMicros(mPolicy.lowBatteryHour));
-        final boolean lowBatteryEnabled = mPolicy.lowBatteryEnabled && !powerSaveModeOn;
+        final boolean lowBattery = mBatteryInfo.batteryLevel <= mWarningLevel;
+        final boolean lowBatteryEnabled = mBatteryTipPolicy.lowBatteryEnabled && !mIsPowerSaveMode;
         final boolean dischargingLowBatteryState =
-                mPolicy.testLowBatteryTip || (mBatteryInfo.discharging && lowBattery);
-
-        int state = BatteryTip.StateType.INVISIBLE;
+                mBatteryTipPolicy.testLowBatteryTip || (mBatteryInfo.discharging && lowBattery);
 
         // Show it as new if in test or in discharging low battery state,
         // dismiss it if battery saver is on or disabled by config.
-        if (lowBatteryEnabled && dischargingLowBatteryState) {
-            state = BatteryTip.StateType.NEW;
-        }
+        final int state =
+                lowBatteryEnabled && dischargingLowBatteryState
+                        ? BatteryTip.StateType.NEW
+                        : BatteryTip.StateType.INVISIBLE;
 
-        return new LowBatteryTip(state, powerSaveModeOn);
+        return new LowBatteryTip(state, mIsPowerSaveMode);
     }
 }

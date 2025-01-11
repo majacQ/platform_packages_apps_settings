@@ -21,24 +21,24 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.net.Uri;
 import android.nfc.NfcAdapter;
-import android.provider.Settings;
 import android.util.Log;
-import android.widget.Switch;
+import android.widget.CompoundButton;
+import android.widget.CompoundButton.OnCheckedChangeListener;
 
 import androidx.preference.PreferenceScreen;
 
+import com.android.settings.R;
 import com.android.settings.core.TogglePreferenceController;
 import com.android.settings.slices.SliceBackgroundWorker;
 import com.android.settingslib.core.lifecycle.LifecycleObserver;
 import com.android.settingslib.core.lifecycle.events.OnPause;
 import com.android.settingslib.core.lifecycle.events.OnResume;
 import com.android.settingslib.widget.MainSwitchPreference;
-import com.android.settingslib.widget.OnMainSwitchChangeListener;
 
 import java.io.IOException;
 
 public class NfcPreferenceController extends TogglePreferenceController
-        implements LifecycleObserver, OnResume, OnPause, OnMainSwitchChangeListener {
+        implements LifecycleObserver, OnResume, OnPause, OnCheckedChangeListener {
 
     public static final String KEY_TOGGLE_NFC = "toggle_nfc";
     private final NfcAdapter mNfcAdapter;
@@ -58,13 +58,13 @@ public class NfcPreferenceController extends TogglePreferenceController
             return;
         }
 
-        mPreference = (MainSwitchPreference) screen.findPreference(getPreferenceKey());
+        mPreference = screen.findPreference(getPreferenceKey());
         mPreference.addOnSwitchChangeListener(this);
         mNfcEnabler = new NfcEnabler(mContext, mPreference);
     }
 
     @Override
-    public void onSwitchChanged(Switch switchView, boolean isChecked) {
+    public void onCheckedChanged(CompoundButton buttonView, boolean isChecked) {
         if (isChecked != mNfcAdapter.isEnabled()) {
             setChecked(isChecked);
         }
@@ -104,6 +104,11 @@ public class NfcPreferenceController extends TogglePreferenceController
     }
 
     @Override
+    public int getSliceHighlightMenuRes() {
+        return R.string.menu_key_connected_devices;
+    }
+
+    @Override
     public Class<? extends SliceBackgroundWorker> getBackgroundWorkerClass() {
         return NfcSliceWorker.class;
     }
@@ -120,18 +125,6 @@ public class NfcPreferenceController extends TogglePreferenceController
         if (mNfcEnabler != null) {
             mNfcEnabler.pause();
         }
-    }
-
-    public static boolean shouldTurnOffNFCInAirplaneMode(Context context) {
-        final String airplaneModeRadios = Settings.Global.getString(context.getContentResolver(),
-                Settings.Global.AIRPLANE_MODE_RADIOS);
-        return airplaneModeRadios != null && airplaneModeRadios.contains(Settings.Global.RADIO_NFC);
-    }
-
-    public static boolean isToggleableInAirplaneMode(Context context) {
-        final String toggleable = Settings.Global.getString(context.getContentResolver(),
-                Settings.Global.AIRPLANE_MODE_TOGGLEABLE_RADIOS);
-        return toggleable != null && toggleable.contains(Settings.Global.RADIO_NFC);
     }
 
     /**

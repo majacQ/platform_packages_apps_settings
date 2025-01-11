@@ -16,6 +16,7 @@
 
 package com.android.settings.applications.appinfo;
 
+import static com.android.settings.applications.appinfo.AppInfoDashboardFragment.ACCESS_RESTRICTED_SETTINGS;
 import static com.android.settings.applications.appinfo.AppInfoDashboardFragment.ARG_PACKAGE_NAME;
 import static com.android.settings.applications.appinfo.AppInfoDashboardFragment.UNINSTALL_ALL_USERS_MENU;
 import static com.android.settings.applications.appinfo.AppInfoDashboardFragment.UNINSTALL_UPDATES;
@@ -34,6 +35,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import android.app.admin.DevicePolicyManager;
+import android.app.ecm.EnhancedConfirmationManager;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ApplicationInfo;
@@ -74,6 +76,9 @@ import java.util.List;
 import java.util.Set;
 
 @RunWith(RobolectricTestRunner.class)
+@Config(shadows = {
+        com.android.settings.testutils.shadow.ShadowFragment.class,
+})
 public final class AppInfoDashboardFragmentTest {
 
     private static final String PACKAGE_NAME = "test_package_name";
@@ -86,7 +91,8 @@ public final class AppInfoDashboardFragmentTest {
     private DevicePolicyManager mDevicePolicyManager;
     @Mock
     private PackageManager mPackageManager;
-
+    @Mock
+    private EnhancedConfirmationManager mEcManager;
     private AppInfoDashboardFragment mFragment;
     private Context mShadowContext;
 
@@ -98,6 +104,7 @@ public final class AppInfoDashboardFragmentTest {
         doReturn(mActivity).when(mFragment).getActivity();
         doReturn(mShadowContext).when(mFragment).getContext();
         doReturn(mPackageManager).when(mActivity).getPackageManager();
+        doReturn(mEcManager).when(mActivity).getSystemService(EnhancedConfirmationManager.class);
         when(mUserManager.isAdminUser()).thenReturn(true);
 
         ReflectionHelpers.setField(mFragment, "mUserManager", mUserManager);
@@ -165,8 +172,10 @@ public final class AppInfoDashboardFragmentTest {
         Menu menu = mock(Menu.class);
         final MenuItem uninstallUpdatesMenuItem = mock(MenuItem.class);
         final MenuItem uninstallForAllMenuItem = mock(MenuItem.class);
+        final MenuItem accessRestrictedMenuItem = mock(MenuItem.class);
         when(menu.findItem(UNINSTALL_UPDATES)).thenReturn(uninstallUpdatesMenuItem);
         when(menu.findItem(UNINSTALL_ALL_USERS_MENU)).thenReturn(uninstallForAllMenuItem);
+        when(menu.findItem(ACCESS_RESTRICTED_SETTINGS)).thenReturn(accessRestrictedMenuItem);
 
         // Setup work to prevent NPE
         final ApplicationInfo info = new ApplicationInfo();
@@ -382,6 +391,11 @@ public final class AppInfoDashboardFragmentTest {
         assertThat(intent.getValue().getBundleExtra(SettingsActivity.EXTRA_SHOW_FRAGMENT_ARGUMENTS)
                 .containsKey(ARG_PACKAGE_NAME))
                 .isTrue();
+    }
+
+    @Test
+    public void shouldSkipForInitialSUW_returnTrue() {
+        assertThat(mFragment.shouldSkipForInitialSUW()).isTrue();
     }
 
     @Implements(AppUtils.class)

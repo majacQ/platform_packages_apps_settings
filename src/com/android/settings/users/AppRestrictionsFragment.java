@@ -18,6 +18,7 @@ package com.android.settings.users;
 
 import android.app.Activity;
 import android.app.settings.SettingsEnums;
+import android.content.ActivityNotFoundException;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
@@ -37,13 +38,13 @@ import android.os.RemoteException;
 import android.os.ServiceManager;
 import android.os.UserHandle;
 import android.os.UserManager;
+import android.util.EventLog;
 import android.util.Log;
 import android.view.View;
 import android.view.View.OnClickListener;
 import android.view.ViewGroup;
 import android.widget.CompoundButton;
 import android.widget.CompoundButton.OnCheckedChangeListener;
-import android.widget.Switch;
 
 import androidx.preference.ListPreference;
 import androidx.preference.MultiSelectListPreference;
@@ -52,7 +53,8 @@ import androidx.preference.Preference.OnPreferenceChangeListener;
 import androidx.preference.Preference.OnPreferenceClickListener;
 import androidx.preference.PreferenceGroup;
 import androidx.preference.PreferenceViewHolder;
-import androidx.preference.SwitchPreference;
+import androidx.preference.SwitchPreferenceCompat;
+import androidx.preference.TwoStatePreference;
 
 import com.android.settings.R;
 import com.android.settings.SettingsPreferenceFragment;
@@ -130,7 +132,7 @@ public class AppRestrictionsFragment extends SettingsPreferenceFragment implemen
         }
     };
 
-    static class AppRestrictionsPreference extends SwitchPreference {
+    static class AppRestrictionsPreference extends SwitchPreferenceCompat {
         private boolean hasSettings;
         private OnClickListener listener;
         private ArrayList<RestrictionEntry> restrictions;
@@ -172,10 +174,6 @@ public class AppRestrictionsFragment extends SettingsPreferenceFragment implemen
             panelOpen = open;
         }
 
-        List<Preference> getChildren() {
-            return mChildren;
-        }
-
         @Override
         public void onBindViewHolder(PreferenceViewHolder view) {
             super.onBindViewHolder(view);
@@ -194,7 +192,7 @@ public class AppRestrictionsFragment extends SettingsPreferenceFragment implemen
             ViewGroup widget = (ViewGroup) view.findViewById(android.R.id.widget_frame);
             widget.setEnabled(!isImmutable());
             if (widget.getChildCount() > 0) {
-                final Switch toggle = (Switch) widget.getChildAt(0);
+                final CompoundButton toggle = (CompoundButton) widget.getChildAt(0);
                 toggle.setEnabled(!isImmutable());
                 toggle.setTag(this);
                 toggle.setClickable(true);
@@ -641,28 +639,33 @@ public class AppRestrictionsFragment extends SettingsPreferenceFragment implemen
             } else if (restrictionsIntent != null) {
                 preference.setRestrictions(restrictions);
                 if (invokeIfCustom && AppRestrictionsFragment.this.isResumed()) {
-                    assertSafeToStartCustomActivity(restrictionsIntent);
+                    try {
+                        assertSafeToStartCustomActivity(restrictionsIntent);
+                    } catch (ActivityNotFoundException | SecurityException e) {
+                        // return without startActivity
+                        Log.e(TAG, "Cannot start restrictionsIntent " + e);
+                        EventLog.writeEvent(0x534e4554, "200688991", -1 /* UID */, "");
+                        return;
+                    }
+
                     int requestCode = generateCustomActivityRequestCode(
                             RestrictionsResultReceiver.this.preference);
                     AppRestrictionsFragment.this.startActivityForResult(
-                            restrictionsIntent, requestCode);
+                            new Intent(restrictionsIntent), requestCode);
                 }
             }
         }
 
         private void assertSafeToStartCustomActivity(Intent intent) {
-            // Activity can be started if it belongs to the same app
-            if (intent.getPackage() != null && intent.getPackage().equals(packageName)) {
-                return;
-            }
-            // Activity can be started if intent resolves to multiple activities
-            List<ResolveInfo> resolveInfos = AppRestrictionsFragment.this.mPackageManager
-                    .queryIntentActivities(intent, 0 /* no flags */);
-            if (resolveInfos.size() != 1) {
-                return;
+            EventLog.writeEvent(0x534e4554, "223578534", -1 /* UID */, "");
+            ResolveInfo resolveInfo = mPackageManager.resolveActivity(
+                    intent, PackageManager.MATCH_DEFAULT_ONLY);
+
+            if (resolveInfo == null) {
+                throw new ActivityNotFoundException("No result for resolving " + intent);
             }
             // Prevent potential privilege escalation
-            ActivityInfo activityInfo = resolveInfos.get(0).activityInfo;
+            ActivityInfo activityInfo = resolveInfo.activityInfo;
             if (!packageName.equals(activityInfo.packageName)) {
                 throw new SecurityException("Application " + packageName
                         + " is not allowed to start activity " + intent);
@@ -680,10 +683,10 @@ public class AppRestrictionsFragment extends SettingsPreferenceFragment implemen
             Preference p = null;
             switch (entry.getType()) {
             case RestrictionEntry.TYPE_BOOLEAN:
-                p = new SwitchPreference(getPrefContext());
+                p = new SwitchPreferenceCompat(getPrefContext());
                 p.setTitle(entry.getTitle());
                 p.setSummary(entry.getDescription());
-                ((SwitchPreference)p).setChecked(entry.getSelectedState());
+                ((TwoStatePreference) p).setChecked(entry.getSelectedState());
                 break;
             case RestrictionEntry.TYPE_CHOICE:
             case RestrictionEntry.TYPE_CHOICE_LEVEL:

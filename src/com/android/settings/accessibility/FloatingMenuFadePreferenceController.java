@@ -26,8 +26,9 @@ import android.provider.Settings;
 import androidx.annotation.VisibleForTesting;
 import androidx.preference.Preference;
 import androidx.preference.PreferenceScreen;
-import androidx.preference.SwitchPreference;
+import androidx.preference.TwoStatePreference;
 
+import com.android.settings.R;
 import com.android.settings.core.BasePreferenceController;
 import com.android.settingslib.core.lifecycle.LifecycleObserver;
 import com.android.settingslib.core.lifecycle.events.OnPause;
@@ -45,7 +46,7 @@ public class FloatingMenuFadePreferenceController extends BasePreferenceControll
     final ContentObserver mContentObserver;
 
     @VisibleForTesting
-    SwitchPreference mPreference;
+    TwoStatePreference mPreference;
 
     public FloatingMenuFadePreferenceController(Context context, String preferenceKey) {
         super(context, preferenceKey);
@@ -65,6 +66,15 @@ public class FloatingMenuFadePreferenceController extends BasePreferenceControll
     }
 
     @Override
+    public CharSequence getSummary() {
+        int rId = R.string.accessibility_button_fade_summary;
+        if (mPreference != null && !mPreference.isEnabled()) {
+            rId = R.string.accessibility_button_disabled_button_mode_summary;
+        }
+        return mContext.getString(rId);
+    }
+
+    @Override
     public void displayPreference(PreferenceScreen screen) {
         super.displayPreference(screen);
 
@@ -81,7 +91,7 @@ public class FloatingMenuFadePreferenceController extends BasePreferenceControll
     @Override
     public void updateState(Preference preference) {
         super.updateState(preference);
-        final SwitchPreference switchPreference = (SwitchPreference) preference;
+        final TwoStatePreference switchPreference = (TwoStatePreference) preference;
 
         switchPreference.setChecked(getFloatingMenuFadeValue() == ON);
     }
@@ -101,6 +111,7 @@ public class FloatingMenuFadePreferenceController extends BasePreferenceControll
 
     private void updateAvailabilityStatus() {
         mPreference.setEnabled(AccessibilityUtil.isFloatingMenuEnabled(mContext));
+        refreshSummary(mPreference);
     }
 
     private int getFloatingMenuFadeValue() {

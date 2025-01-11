@@ -22,8 +22,11 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import android.app.admin.DevicePolicyManager;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ApplicationInfo;
@@ -36,6 +39,7 @@ import com.android.settings.R;
 import com.android.settings.applications.EnterpriseDefaultApps;
 import com.android.settings.applications.UserAppInfo;
 import com.android.settings.testutils.FakeFeatureFactory;
+import com.android.settingslib.utils.StringUtil;
 
 import org.junit.Before;
 import org.junit.Test;
@@ -64,6 +68,8 @@ public final class EnterpriseSetDefaultAppsPreferenceControllerTest {
     @Before
     public void setUp() {
         MockitoAnnotations.initMocks(this);
+        doReturn(mock(DevicePolicyManager.class)).when(mContext)
+                .getSystemService(Context.DEVICE_POLICY_SERVICE);
         mFeatureFactory = FakeFeatureFactory.setupForTest();
         mController = new EnterpriseSetDefaultAppsPreferenceController(mContext);
     }
@@ -96,8 +102,10 @@ public final class EnterpriseSetDefaultAppsPreferenceControllerTest {
         setEnterpriseSetDefaultApps(EnterpriseDefaultApps.CALENDAR.getIntents(), 16);
         setEnterpriseSetDefaultApps(EnterpriseDefaultApps.CONTACTS.getIntents(), 32);
         setEnterpriseSetDefaultApps(EnterpriseDefaultApps.PHONE.getIntents(), 64);
-        when(mContext.getResources().getQuantityString(R.plurals.enterprise_privacy_number_packages,
-                127, 127)).thenReturn("127 apps");
+        when(mContext.getResources().getString(R.string.enterprise_privacy_number_packages))
+                .thenReturn("# apps");
+        when(StringUtil.getIcuPluralsString(mContext, 127,
+                R.string.enterprise_privacy_number_packages)).thenReturn("127 apps");
 
         // As setEnterpriseSetDefaultApps uses fake Users, we need to list them via UserManager.
         configureUsers(64);

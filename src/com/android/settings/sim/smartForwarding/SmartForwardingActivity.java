@@ -38,6 +38,7 @@ import androidx.core.content.ContextCompat;
 
 import com.android.settings.R;
 import com.android.settings.core.SettingsBaseActivity;
+import com.android.settings.network.SubscriptionUtil;
 
 import com.google.common.util.concurrent.FutureCallback;
 import com.google.common.util.concurrent.Futures;
@@ -48,12 +49,19 @@ import com.google.common.util.concurrent.MoreExecutors;
 import java.util.concurrent.Executors;
 
 public class SmartForwardingActivity extends SettingsBaseActivity {
+    static final String LOG_TAG = SmartForwardingActivity.class.toString();
     final ListeningExecutorService service =
             MoreExecutors.listeningDecorator(Executors.newSingleThreadExecutor());
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+
+        if (!SubscriptionUtil.isSimHardwareVisible(this)) {
+            Log.d(LOG_TAG, "Not support on device without SIM.");
+            finish();
+            return;
+        }
 
         final Toolbar toolbar = findViewById(R.id.action_bar);
         toolbar.setVisibility(View.VISIBLE);
@@ -77,12 +85,7 @@ public class SmartForwardingActivity extends SettingsBaseActivity {
 
     public void enableSmartForwarding(String[] phoneNumber) {
         // Pop-up ongoing dialog
-        ProgressDialog dialog = new ProgressDialog(this);
-        dialog.setTitle(R.string.smart_forwarding_ongoing_title);
-        dialog.setIndeterminate(true);
-        dialog.setMessage(getText(R.string.smart_forwarding_ongoing_text));
-        dialog.setCancelable(false);
-        dialog.show();
+        ProgressDialog dialog = showOngoingDialog();
 
         // Enable feature
         ListenableFuture<FeatureResult> enableTask =
@@ -129,8 +132,11 @@ public class SmartForwardingActivity extends SettingsBaseActivity {
         TelephonyManager tm = getSystemService(TelephonyManager.class);
         SubscriptionManager sm = getSystemService(SubscriptionManager.class);
 
-        boolean[] callWaitingStatus = getAllSlotCallWaitingStatus(this, sm, tm);
+        boolean[] callWaitingStatus = getAllSlotCallWaitingStatus(this, tm);
         CallForwardingInfo[] callForwardingInfo = getAllSlotCallForwardingStatus(this, sm, tm);
+
+        // Pop-up ongoing dialog
+        ProgressDialog dialog = showOngoingDialog();
 
         // Disable feature
         ListenableFuture disableTask = service.submit(new DisableSmartForwardingTask(
@@ -139,11 +145,13 @@ public class SmartForwardingActivity extends SettingsBaseActivity {
             @Override
             public void onSuccess(Object result) {
                 clearAllBackupData(SmartForwardingActivity.this, sm, tm);
+                dialog.dismiss();
             }
 
             @Override
             public void onFailure(Throwable t) {
                 Log.e(TAG, "Disable Feature exception" + t);
+                dialog.dismiss();
             }
         }, ContextCompat.getMainExecutor(this));
     }
@@ -165,5 +173,16 @@ public class SmartForwardingActivity extends SettingsBaseActivity {
                         (dialog, which) -> { dialog.dismiss(); })
                 .create();
         mDialog.show();
+    }
+
+    private ProgressDialog showOngoingDialog() {
+        ProgressDialog dialog = new ProgressDialog(this);
+        dialog.setTitle(R.string.smart_forwarding_ongoing_title);
+        dialog.setIndeterminate(true);
+        dialog.setMessage(getText(R.string.smart_forwarding_ongoing_text));
+        dialog.setCancelable(false);
+        dialog.show();
+
+        return dialog;
     }
 }

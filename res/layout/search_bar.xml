@@ -31,8 +31,11 @@
             android:id="@+id/search_action_bar"
             android:layout_width="match_parent"
             android:layout_height="@dimen/search_bar_height"
-            android:paddingStart="4dp"
+            android:paddingStart="@dimen/search_bar_padding_start"
+            android:paddingEnd="@dimen/search_bar_padding_end"
             android:background="@drawable/search_bar_selected_background"
+            android:touchscreenBlocksFocus="false"
+            android:nextFocusForward="@+id/homepage_container"
             android:contentInsetStartWithNavigation="@dimen/search_bar_content_inset"
             android:navigationIcon="@drawable/ic_homepage_search">
             <TextView
@@ -40,7 +43,7 @@
                 style="@style/TextAppearance.SearchBar"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:paddingStart="-4dp"
+                android:paddingStart="@dimen/search_bar_title_padding_start"
                 android:layout_gravity="start"
                 android:text="@string/search_menu"/>
         </Toolbar>

@@ -17,6 +17,10 @@ package com.android.settings.network;
 
 import static android.provider.SettingsSlicesContract.KEY_AIRPLANE_MODE;
 
+import static com.android.settings.network.SatelliteWarningDialogActivity.EXTRA_TYPE_OF_SATELLITE_WARNING_DIALOG;
+import static com.android.settings.network.SatelliteWarningDialogActivity.TYPE_IS_AIRPLANE_MODE;
+
+import android.app.Activity;
 import android.content.ContentResolver;
 import android.content.Context;
 import android.content.Intent;
@@ -24,25 +28,34 @@ import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.provider.SettingsSlicesContract;
 import android.telephony.TelephonyManager;
+import android.util.Log;
 
 import androidx.annotation.VisibleForTesting;
 import androidx.fragment.app.Fragment;
 import androidx.preference.Preference;
 import androidx.preference.PreferenceScreen;
-import androidx.preference.SwitchPreference;
+import androidx.preference.TwoStatePreference;
 
 import com.android.settings.AirplaneModeEnabler;
 import com.android.settings.R;
+import com.android.settings.Utils;
 import com.android.settings.core.TogglePreferenceController;
 import com.android.settingslib.core.lifecycle.LifecycleObserver;
 import com.android.settingslib.core.lifecycle.events.OnDestroy;
+import com.android.settingslib.core.lifecycle.events.OnResume;
 import com.android.settingslib.core.lifecycle.events.OnStart;
 import com.android.settingslib.core.lifecycle.events.OnStop;
 
-public class AirplaneModePreferenceController extends TogglePreferenceController
-        implements LifecycleObserver, OnStart, OnStop, OnDestroy,
-        AirplaneModeEnabler.OnAirplaneModeChangedListener {
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
 
+public class AirplaneModePreferenceController extends TogglePreferenceController
+        implements LifecycleObserver, OnStart, OnResume, OnStop, OnDestroy,
+        AirplaneModeEnabler.OnAirplaneModeChangedListener {
+    private static final String TAG = AirplaneModePreferenceController.class.getSimpleName();
     public static final int REQUEST_CODE_EXIT_ECM = 1;
 
     /**
@@ -54,17 +67,19 @@ public class AirplaneModePreferenceController extends TogglePreferenceController
             .appendPath(SettingsSlicesContract.PATH_SETTING_ACTION)
             .appendPath(SettingsSlicesContract.KEY_AIRPLANE_MODE)
             .build();
-    private static final String EXIT_ECM_RESULT = "exit_ecm_result";
 
     private Fragment mFragment;
     private AirplaneModeEnabler mAirplaneModeEnabler;
-    private SwitchPreference mAirplaneModePreference;
+    private TwoStatePreference mAirplaneModePreference;
+    private SatelliteRepository mSatelliteRepository;
+    @VisibleForTesting
+    AtomicBoolean mIsSatelliteOn = new AtomicBoolean(false);
 
     public AirplaneModePreferenceController(Context context, String key) {
         super(context, key);
-
         if (isAvailable(mContext)) {
             mAirplaneModeEnabler = new AirplaneModeEnabler(mContext, this);
+            mSatelliteRepository = new SatelliteRepository(mContext);
         }
     }
 
@@ -79,17 +94,28 @@ public class AirplaneModePreferenceController extends TogglePreferenceController
 
     @Override
     public boolean handlePreferenceTreeClick(Preference preference) {
-        if (KEY_AIRPLANE_MODE.equals(preference.getKey())
-                && mAirplaneModeEnabler.isInEcmMode()) {
+        if (KEY_AIRPLANE_MODE.equals(preference.getKey()) && isAvailable()) {
             // In ECM mode launch ECM app dialog
-            if (mFragment != null) {
-                mFragment.startActivityForResult(
-                        new Intent(TelephonyManager.ACTION_SHOW_NOTICE_ECM_BLOCK_OTHERS, null),
-                        REQUEST_CODE_EXIT_ECM);
+            if (mAirplaneModeEnabler.isInEcmMode()) {
+                if (mFragment != null) {
+                    mFragment.startActivityForResult(
+                            new Intent(TelephonyManager.ACTION_SHOW_NOTICE_ECM_BLOCK_OTHERS, null)
+                                    .setPackage(Utils.PHONE_PACKAGE_NAME),
+                            REQUEST_CODE_EXIT_ECM);
+                }
+                return true;
             }
-            return true;
-        }
 
+            if (mIsSatelliteOn.get()) {
+                mContext.startActivity(
+                        new Intent(mContext, SatelliteWarningDialogActivity.class)
+                                .putExtra(
+                                        EXTRA_TYPE_OF_SATELLITE_WARNING_DIALOG,
+                                        TYPE_IS_AIRPLANE_MODE)
+                );
+                return true;
+            }
+        }
         return false;
     }
 
@@ -121,9 +147,26 @@ public class AirplaneModePreferenceController extends TogglePreferenceController
     }
 
     @Override
+    public int getSliceHighlightMenuRes() {
+        return R.string.menu_key_network;
+    }
+
+    @Override
     public void onStart() {
         if (isAvailable()) {
             mAirplaneModeEnabler.start();
+        }
+    }
+
+    @Override
+    public void onResume() {
+        try {
+            mIsSatelliteOn.set(
+                    mSatelliteRepository
+                            .requestIsSessionStarted(Executors.newSingleThreadExecutor())
+                            .get(2000, TimeUnit.MILLISECONDS));
+        } catch (ExecutionException | TimeoutException | InterruptedException e) {
+            Log.e(TAG, "Error to get satellite status : " + e);
         }
     }
 
@@ -136,13 +179,15 @@ public class AirplaneModePreferenceController extends TogglePreferenceController
 
     @Override
     public void onDestroy() {
-        mAirplaneModeEnabler.close();
+        if (isAvailable()) {
+            mAirplaneModeEnabler.close();
+        }
     }
 
 
     public void onActivityResult(int requestCode, int resultCode, Intent data) {
-        if (requestCode == REQUEST_CODE_EXIT_ECM) {
-            final boolean isChoiceYes = data.getBooleanExtra(EXIT_ECM_RESULT, false);
+        if (requestCode == REQUEST_CODE_EXIT_ECM && isAvailable()) {
+            final boolean isChoiceYes = (resultCode == Activity.RESULT_OK);
             // Set Airplane mode based on the return value and checkbox state
             mAirplaneModeEnabler.setAirplaneModeInECM(isChoiceYes,
                     mAirplaneModePreference.isChecked());
@@ -151,15 +196,17 @@ public class AirplaneModePreferenceController extends TogglePreferenceController
 
     @Override
     public boolean isChecked() {
-        return mAirplaneModeEnabler.isAirplaneModeOn();
+        return isAvailable() && mAirplaneModeEnabler.isAirplaneModeOn();
     }
 
     @Override
     public boolean setChecked(boolean isChecked) {
-        if (isChecked() == isChecked) {
+        if (isChecked() == isChecked || mIsSatelliteOn.get()) {
             return false;
         }
-        mAirplaneModeEnabler.setAirplaneMode(isChecked);
+        if (isAvailable()) {
+            mAirplaneModeEnabler.setAirplaneMode(isChecked);
+        }
         return true;
     }
 

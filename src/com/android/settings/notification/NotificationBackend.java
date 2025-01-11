@@ -21,12 +21,13 @@ import static android.content.pm.LauncherApps.ShortcutQuery.FLAG_MATCH_CACHED;
 import static android.content.pm.LauncherApps.ShortcutQuery.FLAG_MATCH_DYNAMIC;
 import static android.content.pm.LauncherApps.ShortcutQuery.FLAG_MATCH_PINNED_BY_ANY_LAUNCHER;
 
+import static com.android.server.notification.Flags.notificationHideUnusedChannels;
+
 import android.app.INotificationManager;
 import android.app.NotificationChannel;
 import android.app.NotificationChannelGroup;
 import android.app.NotificationHistory;
 import android.app.NotificationManager;
-import android.app.role.RoleManager;
 import android.app.usage.IUsageStatsManager;
 import android.app.usage.UsageEvents;
 import android.companion.ICompanionDeviceManager;
@@ -41,6 +42,7 @@ import android.content.pm.ParceledListSlice;
 import android.content.pm.ShortcutInfo;
 import android.content.pm.ShortcutManager;
 import android.graphics.drawable.Drawable;
+import android.os.Build;
 import android.os.RemoteException;
 import android.os.ServiceManager;
 import android.os.UserHandle;
@@ -52,8 +54,8 @@ import android.util.Log;
 
 import androidx.annotation.VisibleForTesting;
 
-import com.android.settingslib.R;
-import com.android.settingslib.Utils;
+import com.android.internal.util.CollectionUtils;
+import com.android.settings.R;
 import com.android.settingslib.bluetooth.CachedBluetoothDevice;
 import com.android.settingslib.bluetooth.LocalBluetoothManager;
 import com.android.settingslib.notification.ConversationIconFactory;
@@ -78,6 +80,9 @@ public class NotificationBackend {
 
     public AppRow loadAppRow(Context context, PackageManager pm, ApplicationInfo app) {
         final AppRow row = new AppRow();
+        if (notificationHideUnusedChannels()) {
+            row.showAllChannels = false;
+        }
         row.pkg = app.packageName;
         row.uid = app.uid;
         try {
@@ -97,57 +102,43 @@ public class NotificationBackend {
         return row;
     }
 
-    public boolean isBlockable(Context context, ApplicationInfo info) {
-        final boolean blocked = getNotificationsBanned(info.packageName, info.uid);
-        final boolean systemApp = isSystemApp(context, info);
-        return !systemApp || (systemApp && blocked);
-    }
-
-    public AppRow loadAppRow(Context context, PackageManager pm,
-            RoleManager roleManager, PackageInfo app) {
+    public AppRow loadAppRow(Context context, PackageManager pm, PackageInfo app) {
         final AppRow row = loadAppRow(context, pm, app.applicationInfo);
-        recordCanBeBlocked(context, pm, roleManager, app, row);
+        recordCanBeBlocked(app, row);
         return row;
     }
 
-    void recordCanBeBlocked(Context context, PackageManager pm, RoleManager rm, PackageInfo app,
-            AppRow row) {
-        row.systemApp = Utils.isSystemPackage(context.getResources(), pm, app);
-        List<String> roles = rm.getHeldRolesFromController(app.packageName);
-        if (roles.contains(RoleManager.ROLE_DIALER)
-                || roles.contains(RoleManager.ROLE_EMERGENCY)) {
-            row.systemApp = true;
+    void recordCanBeBlocked(PackageInfo app, AppRow row) {
+        try {
+            row.systemApp = row.lockedImportance =
+                    sINM.isImportanceLocked(app.packageName, app.applicationInfo.uid);
+        } catch (RemoteException e) {
+            Log.w(TAG, "Error calling NMS", e);
         }
-        final String[] nonBlockablePkgs = context.getResources().getStringArray(
-                com.android.internal.R.array.config_nonBlockableNotificationPackages);
-        markAppRowWithBlockables(nonBlockablePkgs, row, app.packageName);
-    }
 
-    @VisibleForTesting static void markAppRowWithBlockables(String[] nonBlockablePkgs, AppRow row,
-            String packageName) {
-        if (nonBlockablePkgs != null) {
-            int N = nonBlockablePkgs.length;
-            for (int i = 0; i < N; i++) {
-                String pkg = nonBlockablePkgs[i];
-                if (pkg == null) {
-                    continue;
-                } else if (pkg.contains(":")) {
-                    // handled by NotificationChannel.isImportanceLockedByOEM()
-                    continue;
-                } else if (packageName.equals(nonBlockablePkgs[i])) {
-                    row.systemApp = row.lockedImportance = true;
-                }
+        // if the app targets T but has not requested the permission, we cannot change the
+        // permission state
+        if (app.applicationInfo.targetSdkVersion > Build.VERSION_CODES.S_V2) {
+            if (app.requestedPermissions == null || Arrays.stream(app.requestedPermissions)
+                    .noneMatch(p -> p.equals(android.Manifest.permission.POST_NOTIFICATIONS))) {
+                row.lockedImportance = true;
+                row.permissionStateLocked = true;
             }
         }
     }
 
     static public CharSequence getDeviceList(ICompanionDeviceManager cdm, LocalBluetoothManager lbm,
             String pkg, int userId) {
+        if (cdm == null) {
+            return "";
+        }
         boolean multiple = false;
         StringBuilder sb = new StringBuilder();
 
         try {
-            List<String> associatedMacAddrs = cdm.getAssociations(pkg, userId);
+            List<String> associatedMacAddrs = CollectionUtils.mapNotNull(
+                    cdm.getAssociations(pkg, userId),
+                    a -> a.isSelfManaged() ? null : a.getDeviceMacAddress().toString());
             if (associatedMacAddrs != null) {
                 for (String assocMac : associatedMacAddrs) {
                     final Collection<CachedBluetoothDevice> cachedDevices =
@@ -170,14 +161,14 @@ public class NotificationBackend {
         return sb.toString();
     }
 
-    public boolean isSystemApp(Context context, ApplicationInfo app) {
+    public boolean enableSwitch(Context context, ApplicationInfo app) {
         try {
             PackageInfo info = context.getPackageManager().getPackageInfo(
-                    app.packageName, PackageManager.GET_SIGNATURES);
-            RoleManager rm = context.getSystemService(RoleManager.class);
+                    app.packageName, PackageManager.GET_PERMISSIONS);
             final AppRow row = new AppRow();
-            recordCanBeBlocked(context, context.getPackageManager(), rm, info, row);
-            return row.systemApp;
+            recordCanBeBlocked(info, row);
+            boolean systemBlockable = !row.systemApp || (row.systemApp && row.banned);
+            return systemBlockable && !row.lockedImportance;
         } catch (PackageManager.NameNotFoundException e) {
             e.printStackTrace();
         }
@@ -286,6 +277,16 @@ public class NotificationBackend {
         }
     }
 
+    public ParceledListSlice<NotificationChannelGroup> getGroupsWithRecentBlockedFilter(String pkg,
+            int uid) {
+        try {
+            return sINM.getRecentBlockedNotificationChannelGroupsForPackage(pkg, uid);
+        } catch (Exception e) {
+            Log.w(TAG, "Error calling NoMan", e);
+            return ParceledListSlice.emptyList();
+        }
+    }
+
     public ParceledListSlice<ConversationChannelWrapper> getConversations(String pkg, int uid) {
         try {
             return sINM.getConversationsForPackage(pkg, uid);
@@ -336,6 +337,15 @@ public class NotificationBackend {
              sINM.setInvalidMsgAppDemoted(pkg, uid, isDemoted);
         } catch (Exception e) {
             Log.w(TAG, "Error calling NoMan", e);
+        }
+    }
+
+    public boolean hasSentValidBubble(String pkg, int uid) {
+        try {
+            return sINM.hasSentValidBubble(pkg, uid);
+        } catch (Exception e) {
+            Log.w(TAG, "Error calling NoMan", e);
+            return false;
         }
     }
 
@@ -404,24 +414,6 @@ public class NotificationBackend {
         }
     }
 
-    public int getNumAppsBypassingDnd(int uid) {
-        try {
-            return sINM.getAppsBypassingDndCount(uid);
-        } catch (Exception e) {
-            Log.w(TAG, "Error calling NoMan", e);
-            return 0;
-        }
-    }
-
-    public int getBlockedAppCount() {
-        try {
-            return sINM.getBlockedAppCount(UserHandle.myUserId());
-        } catch (Exception e) {
-            Log.w(TAG, "Error calling NoMan", e);
-            return 0;
-        }
-    }
-
     public boolean shouldHideSilentStatusBarIcons(Context context) {
         try {
             return sINM.shouldHideSilentStatusIcons(context.getPackageName());
@@ -434,18 +426,6 @@ public class NotificationBackend {
     public void setHideSilentStatusIcons(boolean hide) {
         try {
             sINM.setHideSilentStatusIcons(hide);
-        } catch (Exception e) {
-            Log.w(TAG, "Error calling NoMan", e);
-        }
-    }
-
-    public void allowAssistantAdjustment(String capability, boolean allowed) {
-        try {
-            if (allowed) {
-                sINM.allowAssistantAdjustment(capability);
-            } else {
-                sINM.disallowAssistantAdjustment(capability);
-            }
         } catch (Exception e) {
             Log.w(TAG, "Error calling NoMan", e);
         }
@@ -535,11 +515,11 @@ public class NotificationBackend {
                     context, System.currentTimeMillis() - state.lastSent, true);
         } else {
             if (state.avgSentDaily > 0) {
-                return context.getResources().getQuantityString(R.plurals.notifications_sent_daily,
-                        state.avgSentDaily, state.avgSentDaily);
+                return StringUtil.getIcuPluralsString(context, state.avgSentDaily,
+                        R.string.notifications_sent_daily);
             }
-            return context.getResources().getQuantityString(R.plurals.notifications_sent_weekly,
-                    state.avgSentWeekly, state.avgSentWeekly);
+            return StringUtil.getIcuPluralsString(context, state.avgSentWeekly,
+                    R.string.notifications_sent_weekly);
         }
     }
 
@@ -671,6 +651,11 @@ public class NotificationBackend {
         return false;
     }
 
+    @VisibleForTesting
+    void setNm(INotificationManager inm) {
+        sINM = inm;
+    }
+
     /**
      * NotificationsSentState contains how often an app sends notifications and how recently it sent
      * one.
@@ -697,11 +682,15 @@ public class NotificationBackend {
         public boolean systemApp;
         public boolean lockedImportance;
         public boolean showBadge;
+        // For apps target T but have not but has not requested the permission
+        // we cannot change the permission state
+        public boolean permissionStateLocked;
         public int bubblePreference = NotificationManager.BUBBLE_PREFERENCE_NONE;
         public int userId;
         public int blockedChannelCount;
         public int channelCount;
         public Map<String, NotificationsSentState> sentByChannel;
         public NotificationsSentState sentByApp;
+        public boolean showAllChannels = true;
     }
 }

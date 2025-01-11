@@ -24,17 +24,20 @@ import android.content.pm.ResolveInfo;
 import android.content.pm.ServiceInfo;
 import android.os.RemoteException;
 import android.os.ServiceManager;
+import android.os.SystemProperties;
 import android.service.quicksettings.TileService;
 import android.util.Log;
 
 import androidx.annotation.VisibleForTesting;
 import androidx.preference.Preference;
 import androidx.preference.PreferenceScreen;
-import androidx.preference.SwitchPreference;
+import androidx.preference.SwitchPreferenceCompat;
+import androidx.preference.TwoStatePreference;
 
 import com.android.internal.statusbar.IStatusBarService;
 import com.android.settings.core.BasePreferenceController;
 
+import java.util.ArrayList;
 import java.util.List;
 
 public class DevelopmentTilePreferenceController extends BasePreferenceController {
@@ -58,19 +61,29 @@ public class DevelopmentTilePreferenceController extends BasePreferenceControlle
     public void displayPreference(PreferenceScreen screen) {
         super.displayPreference(screen);
         final Context context = screen.getContext();
-        final Intent intent = new Intent(TileService.ACTION_QS_TILE)
-                .setPackage(context.getPackageName());
-        final List<ResolveInfo> resolveInfos = mPackageManager.queryIntentServices(intent,
-                PackageManager.MATCH_DISABLED_COMPONENTS);
-        for (ResolveInfo info : resolveInfos) {
-            ServiceInfo sInfo = info.serviceInfo;
+        List<ServiceInfo> serviceInfos = getTileServiceList(context);
+
+        for (ServiceInfo sInfo : serviceInfos) {
+            // Check if the tile requires a flag. If it does, hide tile if flag is off.
+            if (sInfo.metaData != null) {
+                String flag = sInfo.metaData.getString(
+                        DevelopmentTiles.META_DATA_REQUIRES_SYSTEM_PROPERTY);
+                if (flag != null) {
+                    boolean enabled = SystemProperties.getBoolean(flag, false);
+                    if (!enabled) {
+                        // Flagged tile, flag is not enabled
+                        continue;
+                    }
+                }
+            }
+
             final int enabledSetting = mPackageManager.getComponentEnabledSetting(
                     new ComponentName(sInfo.packageName, sInfo.name));
             boolean checked = enabledSetting == PackageManager.COMPONENT_ENABLED_STATE_ENABLED
                     || ((enabledSetting == PackageManager.COMPONENT_ENABLED_STATE_DEFAULT)
                     && sInfo.enabled);
 
-            SwitchPreference preference = new SwitchPreference(context);
+            TwoStatePreference preference = new SwitchPreferenceCompat(context);
             preference.setTitle(sInfo.loadLabel(mPackageManager));
             preference.setIcon(sInfo.icon);
             preference.setKey(sInfo.name);
@@ -78,6 +91,24 @@ public class DevelopmentTilePreferenceController extends BasePreferenceControlle
             preference.setOnPreferenceChangeListener(mOnChangeHandler);
             screen.addPreference(preference);
         }
+    }
+
+    /**
+     * Get Quick Settings services from PackageManager
+     */
+    public static List<ServiceInfo> getTileServiceList(Context context) {
+        Intent intent = new Intent(TileService.ACTION_QS_TILE)
+                .setPackage(context.getPackageName());
+        PackageManager packageManager = context.getPackageManager();
+        List<ResolveInfo> resolveInfos = packageManager.queryIntentServices(intent,
+                PackageManager.MATCH_DISABLED_COMPONENTS | PackageManager.GET_META_DATA);
+
+        List<ServiceInfo> servicesInfos = new ArrayList<>();
+        for (ResolveInfo info : resolveInfos) {
+            ServiceInfo sInfo = info.serviceInfo;
+            servicesInfos.add(sInfo);
+        }
+        return servicesInfos;
     }
 
     @VisibleForTesting

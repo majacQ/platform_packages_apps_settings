@@ -31,8 +31,7 @@ import static com.android.settings.network.telephony.TelephonyConstants.Telephon
 import static com.android.settings.network.telephony.TelephonyConstants.TelephonyManagerConstants.NETWORK_MODE_NR_LTE_CDMA_EVDO;
 import static com.android.settings.network.telephony.TelephonyConstants.TelephonyManagerConstants.NETWORK_MODE_NR_LTE_GSM_WCDMA;
 
-import android.annotation.Nullable;
-import android.content.ContentResolver;
+import android.app.KeyguardManager;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
@@ -42,12 +41,17 @@ import android.graphics.Color;
 import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.LayerDrawable;
+import android.hardware.biometrics.BiometricPrompt;
 import android.net.ConnectivityManager;
 import android.net.Network;
 import android.net.NetworkCapabilities;
+import android.os.Bundle;
+import android.os.CancellationSignal;
+import android.os.Handler;
+import android.os.Looper;
 import android.os.PersistableBundle;
-import android.os.SystemClock;
-import android.os.SystemProperties;
+import android.os.UserHandle;
+import android.os.UserManager;
 import android.provider.Settings;
 import android.telecom.PhoneAccountHandle;
 import android.telecom.TelecomManager;
@@ -67,38 +71,32 @@ import android.text.TextUtils;
 import android.util.Log;
 import android.view.Gravity;
 
+import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
 import androidx.annotation.VisibleForTesting;
 
 import com.android.internal.util.ArrayUtils;
 import com.android.settings.R;
 import com.android.settings.Utils;
 import com.android.settings.core.BasePreferenceController;
+import com.android.settings.core.SubSettingLauncher;
+import com.android.settings.network.CarrierConfigCache;
 import com.android.settings.network.SubscriptionUtil;
 import com.android.settings.network.ims.WifiCallingQueryImsState;
 import com.android.settings.network.telephony.TelephonyConstants.TelephonyManagerConstants;
-import com.android.settingslib.development.DevelopmentSettingsEnabler;
+import com.android.settings.network.telephony.wificalling.WifiCallingRepository;
+import com.android.settingslib.core.instrumentation.Instrumentable;
 import com.android.settingslib.graph.SignalDrawable;
-import com.android.settingslib.utils.ThreadUtils;
+import com.android.settingslib.mobile.dataservice.SubscriptionInfoEntity;
 
-import java.util.Arrays;
+import java.util.HashSet;
 import java.util.List;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.Future;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
+import java.util.Set;
 
 public class MobileNetworkUtils {
 
     private static final String TAG = "MobileNetworkUtils";
 
-    // CID of the device.
-    private static final String KEY_CID = "ro.boot.cid";
-    // CIDs of devices which should not show anything related to eSIM.
-    private static final String KEY_ESIM_CID_IGNORE = "ro.setupwizard.esim_cid_ignore";
-    // System Property which is used to decide whether the default eSIM UI will be shown,
-    // the default value is false.
-    private static final String KEY_ENABLE_ESIM_UI_BY_DEFAULT =
-            "esim.enable_esim_system_ui_by_default";
     private static final String LEGACY_ACTION_CONFIGURE_PHONE_ACCOUNT =
             "android.telecom.action.CONNECTION_SERVICE_CONFIGURE";
     private static final String RTL_MARK = "\u200F";
@@ -106,6 +104,23 @@ public class MobileNetworkUtils {
     // The following constants are used to draw signal icon.
     public static final int NO_CELL_DATA_TYPE_ICON = 0;
     public static final Drawable EMPTY_DRAWABLE = new ColorDrawable(Color.TRANSPARENT);
+
+    /**
+     * Return true if current user limited by UserManager.DISALLOW_CONFIG_MOBILE_NETWORKS.
+     *
+     * Note: Guest user should have this restriction through
+     *       GuestTelephonyPreferenceController.java.
+     *       However, it's not help with those devices upgraded their software.
+     */
+    public static boolean isMobileNetworkUserRestricted(Context context) {
+        UserManager um = context.getSystemService(UserManager.class);
+        boolean disallow = false;
+        if (um != null) {
+            disallow = um.isGuestUser() || um.hasUserRestriction(
+                    UserManager.DISALLOW_CONFIG_MOBILE_NETWORKS);
+        }
+        return disallow;
+    }
 
     /**
      * Returns if DPC APNs are enforced.
@@ -201,14 +216,13 @@ public class MobileNetworkUtils {
      * should be shown to the user, false if the option should be hidden.
      */
     public static boolean isContactDiscoveryVisible(Context context, int subId) {
-        CarrierConfigManager carrierConfigManager = context.getSystemService(
-                CarrierConfigManager.class);
-        if (carrierConfigManager == null) {
+        CarrierConfigCache carrierConfigCache = CarrierConfigCache.getInstance(context);
+        if (!carrierConfigCache.hasCarrierConfigManager()) {
             Log.w(TAG, "isContactDiscoveryVisible: Could not resolve carrier config");
             return false;
         }
-        PersistableBundle bundle = carrierConfigManager.getConfigForSubId(subId);
-        return bundle.getBoolean(
+        PersistableBundle bundle = carrierConfigCache.getConfigForSubId(subId);
+        return bundle == null ? false : bundle.getBoolean(
                 CarrierConfigManager.KEY_USE_RCS_PRESENCE_BOOL, false /*default*/)
                 || bundle.getBoolean(CarrierConfigManager.Ims.KEY_RCS_BULK_CAPABILITY_EXCHANGE_BOOL,
                 false /*default*/);
@@ -251,61 +265,6 @@ public class MobileNetworkUtils {
     }
 
     /**
-     * Whether to show the entry point to eUICC settings.
-     *
-     * <p>We show the entry point on any device which supports eUICC as long as either the eUICC
-     * was ever provisioned (that is, at least one profile was ever downloaded onto it), or if
-     * the user has enabled development mode.
-     */
-    public static boolean showEuiccSettings(Context context) {
-        long timeForAccess = SystemClock.elapsedRealtime();
-        try {
-            Boolean isShow = ((Future<Boolean>) ThreadUtils.postOnBackgroundThread(() -> {
-                        try {
-                            return showEuiccSettingsDetecting(context);
-                        } catch (Exception threadException) {
-                            Log.w(TAG, "Accessing Euicc failure", threadException);
-                        }
-                        return Boolean.FALSE;
-                    })).get(3, TimeUnit.SECONDS);
-            return ((isShow != null) && isShow.booleanValue());
-        } catch (ExecutionException | InterruptedException | TimeoutException exception) {
-            timeForAccess = SystemClock.elapsedRealtime() - timeForAccess;
-            Log.w(TAG, "Accessing Euicc takes too long: +" + timeForAccess + "ms");
-        }
-        return false;
-    }
-
-    // The same as #showEuiccSettings(Context context)
-    public static Boolean showEuiccSettingsDetecting(Context context) {
-        final EuiccManager euiccManager =
-                (EuiccManager) context.getSystemService(EuiccManager.class);
-        if (!euiccManager.isEnabled()) {
-            Log.w(TAG, "EuiccManager is not enabled.");
-            return false;
-        }
-
-        final ContentResolver cr = context.getContentResolver();
-        final boolean esimIgnoredDevice =
-                Arrays.asList(TextUtils.split(SystemProperties.get(KEY_ESIM_CID_IGNORE, ""), ","))
-                        .contains(SystemProperties.get(KEY_CID));
-        final boolean enabledEsimUiByDefault =
-                SystemProperties.getBoolean(KEY_ENABLE_ESIM_UI_BY_DEFAULT, true);
-        final boolean euiccProvisioned =
-                Settings.Global.getInt(cr, Settings.Global.EUICC_PROVISIONED, 0) != 0;
-        final boolean inDeveloperMode =
-                DevelopmentSettingsEnabler.isDevelopmentSettingsEnabled(context);
-        Log.i(TAG,
-                String.format("showEuiccSettings: esimIgnoredDevice: %b, enabledEsimUiByDefault: "
-                        + "%b, euiccProvisioned: %b, inDeveloperMode: %b.",
-                esimIgnoredDevice, enabledEsimUiByDefault, euiccProvisioned, inDeveloperMode));
-        return (euiccProvisioned
-                || (!esimIgnoredDevice && inDeveloperMode)
-                || (!esimIgnoredDevice && enabledEsimUiByDefault
-                        && isCurrentCountrySupported(context)));
-    }
-
-    /**
      * Return {@code true} if mobile data is enabled
      */
     public static boolean isMobileDataEnabled(Context context) {
@@ -330,8 +289,10 @@ public class MobileNetworkUtils {
         final TelephonyManager telephonyManager = context.getSystemService(TelephonyManager.class)
                 .createForSubscriptionId(subId);
         final SubscriptionManager subscriptionManager = context.getSystemService(
-                SubscriptionManager.class);
-        telephonyManager.setDataEnabled(enabled);
+                SubscriptionManager.class).createForAllUserProfiles();
+        Log.d(TAG, "setDataEnabledForReason: " + enabled);
+        telephonyManager.setDataEnabledForReason(TelephonyManager.DATA_ENABLED_REASON_USER,
+                enabled);
 
         if (disableOtherSubscriptions) {
             final List<SubscriptionInfo> subInfoList =
@@ -340,8 +301,10 @@ public class MobileNetworkUtils {
                 for (SubscriptionInfo subInfo : subInfoList) {
                     // We never disable mobile data for opportunistic subscriptions.
                     if (subInfo.getSubscriptionId() != subId && !subInfo.isOpportunistic()) {
-                        context.getSystemService(TelephonyManager.class).createForSubscriptionId(
-                                subInfo.getSubscriptionId()).setDataEnabled(false);
+                        context.getSystemService(TelephonyManager.class)
+                                .createForSubscriptionId(subInfo.getSubscriptionId())
+                                .setDataEnabledForReason(TelephonyManager.DATA_ENABLED_REASON_USER,
+                                        false);
                     }
                 }
             }
@@ -355,18 +318,18 @@ public class MobileNetworkUtils {
         if (subId == SubscriptionManager.INVALID_SUBSCRIPTION_ID) {
             return false;
         }
-        final TelephonyManager telephonyManager = context.getSystemService(TelephonyManager.class)
-                .createForSubscriptionId(subId);
-        final PersistableBundle carrierConfig = context.getSystemService(
-                CarrierConfigManager.class).getConfigForSubId(subId);
-
-
-        if (telephonyManager.getPhoneType() == TelephonyManager.PHONE_TYPE_CDMA) {
-            return true;
-        } else if (carrierConfig != null
+        final PersistableBundle carrierConfig =
+                CarrierConfigCache.getInstance(context).getConfigForSubId(subId);
+        if (carrierConfig != null
                 && !carrierConfig.getBoolean(
                 CarrierConfigManager.KEY_HIDE_CARRIER_NETWORK_SETTINGS_BOOL)
                 && carrierConfig.getBoolean(CarrierConfigManager.KEY_WORLD_PHONE_BOOL)) {
+            return true;
+        }
+
+        final TelephonyManager telephonyManager = context.getSystemService(TelephonyManager.class)
+                .createForSubscriptionId(subId);
+        if (telephonyManager.getPhoneType() == TelephonyManager.PHONE_TYPE_CDMA) {
             return true;
         }
 
@@ -420,17 +383,18 @@ public class MobileNetworkUtils {
     }
 
     private static boolean isGsmBasicOptions(Context context, int subId) {
-        final TelephonyManager telephonyManager = context.getSystemService(TelephonyManager.class)
-                .createForSubscriptionId(subId);
-        final PersistableBundle carrierConfig = context.getSystemService(
-                CarrierConfigManager.class).getConfigForSubId(subId);
-
-        if (telephonyManager.getPhoneType() == TelephonyManager.PHONE_TYPE_GSM) {
-            return true;
-        } else if (carrierConfig != null
+        final PersistableBundle carrierConfig =
+                CarrierConfigCache.getInstance(context).getConfigForSubId(subId);
+        if (carrierConfig != null
                 && !carrierConfig.getBoolean(
                 CarrierConfigManager.KEY_HIDE_CARRIER_NETWORK_SETTINGS_BOOL)
                 && carrierConfig.getBoolean(CarrierConfigManager.KEY_WORLD_PHONE_BOOL)) {
+            return true;
+        }
+
+        final TelephonyManager telephonyManager = context.getSystemService(TelephonyManager.class)
+                .createForSubscriptionId(subId);
+        if (telephonyManager.getPhoneType() == TelephonyManager.PHONE_TYPE_GSM) {
             return true;
         }
 
@@ -442,8 +406,8 @@ public class MobileNetworkUtils {
      * settings
      */
     public static boolean isWorldMode(Context context, int subId) {
-        final PersistableBundle carrierConfig = context.getSystemService(
-                CarrierConfigManager.class).getConfigForSubId(subId);
+        final PersistableBundle carrierConfig =
+                CarrierConfigCache.getInstance(context).getConfigForSubId(subId);
         return carrierConfig == null
                 ? false
                 : carrierConfig.getBoolean(CarrierConfigManager.KEY_WORLD_MODE_ENABLED_BOOL);
@@ -455,8 +419,8 @@ public class MobileNetworkUtils {
     public static boolean shouldDisplayNetworkSelectOptions(Context context, int subId) {
         final TelephonyManager telephonyManager = context.getSystemService(TelephonyManager.class)
                 .createForSubscriptionId(subId);
-        final PersistableBundle carrierConfig = context.getSystemService(
-                CarrierConfigManager.class).getConfigForSubId(subId);
+        final PersistableBundle carrierConfig =
+                CarrierConfigCache.getInstance(context).getConfigForSubId(subId);
         if (subId == SubscriptionManager.INVALID_SUBSCRIPTION_ID
                 || carrierConfig == null
                 || !carrierConfig.getBoolean(
@@ -468,28 +432,23 @@ public class MobileNetworkUtils {
             return false;
         }
 
-        final int networkMode = getNetworkTypeFromRaf(
-                (int) telephonyManager.getAllowedNetworkTypesForReason(
-                        TelephonyManager.ALLOWED_NETWORK_TYPES_REASON_USER));
-        if (networkMode == TelephonyManagerConstants.NETWORK_MODE_LTE_CDMA_EVDO
-                && isWorldMode(context, subId)) {
-            return false;
-        }
-        if (shouldSpeciallyUpdateGsmCdma(context, subId)) {
-            return false;
-        }
-
-        if (isGsmBasicOptions(context, subId)) {
-            return true;
-        }
-
         if (isWorldMode(context, subId)) {
+            final int networkMode = getNetworkTypeFromRaf(
+                    (int) telephonyManager.getAllowedNetworkTypesForReason(
+                            TelephonyManager.ALLOWED_NETWORK_TYPES_REASON_USER));
+            if (networkMode == TelephonyManagerConstants.NETWORK_MODE_LTE_CDMA_EVDO) {
+                return false;
+            }
+            if (shouldSpeciallyUpdateGsmCdma(context, subId)) {
+                return false;
+            }
+
             if (networkMode == TelephonyManagerConstants.NETWORK_MODE_LTE_GSM_WCDMA) {
                 return true;
             }
         }
 
-        return false;
+        return isGsmBasicOptions(context, subId);
     }
 
     /**
@@ -502,8 +461,7 @@ public class MobileNetworkUtils {
 
     //TODO(b/117651939): move it to telephony
     private static boolean isTdscdmaSupported(Context context, TelephonyManager telephonyManager) {
-        final PersistableBundle carrierConfig = context.getSystemService(
-                CarrierConfigManager.class).getConfig();
+        final PersistableBundle carrierConfig = CarrierConfigCache.getInstance(context).getConfig();
 
         if (carrierConfig == null) {
             return false;
@@ -512,12 +470,15 @@ public class MobileNetworkUtils {
         if (carrierConfig.getBoolean(CarrierConfigManager.KEY_SUPPORT_TDSCDMA_BOOL)) {
             return true;
         }
+        final String[] numericArray = carrierConfig.getStringArray(
+                CarrierConfigManager.KEY_SUPPORT_TDSCDMA_ROAMING_NETWORKS_STRING_ARRAY);
+        if (numericArray == null) {
+            return false;
+        }
         final ServiceState serviceState = telephonyManager.getServiceState();
         final String operatorNumeric =
                 (serviceState != null) ? serviceState.getOperatorNumeric() : null;
-        final String[] numericArray = carrierConfig.getStringArray(
-                CarrierConfigManager.KEY_SUPPORT_TDSCDMA_ROAMING_NETWORKS_STRING_ARRAY);
-        if (numericArray == null || operatorNumeric == null) {
+        if (operatorNumeric == null) {
             return false;
         }
         for (String numeric : numericArray) {
@@ -582,6 +543,9 @@ public class MobileNetworkUtils {
      */
     @VisibleForTesting
     static boolean shouldSpeciallyUpdateGsmCdma(Context context, int subId) {
+        if (!isWorldMode(context, subId)) {
+            return false;
+        }
         final TelephonyManager telephonyManager = context.getSystemService(TelephonyManager.class)
                 .createForSubscriptionId(subId);
         final int networkMode = getNetworkTypeFromRaf(
@@ -594,7 +558,7 @@ public class MobileNetworkUtils {
                 || networkMode
                 == TelephonyManagerConstants.NETWORK_MODE_LTE_TDSCDMA_CDMA_EVDO_GSM_WCDMA
                 || networkMode == TelephonyManagerConstants.NETWORK_MODE_LTE_CDMA_EVDO_GSM_WCDMA) {
-            if (!isTdscdmaSupported(context, subId) && isWorldMode(context, subId)) {
+            if (!isTdscdmaSupported(context, subId)) {
                 return true;
             }
         }
@@ -603,10 +567,11 @@ public class MobileNetworkUtils {
     }
 
     public static Drawable getSignalStrengthIcon(Context context, int level, int numLevels,
-            int iconType, boolean cutOut) {
+            int iconType, boolean cutOut, boolean carrierNetworkChanged) {
         final SignalDrawable signalDrawable = new SignalDrawable(context);
         signalDrawable.setLevel(
-                SignalDrawable.getState(level, numLevels, cutOut));
+                carrierNetworkChanged ? SignalDrawable.getCarrierChangeState(numLevels)
+                        : SignalDrawable.getState(level, numLevels, cutOut));
 
         // Make the network type drawable
         final Drawable networkDrawable =
@@ -637,39 +602,26 @@ public class MobileNetworkUtils {
      * 2. Similar design which aligned with operator name displayed in status bar
      */
     public static CharSequence getCurrentCarrierNameForDisplay(Context context, int subId) {
-        final SubscriptionManager sm = context.getSystemService(SubscriptionManager.class);
-        if (sm != null) {
-            final SubscriptionInfo subInfo = getSubscriptionInfo(sm, subId);
-            if (subInfo != null) {
-                return subInfo.getCarrierName();
-            }
+        final SubscriptionInfo subInfo = getSubscriptionInfo(context, subId);
+        if (subInfo != null) {
+            return subInfo.getCarrierName();
         }
         return getOperatorNameFromTelephonyManager(context);
     }
 
     public static CharSequence getCurrentCarrierNameForDisplay(Context context) {
-        final SubscriptionManager sm = context.getSystemService(SubscriptionManager.class);
-        if (sm != null) {
-            final int subId = sm.getDefaultSubscriptionId();
-            final SubscriptionInfo subInfo = getSubscriptionInfo(sm, subId);
-            if (subInfo != null) {
-                return subInfo.getCarrierName();
-            }
+        final SubscriptionInfo subInfo = getSubscriptionInfo(context,
+                SubscriptionManager.getDefaultSubscriptionId());
+        if (subInfo != null) {
+            return subInfo.getCarrierName();
         }
         return getOperatorNameFromTelephonyManager(context);
     }
 
-    private static SubscriptionInfo getSubscriptionInfo(SubscriptionManager subManager, int subId) {
-        List<SubscriptionInfo> subInfos = subManager.getActiveSubscriptionInfoList();
-        if (subInfos == null) {
-            return null;
-        }
-        for (SubscriptionInfo subInfo : subInfos) {
-            if (subInfo.getSubscriptionId() == subId) {
-                return subInfo;
-            }
-        }
-        return null;
+    private static @Nullable SubscriptionInfo getSubscriptionInfo(Context context, int subId) {
+        SubscriptionManager sm = context.getSystemService(SubscriptionManager.class);
+        if (sm == null) return null;
+        return sm.createForAllUserProfiles().getActiveSubscriptionInfo(subId);
     }
 
     private static String getOperatorNameFromTelephonyManager(Context context) {
@@ -681,12 +633,13 @@ public class MobileNetworkUtils {
         return tm.getNetworkOperatorName();
     }
 
-    private static int[] getActiveSubscriptionIdList(Context context) {
+    @VisibleForTesting
+    static int[] getActiveSubscriptionIdList(Context context) {
         final SubscriptionManager subscriptionManager = context.getSystemService(
-                SubscriptionManager.class);
+                SubscriptionManager.class).createForAllUserProfiles();
         final List<SubscriptionInfo> subInfoList =
-                subscriptionManager.getActiveSubscriptionInfoList();
-        if (subInfoList == null) {
+                SubscriptionUtil.getActiveSubscriptions(subscriptionManager);
+        if (subInfoList == null || subInfoList.isEmpty()) {
             return new int[0];
         }
         int[] activeSubIds = new int[subInfoList.size()];
@@ -707,15 +660,17 @@ public class MobileNetworkUtils {
         final TelephonyManager tm =
                 (TelephonyManager) context.getSystemService(TelephonyManager.class);
 
+        Set<String> countrySet = new HashSet<>();
         for (int i = 0; i < tm.getPhoneCount(); i++) {
             String countryCode = tm.getNetworkCountryIso(i);
-            if (em.isSupportedCountry(countryCode)) {
-                Log.i(TAG, "isCurrentCountrySupported: eSIM is supported in " + countryCode);
-                return true;
+            if (!TextUtils.isEmpty(countryCode)) {
+                countrySet.add(countryCode);
             }
         }
-        Log.i(TAG, "isCurrentCountrySupported: eSIM is not supported in the current country.");
-        return false;
+        boolean isSupported = countrySet.stream().anyMatch(em::isSupportedCountry);
+        Log.i(TAG, "isCurrentCountrySupported countryCodes: " + countrySet
+                + " eSIMSupported: " + isSupported);
+        return isSupported;
     }
 
     /**
@@ -907,45 +862,31 @@ public class MobileNetworkUtils {
 
     /**
      * Copied from WifiCallingPreferenceController#isWifiCallingEnabled()
+     *
+     * @deprecated Use {@link WifiCallingRepository#wifiCallingReadyFlow()} instead.
      */
+    @Deprecated
     public static boolean isWifiCallingEnabled(Context context, int subId,
-            @Nullable WifiCallingQueryImsState queryImsState,
-            @Nullable PhoneAccountHandle phoneAccountHandle) {
-        if (phoneAccountHandle == null){
-            phoneAccountHandle = context.getSystemService(TelecomManager.class)
-                    .getSimCallManagerForSubscription(subId);
+            @Nullable WifiCallingQueryImsState queryImsState) {
+        if (queryImsState == null) {
+            queryImsState = new WifiCallingQueryImsState(context, subId);
         }
-        boolean isWifiCallingEnabled;
-        if (phoneAccountHandle != null) {
-            final Intent intent = buildPhoneAccountConfigureIntent(context, phoneAccountHandle);
-            isWifiCallingEnabled = intent != null;
-        } else {
-            if (queryImsState == null) {
-                queryImsState = new WifiCallingQueryImsState(context, subId);
-            }
-            isWifiCallingEnabled = queryImsState.isReadyToWifiCalling();
-        }
-        return isWifiCallingEnabled;
+        return queryImsState.isReadyToWifiCalling();
     }
-
 
     /**
      * Returns preferred status of Calls & SMS separately when Provider Model is enabled.
      */
     public static CharSequence getPreferredStatus(boolean isRtlMode, Context context,
-            SubscriptionManager subscriptionManager, boolean isPreferredCallStatus) {
-        final List<SubscriptionInfo> subs = SubscriptionUtil.getActiveSubscriptions(
-                subscriptionManager);
-        if (!subs.isEmpty()) {
+            boolean isPreferredCallStatus, List<SubscriptionInfoEntity> entityList) {
+        if (entityList != null && !entityList.isEmpty()) {
             final StringBuilder summary = new StringBuilder();
-            for (SubscriptionInfo subInfo : subs) {
-                int subsSize = subs.size();
-                final CharSequence displayName = SubscriptionUtil.getUniqueSubscriptionDisplayName(
-                        subInfo, context);
+            for (SubscriptionInfoEntity subInfo : entityList) {
+                int subsSize = entityList.size();
+                final CharSequence displayName = subInfo.uniqueName;
 
                 // Set displayName as summary if there is only one valid SIM.
-                if (subsSize == 1
-                        && SubscriptionManager.isValidSubscriptionId(subInfo.getSubscriptionId())) {
+                if (subsSize == 1 && subInfo.isValidSubscription) {
                     return displayName;
                 }
 
@@ -963,7 +904,7 @@ public class MobileNetworkUtils {
                             .append(")");
                 }
                 // Do not add ", " for the last subscription.
-                if (subInfo != subs.get(subs.size() - 1)) {
+                if (subInfo != entityList.get(entityList.size() - 1)) {
                     summary.append(", ");
                 }
 
@@ -977,24 +918,20 @@ public class MobileNetworkUtils {
         }
     }
 
-    private static CharSequence getPreferredCallStatus(Context context, SubscriptionInfo subInfo) {
-        final int subId = subInfo.getSubscriptionId();
+    private static CharSequence getPreferredCallStatus(Context context,
+            SubscriptionInfoEntity subInfo) {
         String status = "";
-        boolean isDataPreferred = subId == SubscriptionManager.getDefaultVoiceSubscriptionId();
-
-        if (isDataPreferred) {
+        if (subInfo.getSubId() == SubscriptionManager.getDefaultVoiceSubscriptionId()) {
             status = setSummaryResId(context, R.string.calls_sms_preferred);
         }
 
         return status;
     }
 
-    private static CharSequence getPreferredSmsStatus(Context context, SubscriptionInfo subInfo) {
-        final int subId = subInfo.getSubscriptionId();
+    private static CharSequence getPreferredSmsStatus(Context context,
+            SubscriptionInfoEntity subInfo) {
         String status = "";
-        boolean isSmsPreferred = subId == SubscriptionManager.getDefaultSmsSubscriptionId();
-
-        if (isSmsPreferred) {
+        if (subInfo.getSubId() == SubscriptionManager.getDefaultSmsSubscriptionId()) {
             status = setSummaryResId(context, R.string.calls_sms_preferred);
         }
 
@@ -1005,4 +942,93 @@ public class MobileNetworkUtils {
         return context.getResources().getString(resId);
     }
 
+    public static void launchMobileNetworkSettings(Context context, SubscriptionInfo info) {
+        if (!SubscriptionUtil.isSimHardwareVisible(context)) {
+            Log.e(TAG, "launchMobileNetworkSettings fail, device without such UI.");
+            return;
+        }
+        final int subId = info.getSubscriptionId();
+        if (subId == SubscriptionManager.INVALID_SUBSCRIPTION_ID) {
+            Log.d(TAG, "launchMobileNetworkSettings fail, subId is invalid.");
+            return;
+        }
+
+        Log.d(TAG, "launchMobileNetworkSettings for subId: " + subId);
+        final Bundle extra = new Bundle();
+        extra.putInt(Settings.EXTRA_SUB_ID, subId);
+        new SubSettingLauncher(context)
+                .setTitleText(SubscriptionUtil.getUniqueSubscriptionDisplayName(info, context))
+                .setDestination(MobileNetworkSettings.class.getCanonicalName())
+                .setSourceMetricsCategory(Instrumentable.METRICS_CATEGORY_UNKNOWN)
+                .setArguments(extra)
+                .launch();
+    }
+
+    public static void launchMobileNetworkSettings(Context context, SubscriptionInfoEntity info) {
+        final int subId = Integer.valueOf(info.subId);
+        if (!info.isValidSubscription) {
+            Log.d(TAG, "launchMobileNetworkSettings fail, subId is invalid.");
+            return;
+        }
+
+        Log.d(TAG, "launchMobileNetworkSettings for SubscriptionInfoEntity subId: " + subId);
+        final Bundle extra = new Bundle();
+        extra.putInt(Settings.EXTRA_SUB_ID, subId);
+        new SubSettingLauncher(context)
+                .setTitleText(info.uniqueName)
+                .setDestination(MobileNetworkSettings.class.getCanonicalName())
+                .setSourceMetricsCategory(Instrumentable.METRICS_CATEGORY_UNKNOWN)
+                .setArguments(extra)
+                .launch();
+    }
+
+    /**
+     * Shows authentication screen to confirm credentials (pin/pattern/password) for the current
+     * user of the device.
+     *
+     * <p>Similar to WifiDppUtils.showLockScreen(), but doesn't check for the existence of
+     * SIM PIN lock, only screen PIN lock.
+     *
+     * @param context The {@code Context} used to get {@link KeyguardManager} service
+     * @param onSuccess The {@code Runnable} which will be executed if the user does not setup
+     *                  device security or if lock screen is unlocked
+     */
+    public static void showLockScreen(@NonNull Context context, @NonNull Runnable onSuccess) {
+        final KeyguardManager keyguardManager =
+                context.getSystemService(KeyguardManager.class);
+
+        if (keyguardManager.isDeviceSecure()) {
+            final BiometricPrompt.AuthenticationCallback authenticationCallback =
+                    new BiometricPrompt.AuthenticationCallback() {
+                        @Override
+                        public void onAuthenticationSucceeded(
+                                    BiometricPrompt.AuthenticationResult result) {
+                            onSuccess.run();
+                        }
+
+                        @Override
+                        public void onAuthenticationError(int errorCode, CharSequence errString) {
+                            // Do nothing
+                        }
+            };
+
+            final int userId = UserHandle.myUserId();
+            final BiometricPrompt biometricPrompt = new BiometricPrompt.Builder(context)
+                    .setTitle(context.getText(R.string.wifi_dpp_lockscreen_title))
+                    .setDeviceCredentialAllowed(true)
+                    .setTextForDeviceCredential(
+                        /* title= */ null,
+                        Utils.getConfirmCredentialStringForUser(
+                                context, userId, Utils.getCredentialType(context, userId)),
+                        /* description= */ null)
+                    .build();
+            final Handler handler = new Handler(Looper.getMainLooper());
+            biometricPrompt.authenticate(
+                    new CancellationSignal(),
+                    handler::post,
+                    authenticationCallback);
+        } else {
+            onSuccess.run();
+        }
+    }
 }

@@ -44,7 +44,8 @@ public class FingerprintEnrollParentalConsent extends FingerprintEnrollIntroduct
             R.string.security_settings_fingerprint_v2_enroll_introduction_footer_message_consent_2,
             R.string.security_settings_fingerprint_v2_enroll_introduction_footer_message_consent_3,
             R.string.security_settings_fingerprint_v2_enroll_introduction_footer_message_consent_4,
-            R.string.security_settings_fingerprint_v2_enroll_introduction_footer_message_consent_5
+            R.string.security_settings_fingerprint_v2_enroll_introduction_footer_message_consent_5,
+            R.string.security_settings_fingerprint_v2_enroll_introduction_footer_message_consent_6
     };
 
     @Override
@@ -116,6 +117,11 @@ public class FingerprintEnrollParentalConsent extends FingerprintEnrollIntroduct
         return R.string.security_settings_fingerprint_v2_enroll_introduction_footer_message_consent_5;
     }
 
+    @StringRes
+    protected int getFooterMessage6() {
+        return R.string.security_settings_fingerprint_v2_enroll_introduction_footer_message_consent_6;
+    }
+
     @Override
     protected int getHeaderResDefault() {
         return R.string.security_settings_fingerprint_enroll_consent_introduction_title;
@@ -124,5 +130,13 @@ public class FingerprintEnrollParentalConsent extends FingerprintEnrollIntroduct
     @Override
     public int getMetricsCategory() {
         return SettingsEnums.FINGERPRINT_PARENTAL_CONSENT;
+    }
+
+
+    @Override
+    protected void updateDescriptionText() {
+        super.updateDescriptionText();
+        setDescriptionText(
+                R.string.security_settings_fingerprint_enroll_introduction_consent_message);
     }
 }

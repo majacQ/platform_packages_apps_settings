@@ -18,8 +18,9 @@
         xmlns:settings="http://schemas.android.com/apk/res-auto">
 
         <Preference
+                android:theme="@style/VpnAppManagementPreferenceStyle"
+                android:title="@string/vpn_version"
                 android:key="version"
-                android:textColor="?android:attr/textColorSecondary"
                 android:selectable="false"/>
 
         <com.android.settingslib.RestrictedSwitchPreference

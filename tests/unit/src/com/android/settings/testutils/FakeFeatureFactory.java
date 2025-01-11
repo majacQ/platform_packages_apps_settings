@@ -19,35 +19,44 @@ import static org.mockito.Mockito.mock;
 
 import android.content.Context;
 
+import com.android.settings.accessibility.AccessibilityMetricsFeatureProvider;
 import com.android.settings.accessibility.AccessibilitySearchFeatureProvider;
 import com.android.settings.accounts.AccountFeatureProvider;
 import com.android.settings.applications.ApplicationFeatureProvider;
-import com.android.settings.applications.GameSettingsFeatureProvider;
-import com.android.settings.applications.appinfo.ExtraAppInfoFeatureProvider;
-import com.android.settings.aware.AwareFeatureProvider;
 import com.android.settings.biometrics.face.FaceFeatureProvider;
+import com.android.settings.biometrics.fingerprint.FingerprintFeatureProvider;
 import com.android.settings.bluetooth.BluetoothFeatureProvider;
+import com.android.settings.connecteddevice.fastpair.FastPairFeatureProvider;
+import com.android.settings.connecteddevice.stylus.StylusFeatureProvider;
 import com.android.settings.dashboard.DashboardFeatureProvider;
 import com.android.settings.dashboard.suggestions.SuggestionFeatureProvider;
+import com.android.settings.display.DisplayFeatureProvider;
 import com.android.settings.enterprise.EnterprisePrivacyFeatureProvider;
 import com.android.settings.fuelgauge.BatterySettingsFeatureProvider;
 import com.android.settings.fuelgauge.BatteryStatusFeatureProvider;
 import com.android.settings.fuelgauge.PowerUsageFeatureProvider;
-import com.android.settings.gestures.AssistGestureFeatureProvider;
 import com.android.settings.homepage.contextualcards.ContextualCardFeatureProvider;
+import com.android.settings.inputmethod.KeyboardSettingsFeatureProvider;
 import com.android.settings.localepicker.LocaleFeatureProvider;
+import com.android.settings.notification.syncacrossdevices.SyncAcrossDevicesFeatureProvider;
+import com.android.settings.onboarding.OnboardingFeatureProvider;
 import com.android.settings.overlay.DockUpdaterFeatureProvider;
 import com.android.settings.overlay.FeatureFactory;
 import com.android.settings.overlay.SupportFeatureProvider;
 import com.android.settings.overlay.SurveyFeatureProvider;
 import com.android.settings.panel.PanelFeatureProvider;
+import com.android.settings.privatespace.PrivateSpaceLoginFeatureProvider;
 import com.android.settings.search.SearchFeatureProvider;
 import com.android.settings.security.SecurityFeatureProvider;
 import com.android.settings.security.SecuritySettingsFeatureProvider;
 import com.android.settings.slices.SlicesFeatureProvider;
 import com.android.settings.users.UserFeatureProvider;
+import com.android.settings.vpn2.AdvancedVpnFeatureProvider;
 import com.android.settings.wifi.WifiTrackerLibProvider;
+import com.android.settings.wifi.factory.WifiFeatureProvider;
 import com.android.settingslib.core.instrumentation.MetricsFeatureProvider;
+
+import org.jetbrains.annotations.NotNull;
 
 /**
  * Test util to provide fake FeatureFactory. To use this factory, call {@code setupForTest} in
@@ -68,11 +77,10 @@ public class FakeFeatureFactory extends FeatureFactory {
     public final SecurityFeatureProvider securityFeatureProvider;
     public final SuggestionFeatureProvider suggestionsFeatureProvider;
     public final UserFeatureProvider userFeatureProvider;
-    public final AssistGestureFeatureProvider assistGestureFeatureProvider;
     public final AccountFeatureProvider mAccountFeatureProvider;
     public final BluetoothFeatureProvider mBluetoothFeatureProvider;
-    public final AwareFeatureProvider mAwareFeatureProvider;
     public final FaceFeatureProvider mFaceFeatureProvider;
+    public final FingerprintFeatureProvider mFingerprintFeatureProvider;
 
     public PanelFeatureProvider panelFeatureProvider;
     public SlicesFeatureProvider slicesFeatureProvider;
@@ -80,22 +88,33 @@ public class FakeFeatureFactory extends FeatureFactory {
     public ContextualCardFeatureProvider mContextualCardFeatureProvider;
 
     public WifiTrackerLibProvider wifiTrackerLibProvider;
-    public ExtraAppInfoFeatureProvider extraAppInfoFeatureProvider;
     public SecuritySettingsFeatureProvider securitySettingsFeatureProvider;
-    public GameSettingsFeatureProvider gameSettingsFeatureProvider;
     public AccessibilitySearchFeatureProvider mAccessibilitySearchFeatureProvider;
+    public AccessibilityMetricsFeatureProvider mAccessibilityMetricsFeatureProvider;
+    public AdvancedVpnFeatureProvider mAdvancedVpnFeatureProvider;
+    public WifiFeatureProvider mWifiFeatureProvider;
+    public KeyboardSettingsFeatureProvider mKeyboardSettingsFeatureProvider;
+    public StylusFeatureProvider mStylusFeatureProvider;
+    public OnboardingFeatureProvider mOnboardingFeatureProvider;
+    public FastPairFeatureProvider mFastPairFeatureProvider;
+    public PrivateSpaceLoginFeatureProvider mPrivateSpaceLoginFeatureProvider;
+    public DisplayFeatureProvider mDisplayFeatureProvider;
+    public SyncAcrossDevicesFeatureProvider mSyncAcrossDevicesFeatureProvider;
 
-    /**
-     * Call this in {@code @Before} method of the test class to use fake factory.
-     */
+    /** Call this in {@code @Before} method of the test class to use fake factory. */
     public static FakeFeatureFactory setupForTest() {
-        sFactory = new FakeFeatureFactory();
-        return (FakeFeatureFactory) sFactory;
+        FakeFeatureFactory factory = new FakeFeatureFactory();
+        try {
+            setFactory(getAppContext(), factory);
+        } catch (NoSuchMethodError ex) {
+            // The getAppContext() @JvmStatic method doesn't appear to generated in AOSP. Falling
+            // back to using the companion object method instead.
+            setFactory(FeatureFactory.Companion.getAppContext(), factory);
+        }
+        return factory;
     }
 
-  /**
-   * FeatureFactory constructor.
-   */
+    /** FeatureFactory constructor. */
     public FakeFeatureFactory() {
         supportFeatureProvider = mock(SupportFeatureProvider.class);
         metricsFeatureProvider = mock(MetricsFeatureProvider.class);
@@ -112,27 +131,35 @@ public class FakeFeatureFactory extends FeatureFactory {
         securityFeatureProvider = mock(SecurityFeatureProvider.class);
         suggestionsFeatureProvider = mock(SuggestionFeatureProvider.class);
         userFeatureProvider = mock(UserFeatureProvider.class);
-        assistGestureFeatureProvider = mock(AssistGestureFeatureProvider.class);
         slicesFeatureProvider = mock(SlicesFeatureProvider.class);
         mAccountFeatureProvider = mock(AccountFeatureProvider.class);
         mContextualCardFeatureProvider = mock(ContextualCardFeatureProvider.class);
         panelFeatureProvider = mock(PanelFeatureProvider.class);
         mBluetoothFeatureProvider = mock(BluetoothFeatureProvider.class);
-        mAwareFeatureProvider = mock(AwareFeatureProvider.class);
         mFaceFeatureProvider = mock(FaceFeatureProvider.class);
+        mFingerprintFeatureProvider = mock(FingerprintFeatureProvider.class);
         wifiTrackerLibProvider = mock(WifiTrackerLibProvider.class);
-        extraAppInfoFeatureProvider = mock(ExtraAppInfoFeatureProvider.class);
         securitySettingsFeatureProvider = mock(SecuritySettingsFeatureProvider.class);
-        gameSettingsFeatureProvider = mock(GameSettingsFeatureProvider.class);
+        mAccessibilitySearchFeatureProvider = mock(AccessibilitySearchFeatureProvider.class);
+        mAccessibilityMetricsFeatureProvider = mock(AccessibilityMetricsFeatureProvider.class);
+        mAdvancedVpnFeatureProvider = mock(AdvancedVpnFeatureProvider.class);
+        mWifiFeatureProvider = mock(WifiFeatureProvider.class);
+        mKeyboardSettingsFeatureProvider = mock(KeyboardSettingsFeatureProvider.class);
+        mStylusFeatureProvider = mock(StylusFeatureProvider.class);
+        mOnboardingFeatureProvider = mock(OnboardingFeatureProvider.class);
+        mFastPairFeatureProvider = mock(FastPairFeatureProvider.class);
+        mPrivateSpaceLoginFeatureProvider = mock(PrivateSpaceLoginFeatureProvider.class);
+        mDisplayFeatureProvider = mock(DisplayFeatureProvider.class);
+        mSyncAcrossDevicesFeatureProvider = mock(SyncAcrossDevicesFeatureProvider.class);
     }
 
     @Override
-    public SuggestionFeatureProvider getSuggestionFeatureProvider(Context context) {
+    public SuggestionFeatureProvider getSuggestionFeatureProvider() {
         return suggestionsFeatureProvider;
     }
 
     @Override
-    public SupportFeatureProvider getSupportFeatureProvider(Context context) {
+    public SupportFeatureProvider getSupportFeatureProvider() {
         return supportFeatureProvider;
     }
 
@@ -141,23 +168,26 @@ public class FakeFeatureFactory extends FeatureFactory {
         return metricsFeatureProvider;
     }
 
+    @NotNull
     @Override
-    public BatteryStatusFeatureProvider getBatteryStatusFeatureProvider(Context context) {
+    public BatteryStatusFeatureProvider getBatteryStatusFeatureProvider() {
         return batteryStatusFeatureProvider;
     }
 
     @Override
-    public BatterySettingsFeatureProvider getBatterySettingsFeatureProvider(Context context) {
+    public BatterySettingsFeatureProvider getBatterySettingsFeatureProvider() {
         return batterySettingsFeatureProvider;
     }
 
+    @NotNull
     @Override
-    public PowerUsageFeatureProvider getPowerUsageFeatureProvider(Context context) {
+    public PowerUsageFeatureProvider getPowerUsageFeatureProvider() {
         return powerUsageFeatureProvider;
     }
 
+    @NotNull
     @Override
-    public DashboardFeatureProvider getDashboardFeatureProvider(Context context) {
+    public DashboardFeatureProvider getDashboardFeatureProvider() {
         return dashboardFeatureProvider;
     }
 
@@ -166,8 +196,9 @@ public class FakeFeatureFactory extends FeatureFactory {
         return dockUpdaterFeatureProvider;
     }
 
+    @NotNull
     @Override
-    public ApplicationFeatureProvider getApplicationFeatureProvider(Context context) {
+    public ApplicationFeatureProvider getApplicationFeatureProvider() {
         return applicationFeatureProvider;
     }
 
@@ -176,8 +207,9 @@ public class FakeFeatureFactory extends FeatureFactory {
         return localeFeatureProvider;
     }
 
+    @NotNull
     @Override
-    public EnterprisePrivacyFeatureProvider getEnterprisePrivacyFeatureProvider(Context context) {
+    public EnterprisePrivacyFeatureProvider getEnterprisePrivacyFeatureProvider() {
         return enterprisePrivacyFeatureProvider;
     }
 
@@ -196,14 +228,10 @@ public class FakeFeatureFactory extends FeatureFactory {
         return securityFeatureProvider;
     }
 
+    @NotNull
     @Override
-    public UserFeatureProvider getUserFeatureProvider(Context context) {
+    public UserFeatureProvider getUserFeatureProvider() {
         return userFeatureProvider;
-    }
-
-    @Override
-    public AssistGestureFeatureProvider getAssistGestureFeatureProvider() {
-        return assistGestureFeatureProvider;
     }
 
     @Override
@@ -227,13 +255,8 @@ public class FakeFeatureFactory extends FeatureFactory {
     }
 
     @Override
-    public BluetoothFeatureProvider getBluetoothFeatureProvider(Context context) {
+    public BluetoothFeatureProvider getBluetoothFeatureProvider() {
         return mBluetoothFeatureProvider;
-    }
-
-    @Override
-    public AwareFeatureProvider getAwareFeatureProvider() {
-        return mAwareFeatureProvider;
     }
 
     @Override
@@ -242,13 +265,13 @@ public class FakeFeatureFactory extends FeatureFactory {
     }
 
     @Override
-    public WifiTrackerLibProvider getWifiTrackerLibProvider() {
-        return wifiTrackerLibProvider;
+    public FingerprintFeatureProvider getFingerprintFeatureProvider() {
+        return mFingerprintFeatureProvider;
     }
 
     @Override
-    public ExtraAppInfoFeatureProvider getExtraAppInfoFeatureProvider() {
-        return extraAppInfoFeatureProvider;
+    public WifiTrackerLibProvider getWifiTrackerLibProvider() {
+        return wifiTrackerLibProvider;
     }
 
     @Override
@@ -257,12 +280,57 @@ public class FakeFeatureFactory extends FeatureFactory {
     }
 
     @Override
-    public GameSettingsFeatureProvider getGameSettingsFeatureProvider() {
-        return gameSettingsFeatureProvider;
+    public AccessibilitySearchFeatureProvider getAccessibilitySearchFeatureProvider() {
+        return mAccessibilitySearchFeatureProvider;
     }
 
     @Override
-    public AccessibilitySearchFeatureProvider getAccessibilitySearchFeatureProvider() {
-        return mAccessibilitySearchFeatureProvider;
+    public AccessibilityMetricsFeatureProvider getAccessibilityMetricsFeatureProvider() {
+        return mAccessibilityMetricsFeatureProvider;
+    }
+
+    @Override
+    public AdvancedVpnFeatureProvider getAdvancedVpnFeatureProvider() {
+        return mAdvancedVpnFeatureProvider;
+    }
+
+    @Override
+    public WifiFeatureProvider getWifiFeatureProvider() {
+        return mWifiFeatureProvider;
+    }
+
+    @Override
+    public KeyboardSettingsFeatureProvider getKeyboardSettingsFeatureProvider() {
+        return mKeyboardSettingsFeatureProvider;
+    }
+
+    @Override
+    public StylusFeatureProvider getStylusFeatureProvider() {
+        return mStylusFeatureProvider;
+    }
+
+    @Override
+    public OnboardingFeatureProvider getOnboardingFeatureProvider() {
+        return mOnboardingFeatureProvider;
+    }
+
+    @Override
+    public FastPairFeatureProvider getFastPairFeatureProvider() {
+        return mFastPairFeatureProvider;
+    }
+
+    @Override
+    public PrivateSpaceLoginFeatureProvider getPrivateSpaceLoginFeatureProvider() {
+        return mPrivateSpaceLoginFeatureProvider;
+    }
+
+    @Override
+    public DisplayFeatureProvider getDisplayFeatureProvider() {
+        return mDisplayFeatureProvider;
+    }
+
+    @Override
+    public SyncAcrossDevicesFeatureProvider getSyncAcrossDevicesFeatureProvider() {
+        return mSyncAcrossDevicesFeatureProvider;
     }
 }

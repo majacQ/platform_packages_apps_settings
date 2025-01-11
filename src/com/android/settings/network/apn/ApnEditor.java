@@ -25,6 +25,7 @@ import android.database.Cursor;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.PersistableBundle;
+import android.os.UserManager;
 import android.provider.Telephony;
 import android.telephony.CarrierConfigManager;
 import android.telephony.SubscriptionInfo;
@@ -47,7 +48,7 @@ import androidx.preference.ListPreference;
 import androidx.preference.MultiSelectListPreference;
 import androidx.preference.Preference;
 import androidx.preference.Preference.OnPreferenceChangeListener;
-import androidx.preference.SwitchPreference;
+import androidx.preference.TwoStatePreference;
 
 import com.android.internal.util.ArrayUtils;
 import com.android.settings.R;
@@ -78,7 +79,8 @@ public class ApnEditor extends SettingsPreferenceFragment
     private static final String KEY_MVNO_TYPE = "mvno_type";
     private static final String KEY_PASSWORD = "apn_password";
 
-    private static final int MENU_DELETE = Menu.FIRST;
+    @VisibleForTesting
+    static final int MENU_DELETE = Menu.FIRST;
     private static final int MENU_SAVE = Menu.FIRST + 1;
     private static final int MENU_CANCEL = Menu.FIRST + 2;
 
@@ -117,7 +119,7 @@ public class ApnEditor extends SettingsPreferenceFragment
     @VisibleForTesting
     ListPreference mRoamingProtocol;
     @VisibleForTesting
-    SwitchPreference mCarrierEnabled;
+    TwoStatePreference mCarrierEnabled;
     @VisibleForTesting
     MultiSelectListPreference mBearerMulti;
     @VisibleForTesting
@@ -148,7 +150,19 @@ public class ApnEditor extends SettingsPreferenceFragment
     String mDefaultApnRoamingProtocol;
     private String[] mReadOnlyApnFields;
     private boolean mReadOnlyApn;
+    /**
+     * The APN deletion feature within menu is aligned with the APN adding feature.
+     * Having only one of them could lead to a UX which not that make sense from user's
+     * perspective.
+     *
+     * mIsAddApnAllowed stores the configuration value reading from
+     * CarrierConfigManager.KEY_ALLOW_ADDING_APNS_BOOL to support the presentation
+     * control of the menu options. When false, delete option would be invisible to
+     * the end user.
+     */
+    private boolean mIsAddApnAllowed;
     private Uri mCarrierUri;
+    private boolean mIsCarrierIdApn;
 
     /**
      * APN types for data connections.  These are usage categories for an APN
@@ -227,7 +241,8 @@ public class ApnEditor extends SettingsPreferenceFragment
             Telephony.Carriers.MVNO_TYPE,   // 21
             Telephony.Carriers.MVNO_MATCH_DATA,  // 22
             Telephony.Carriers.EDITED_STATUS,   // 23
-            Telephony.Carriers.USER_EDITABLE    //24
+            Telephony.Carriers.USER_EDITABLE,   // 24
+            Telephony.Carriers.CARRIER_ID       // 25
     };
 
     private static final int ID_INDEX = 0;
@@ -262,10 +277,16 @@ public class ApnEditor extends SettingsPreferenceFragment
     private static final int MVNO_MATCH_DATA_INDEX = 22;
     private static final int EDITED_INDEX = 23;
     private static final int USER_EDITABLE_INDEX = 24;
+    private static final int CARRIER_ID_INDEX = 25;
 
     @Override
     public void onCreate(Bundle icicle) {
         super.onCreate(icicle);
+        if (isUserRestricted()) {
+            Log.e(TAG, "This setting isn't available due to user restriction.");
+            finish();
+            return;
+        }
 
         setLifecycleForAllControllers();
 
@@ -279,7 +300,7 @@ public class ApnEditor extends SettingsPreferenceFragment
                 SubscriptionManager.INVALID_SUBSCRIPTION_ID);
 
         initApnEditorUi();
-        getCarrierCustomizedConfig();
+        getCarrierCustomizedConfig(getContext());
 
         Uri uri = null;
         if (action.equals(Intent.ACTION_EDIT)) {
@@ -312,6 +333,9 @@ public class ApnEditor extends SettingsPreferenceFragment
         } else {
             mApnData = new ApnData(sProjection.length);
         }
+        final int carrierId = mApnData.getInteger(CARRIER_ID_INDEX,
+                TelephonyManager.UNKNOWN_CARRIER_ID);
+        mIsCarrierIdApn = (carrierId > TelephonyManager.UNKNOWN_CARRIER_ID);
 
         final boolean isUserEdited = mApnData.getInteger(EDITED_INDEX,
                 Telephony.Carriers.USER_EDITED) == Telephony.Carriers.USER_EDITED;
@@ -325,6 +349,10 @@ public class ApnEditor extends SettingsPreferenceFragment
             disableAllFields();
         } else if (!ArrayUtils.isEmpty(mReadOnlyApnFields)) {
             disableFields(mReadOnlyApnFields);
+        }
+        // Make sure that a user cannot break carrier id APN matching
+        if (mIsCarrierIdApn) {
+            disableFieldsForCarrieridApn();
         }
 
         for (int i = 0; i < getPreferenceScreen().getPreferenceCount(); i++) {
@@ -407,15 +435,20 @@ public class ApnEditor extends SettingsPreferenceFragment
             return false;
         }
 
-        if (hasAllApns(apnTypesArray1) || TextUtils.isEmpty(apnTypes2)) {
+        final String[] apnTypesArray1LowerCase = new String[apnTypesArray1.length];
+        for (int i = 0; i < apnTypesArray1.length; i++) {
+            apnTypesArray1LowerCase[i] = apnTypesArray1[i].toLowerCase();
+        }
+
+        if (hasAllApns(apnTypesArray1LowerCase) || TextUtils.isEmpty(apnTypes2)) {
             return true;
         }
 
-        final List apnTypesList1 = Arrays.asList(apnTypesArray1);
+        final List apnTypesList1 = Arrays.asList(apnTypesArray1LowerCase);
         final String[] apnTypesArray2 = apnTypes2.split(",");
 
         for (String apn : apnTypesArray2) {
-            if (apnTypesList1.contains(apn.trim())) {
+            if (apnTypesList1.contains(apn.trim().toLowerCase())) {
                 Log.d(TAG, "apnTypesMatch: true because match found for " + apn.trim());
                 return true;
             }
@@ -517,6 +550,16 @@ public class ApnEditor extends SettingsPreferenceFragment
         mMvnoMatchData.setEnabled(false);
     }
 
+    /**
+     * Disables fields for a carrier id APN to avoid breaking the match criteria
+     */
+    private void disableFieldsForCarrieridApn() {
+        mMcc.setEnabled(false);
+        mMnc.setEnabled(false);
+        mMvnoType.setEnabled(false);
+        mMvnoMatchData.setEnabled(false);
+    }
+
     @Override
     public int getMetricsCategory() {
         return SettingsEnums.APN_EDITOR;
@@ -548,7 +591,7 @@ public class ApnEditor extends SettingsPreferenceFragment
                 // Network code
                 final String mnc = (subInfo == null) ? null : subInfo.getMncString();
 
-                if ((!TextUtils.isEmpty(mcc)) && (!TextUtils.isEmpty(mcc))) {
+                if (!TextUtils.isEmpty(mcc)) {
                     // Auto populate MNC and MCC for new entries, based on what SIM reports
                     mMcc.setText(mcc);
                     mMnc.setText(mnc);
@@ -806,7 +849,8 @@ public class ApnEditor extends SettingsPreferenceFragment
     public void onCreateOptionsMenu(Menu menu, MenuInflater inflater) {
         super.onCreateOptionsMenu(menu, inflater);
         // If it's a new APN, then cancel will delete the new entry in onPause
-        if (!mNewApn && !mReadOnlyApn) {
+        // If APN add is not allowed, delete might lead to issue regarding recovery
+        if (!mNewApn && !mReadOnlyApn && mIsAddApnAllowed) {
             menu.add(0, MENU_DELETE, 0, R.string.menu_delete)
                 .setIcon(R.drawable.ic_delete);
         }
@@ -1150,11 +1194,15 @@ public class ApnEditor extends SettingsPreferenceFragment
         final String apn = checkNotSet(mApn.getText());
         final String mcc = checkNotSet(mMcc.getText());
         final String mnc = checkNotSet(mMnc.getText());
-
+        boolean doNotCheckMccMnc = mIsCarrierIdApn && TextUtils.isEmpty(mcc)
+                && TextUtils.isEmpty(mnc);
         if (TextUtils.isEmpty(name)) {
             errorMsg = getResources().getString(R.string.error_name_empty);
         } else if (TextUtils.isEmpty(apn)) {
             errorMsg = getResources().getString(R.string.error_apn_empty);
+        } else if (doNotCheckMccMnc) {
+            Log.d(TAG, "validateApnData: carrier id APN does not have mcc/mnc defined");
+            // no op, skip mcc mnc null check
         } else if (mcc == null || mcc.length() != 3) {
             errorMsg = getResources().getString(R.string.error_mcc_not3);
         } else if ((mnc == null || (mnc.length() & 0xFFFE) != 2)) {
@@ -1256,7 +1304,8 @@ public class ApnEditor extends SettingsPreferenceFragment
             if (!readOnlyApnTypes.contains(apnType)
                     && !apnType.equals(APN_TYPE_IA)
                     && !apnType.equals(APN_TYPE_EMERGENCY)
-                    && !apnType.equals(APN_TYPE_MCX)) {
+                    && !apnType.equals(APN_TYPE_MCX)
+                    && !apnType.equals(APN_TYPE_IMS)) {
                 if (first) {
                     first = false;
                 } else {
@@ -1288,19 +1337,21 @@ public class ApnEditor extends SettingsPreferenceFragment
         mAuthType = (ListPreference) findPreference(KEY_AUTH_TYPE);
         mProtocol = (ListPreference) findPreference(KEY_PROTOCOL);
         mRoamingProtocol = (ListPreference) findPreference(KEY_ROAMING_PROTOCOL);
-        mCarrierEnabled = (SwitchPreference) findPreference(KEY_CARRIER_ENABLED);
+        mCarrierEnabled = (TwoStatePreference) findPreference(KEY_CARRIER_ENABLED);
         mBearerMulti = (MultiSelectListPreference) findPreference(KEY_BEARER_MULTI);
         mMvnoType = (ListPreference) findPreference(KEY_MVNO_TYPE);
         mMvnoMatchData = (EditTextPreference) findPreference("mvno_match_data");
     }
 
-    private void getCarrierCustomizedConfig() {
+    @VisibleForTesting
+    protected void getCarrierCustomizedConfig(Context context) {
         mReadOnlyApn = false;
         mReadOnlyApnTypes = null;
         mReadOnlyApnFields = null;
+        mIsAddApnAllowed = true;
 
         final CarrierConfigManager configManager = (CarrierConfigManager)
-                getSystemService(Context.CARRIER_CONFIG_SERVICE);
+            context.getSystemService(Context.CARRIER_CONFIG_SERVICE);
         if (configManager != null) {
             final PersistableBundle b = configManager.getConfigForSubId(mSubId);
             if (b != null) {
@@ -1331,6 +1382,11 @@ public class ApnEditor extends SettingsPreferenceFragment
                 if (!TextUtils.isEmpty(mDefaultApnRoamingProtocol)) {
                     Log.d(TAG, "onCreate: default apn roaming protocol: "
                             + mDefaultApnRoamingProtocol);
+                }
+
+                mIsAddApnAllowed = b.getBoolean(CarrierConfigManager.KEY_ALLOW_ADDING_APNS_BOOL);
+                if (!mIsAddApnAllowed) {
+                    Log.d(TAG, "onCreate: not allow to add new APN");
                 }
             }
         }
@@ -1395,8 +1451,7 @@ public class ApnEditor extends SettingsPreferenceFragment
                 null /* selection */,
                 null /* selectionArgs */,
                 null /* sortOrder */)) {
-            if (cursor != null) {
-                cursor.moveToFirst();
+            if (cursor != null && cursor.moveToFirst()) {
                 apnData = new ApnData(uri, cursor);
             }
         }
@@ -1406,6 +1461,23 @@ public class ApnEditor extends SettingsPreferenceFragment
         }
 
         return apnData;
+    }
+
+    @VisibleForTesting
+    boolean isUserRestricted() {
+        UserManager userManager = getContext().getSystemService(UserManager.class);
+        if (userManager == null) {
+            return false;
+        }
+        if (!userManager.isAdminUser()) {
+            Log.e(TAG, "User is not an admin");
+            return true;
+        }
+        if (userManager.hasUserRestriction(UserManager.DISALLOW_CONFIG_MOBILE_NETWORKS)) {
+            Log.e(TAG, "User is not allowed to configure mobile network");
+            return true;
+        }
+        return false;
     }
 
     @VisibleForTesting

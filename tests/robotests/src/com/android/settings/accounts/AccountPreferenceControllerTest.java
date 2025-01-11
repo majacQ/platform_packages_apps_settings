@@ -45,7 +45,7 @@ import androidx.preference.PreferenceScreen;
 
 import com.android.settings.AccessiblePreferenceCategory;
 import com.android.settings.R;
-import com.android.settings.SettingsPreferenceFragment;
+import com.android.settings.dashboard.DashboardFragment;
 import com.android.settings.dashboard.profileselector.ProfileSelectFragment;
 import com.android.settings.testutils.shadow.ShadowAccountManager;
 import com.android.settings.testutils.shadow.ShadowContentResolver;
@@ -77,7 +77,7 @@ public class AccountPreferenceControllerTest {
     @Mock(answer = RETURNS_DEEP_STUBS)
     private UserManager mUserManager;
     @Mock(answer = RETURNS_DEEP_STUBS)
-    private SettingsPreferenceFragment mFragment;
+    private DashboardFragment mFragment;
     @Mock(answer = RETURNS_DEEP_STUBS)
     private AccountManager mAccountManager;
     @Mock(answer = RETURNS_DEEP_STUBS)
@@ -254,25 +254,26 @@ public class AccountPreferenceControllerTest {
     }
 
     @Test
-    public void updateRawDataToIndex_ManagedProfile_shouldNotUpdate() {
+    public void updateRawDataToIndex_noManagedProfile_shouldContainAddAccount() {
+        final List<SearchIndexableRaw> data = new ArrayList<>();
+        when(mUserManager.isManagedProfile()).thenReturn(false);
+
+        mController.updateRawDataToIndex(data);
+
+        assertThat(data).hasSize(1);
+        assertThat(data.get(0).key).isEqualTo("add_account");
+    }
+
+
+    @Test
+    public void updateRawDataToIndex_ManagedProfile_shouldContainAddAccount() {
         final List<SearchIndexableRaw> data = new ArrayList<>();
         when(mUserManager.isManagedProfile()).thenReturn(true);
 
         mController.updateRawDataToIndex(data);
 
-        assertThat(data).isEmpty();
-    }
-
-    @Test
-    public void updateRawDataToIndex_DisabledUser_shouldNotUpdate() {
-        final List<SearchIndexableRaw> data = new ArrayList<>();
-        final List<UserInfo> infos = new ArrayList<>();
-        infos.add(new UserInfo(1, "user 1", UserInfo.FLAG_DISABLED));
-        when(mUserManager.isManagedProfile()).thenReturn(false);
-        when(mUserManager.getProfiles(anyInt())).thenReturn(infos);
-        mController.updateRawDataToIndex(data);
-
-        assertThat(data).isEmpty();
+        assertThat(data).hasSize(1);
+        assertThat(data.get(0).key).isEqualTo("add_account");
     }
 
     @Test

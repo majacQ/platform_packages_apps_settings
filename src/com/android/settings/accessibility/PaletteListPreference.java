@@ -34,6 +34,7 @@ import android.widget.TextView;
 
 import androidx.annotation.ColorInt;
 import androidx.annotation.IntDef;
+import androidx.core.text.TextUtilsCompat;
 import androidx.preference.Preference;
 import androidx.preference.PreferenceViewHolder;
 
@@ -49,6 +50,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Locale;
 import java.util.stream.Collectors;
 
 /** Preference that easier preview by matching name to color. */
@@ -148,20 +150,36 @@ public final class PaletteListPreference extends Preference {
 
             rootView.addView(textView);
         }
+
+        updateFirstAndLastItemsBackground(context, rootView, paletteData.size());
     }
 
     private GradientDrawable createGradientDrawable(ViewGroup rootView, @ColorInt int color) {
         mGradientColors.set(Position.END, color);
 
         final GradientDrawable gradientDrawable = new GradientDrawable();
+        final Locale locale = Locale.getDefault();
         final Orientation orientation =
-                rootView.getLayoutDirection() == View.LAYOUT_DIRECTION_RTL
-                        ? Orientation.RIGHT_LEFT
-                        : Orientation.LEFT_RIGHT;
+                TextUtilsCompat.getLayoutDirectionFromLocale(locale) == View.LAYOUT_DIRECTION_RTL
+                    ? Orientation.RIGHT_LEFT
+                    : Orientation.LEFT_RIGHT;
         gradientDrawable.setOrientation(orientation);
         gradientDrawable.setColors(Ints.toArray(mGradientColors), Floats.toArray(mGradientOffsets));
 
         return gradientDrawable;
+    }
+
+    private void updateFirstAndLastItemsBackground(Context context, ViewGroup rootView, int size) {
+        final int radius =
+                context.getResources().getDimensionPixelSize(
+                        R.dimen.accessibility_illustration_view_radius);
+        final int lastIndex = size - 1;
+        final GradientDrawable firstItem =
+                (GradientDrawable) rootView.getChildAt(0).getBackground();
+        final GradientDrawable lastItem =
+                (GradientDrawable) rootView.getChildAt(lastIndex).getBackground();
+        firstItem.setCornerRadii(new float[]{radius, radius, radius, radius, 0, 0, 0, 0});
+        lastItem.setCornerRadii(new float[]{0, 0, 0, 0, radius, radius, radius, radius});
     }
 
     private List<Integer> getPaletteColors(Context context) {

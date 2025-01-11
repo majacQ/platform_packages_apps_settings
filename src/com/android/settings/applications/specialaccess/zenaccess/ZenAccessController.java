@@ -18,18 +18,21 @@ package com.android.settings.applications.specialaccess.zenaccess;
 
 import android.app.ActivityManager;
 import android.app.AppGlobals;
+import android.app.Flags;
 import android.app.NotificationManager;
 import android.app.settings.SettingsEnums;
 import android.content.Context;
 import android.content.pm.PackageInfo;
 import android.content.pm.ParceledListSlice;
-import android.os.AsyncTask;
 import android.os.RemoteException;
 import android.util.ArraySet;
 import android.util.Log;
 
 import androidx.annotation.VisibleForTesting;
+import androidx.preference.Preference;
+import androidx.preference.PreferenceScreen;
 
+import com.android.settings.R;
 import com.android.settings.core.BasePreferenceController;
 import com.android.settings.overlay.FeatureFactory;
 
@@ -47,6 +50,16 @@ public class ZenAccessController extends BasePreferenceController {
     @Override
     public int getAvailabilityStatus() {
         return AVAILABLE;
+    }
+
+    @Override
+    public void displayPreference(PreferenceScreen screen) {
+        Preference preference = screen.findPreference(getPreferenceKey());
+        if (preference != null) {
+            preference.setTitle(Flags.modesApi() && Flags.modesUi()
+                    ? R.string.manage_zen_modes_access_title
+                    : R.string.manage_zen_access_title);
+        }
     }
 
     public static Set<String> getPackagesRequestingNotificationPolicyAccess() {
@@ -97,24 +110,24 @@ public class ZenAccessController extends BasePreferenceController {
 
     public static void setAccess(final Context context, final String pkg, final boolean access) {
         logSpecialPermissionChange(access, pkg, context);
-        AsyncTask.execute(() -> {
-            final NotificationManager mgr = context.getSystemService(NotificationManager.class);
-            mgr.setNotificationPolicyAccessGranted(pkg, access);
-        });
+        final NotificationManager mgr = context.getSystemService(NotificationManager.class);
+        mgr.setNotificationPolicyAccessGranted(pkg, access);
     }
 
     public static void deleteRules(final Context context, final String pkg) {
-        AsyncTask.execute(() -> {
-            final NotificationManager mgr = context.getSystemService(NotificationManager.class);
+        final NotificationManager mgr = context.getSystemService(NotificationManager.class);
+        if (android.app.Flags.modesApi()) {
+            mgr.removeAutomaticZenRules(pkg, /* fromUser= */ true);
+        } else {
             mgr.removeAutomaticZenRules(pkg);
-        });
+        }
     }
 
     @VisibleForTesting
     static void logSpecialPermissionChange(boolean enable, String packageName, Context context) {
         int logCategory = enable ? SettingsEnums.APP_SPECIAL_PERMISSION_DND_ALLOW
                 : SettingsEnums.APP_SPECIAL_PERMISSION_DND_DENY;
-        FeatureFactory.getFactory(context).getMetricsFeatureProvider().action(context,
+        FeatureFactory.getFeatureFactory().getMetricsFeatureProvider().action(context,
                 logCategory, packageName);
     }
 }

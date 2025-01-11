@@ -22,10 +22,12 @@ import android.bluetooth.BluetoothDevice;
 import android.content.Context;
 import android.util.Log;
 
+import androidx.annotation.Nullable;
 import androidx.annotation.VisibleForTesting;
 import androidx.preference.PreferenceScreen;
 
 import com.android.settings.development.BluetoothA2dpConfigStore;
+import com.android.settings.development.Flags;
 import com.android.settingslib.core.lifecycle.Lifecycle;
 
 import java.util.ArrayList;
@@ -40,13 +42,18 @@ public class BluetoothCodecDialogPreferenceController extends
     private static final String KEY = "bluetooth_audio_codec_settings";
     private static final String TAG = "BtCodecCtr";
 
-    private final Callback mCallback;
+    @Nullable private final Callback mCallback;
 
     public BluetoothCodecDialogPreferenceController(Context context, Lifecycle lifecycle,
                                                     BluetoothA2dpConfigStore store,
-                                                    Callback callback) {
+                                                    @Nullable Callback callback) {
         super(context, lifecycle, store);
         mCallback = callback;
+    }
+
+    @Override
+    public boolean isAvailable() {
+        return !Flags.a2dpOffloadCodecExtensibilitySettings();
     }
 
     @Override
@@ -69,7 +76,7 @@ public class BluetoothCodecDialogPreferenceController extends
         if (bluetoothA2dp == null) {
             return index;
         }
-        final BluetoothDevice activeDevice = bluetoothA2dp.getActiveDevice();
+        final BluetoothDevice activeDevice = getA2dpActiveDevice();
         if (activeDevice == null) {
             Log.d(TAG, "Unable to get selectable index. No Active Bluetooth device");
             return index;
@@ -93,7 +100,7 @@ public class BluetoothCodecDialogPreferenceController extends
         int codecPriorityValue = BluetoothCodecConfig.CODEC_PRIORITY_DEFAULT;
         switch (index) {
             case 0:
-                final BluetoothDevice activeDevice = mBluetoothA2dp.getActiveDevice();
+                final BluetoothDevice activeDevice = getA2dpActiveDevice();
                 codecTypeValue = getHighestCodec(mBluetoothA2dp, activeDevice,
                         getSelectableConfigs(activeDevice));
                 codecPriorityValue = BluetoothCodecConfig.CODEC_PRIORITY_HIGHEST;
@@ -116,6 +123,14 @@ public class BluetoothCodecDialogPreferenceController extends
                 break;
             case 5:
                 codecTypeValue = BluetoothCodecConfig.SOURCE_CODEC_TYPE_LDAC;
+                codecPriorityValue = BluetoothCodecConfig.CODEC_PRIORITY_HIGHEST;
+                break;
+            case 6:
+                codecTypeValue = BluetoothCodecConfig.SOURCE_CODEC_TYPE_LC3;
+                codecPriorityValue = BluetoothCodecConfig.CODEC_PRIORITY_HIGHEST;
+                break;
+            case 7:
+                codecTypeValue = BluetoothCodecConfig.SOURCE_CODEC_TYPE_OPUS;
                 codecPriorityValue = BluetoothCodecConfig.CODEC_PRIORITY_HIGHEST;
                 break;
             default:
@@ -179,6 +194,9 @@ public class BluetoothCodecDialogPreferenceController extends
                 break;
             case BluetoothCodecConfig.SOURCE_CODEC_TYPE_LDAC:
                 index = 5;
+                break;
+            case BluetoothCodecConfig.SOURCE_CODEC_TYPE_OPUS:
+                index = 7;
                 break;
             default:
                 Log.e(TAG, "Unsupported config:" + config);

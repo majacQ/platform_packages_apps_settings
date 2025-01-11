@@ -16,18 +16,16 @@
 
 package com.android.settings.accessibility;
 
-import android.app.settings.SettingsEnums;
 import android.bluetooth.BluetoothAdapter;
-import android.bluetooth.BluetoothDevice;
+import android.bluetooth.BluetoothHapClient;
 import android.bluetooth.BluetoothHearingAid;
+import android.bluetooth.BluetoothLeAudio;
 import android.bluetooth.BluetoothProfile;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
-import android.os.Bundle;
 import android.text.TextUtils;
-import android.util.Log;
 
 import androidx.annotation.VisibleForTesting;
 import androidx.fragment.app.FragmentManager;
@@ -35,62 +33,47 @@ import androidx.preference.Preference;
 import androidx.preference.PreferenceScreen;
 
 import com.android.settings.R;
-import com.android.settings.bluetooth.BluetoothDeviceDetailsFragment;
 import com.android.settings.core.BasePreferenceController;
 import com.android.settings.core.SubSettingLauncher;
+import com.android.settingslib.bluetooth.BluetoothCallback;
 import com.android.settingslib.bluetooth.CachedBluetoothDevice;
+import com.android.settingslib.bluetooth.HearingAidInfo;
 import com.android.settingslib.bluetooth.LocalBluetoothManager;
+import com.android.settingslib.bluetooth.LocalBluetoothProfileManager;
 import com.android.settingslib.core.lifecycle.LifecycleObserver;
 import com.android.settingslib.core.lifecycle.events.OnStart;
 import com.android.settingslib.core.lifecycle.events.OnStop;
+import com.android.settingslib.utils.ThreadUtils;
 
-import java.util.Iterator;
-import java.util.List;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.FutureTask;
+import java.util.Set;
 
 /**
  * Controller that shows and updates the bluetooth device name
  */
 public class AccessibilityHearingAidPreferenceController extends BasePreferenceController
-        implements LifecycleObserver, OnStart, OnStop {
+        implements LifecycleObserver, OnStart, OnStop, BluetoothCallback,
+        LocalBluetoothProfileManager.ServiceListener {
     private static final String TAG = "AccessibilityHearingAidPreferenceController";
     private Preference mHearingAidPreference;
 
     private final BroadcastReceiver mHearingAidChangedReceiver = new BroadcastReceiver() {
         @Override
         public void onReceive(Context context, Intent intent) {
-            if (BluetoothHearingAid.ACTION_CONNECTION_STATE_CHANGED.equals(intent.getAction())) {
-                final int state = intent.getIntExtra(BluetoothHearingAid.EXTRA_STATE,
-                        BluetoothHearingAid.STATE_DISCONNECTED);
-                if (state == BluetoothHearingAid.STATE_CONNECTED) {
-                    updateState(mHearingAidPreference);
-                } else {
-                    mHearingAidPreference
-                            .setSummary(R.string.accessibility_hearingaid_not_connected_summary);
-                }
-            } else if (BluetoothAdapter.ACTION_STATE_CHANGED.equals(intent.getAction())) {
-                final int state = intent.getIntExtra(BluetoothAdapter.EXTRA_STATE,
-                        BluetoothAdapter.ERROR);
-                if (state != BluetoothAdapter.STATE_ON) {
-                    mHearingAidPreference
-                            .setSummary(R.string.accessibility_hearingaid_not_connected_summary);
-                }
-            }
+            updateState(mHearingAidPreference);
         }
     };
 
     private final LocalBluetoothManager mLocalBluetoothManager;
-    private final BluetoothAdapter mBluetoothAdapter;
-    //cache value of supporting hearing aid or not
-    private boolean mHearingAidProfileSupported;
+    private final LocalBluetoothProfileManager mProfileManager;
+    private final HearingAidHelper mHelper;
     private FragmentManager mFragmentManager;
 
     public AccessibilityHearingAidPreferenceController(Context context, String preferenceKey) {
         super(context, preferenceKey);
-        mLocalBluetoothManager = getLocalBluetoothManager();
-        mBluetoothAdapter = BluetoothAdapter.getDefaultAdapter();
-        mHearingAidProfileSupported = isHearingAidProfileSupported();
+        mLocalBluetoothManager = com.android.settings.bluetooth.Utils.getLocalBluetoothManager(
+                context);
+        mProfileManager = mLocalBluetoothManager.getProfileManager();
+        mHelper = new HearingAidHelper(context);
     }
 
     @Override
@@ -101,95 +84,131 @@ public class AccessibilityHearingAidPreferenceController extends BasePreferenceC
 
     @Override
     public int getAvailabilityStatus() {
-        return mHearingAidProfileSupported ? AVAILABLE : UNSUPPORTED_ON_DEVICE;
+        return mHelper.isHearingAidSupported() ? AVAILABLE : UNSUPPORTED_ON_DEVICE;
     }
 
     @Override
     public void onStart() {
-        if (mHearingAidProfileSupported) {
-            IntentFilter filter = new IntentFilter();
-            filter.addAction(BluetoothHearingAid.ACTION_CONNECTION_STATE_CHANGED);
-            filter.addAction(BluetoothAdapter.ACTION_STATE_CHANGED);
-            mContext.registerReceiver(mHearingAidChangedReceiver, filter);
+        IntentFilter filter = new IntentFilter();
+        filter.addAction(BluetoothHearingAid.ACTION_CONNECTION_STATE_CHANGED);
+        filter.addAction(BluetoothHapClient.ACTION_HAP_CONNECTION_STATE_CHANGED);
+        filter.addAction(BluetoothLeAudio.ACTION_LE_AUDIO_CONNECTION_STATE_CHANGED);
+        filter.addAction(BluetoothAdapter.ACTION_STATE_CHANGED);
+        mContext.registerReceiver(mHearingAidChangedReceiver, filter);
+        mLocalBluetoothManager.getEventManager().registerCallback(this);
+        // Can't get connected hearing aids when hearing aids related profiles are not ready. The
+        // profiles will be ready after the services are connected. Needs to add listener and
+        // updates the information when all hearing aids related services are connected.
+        if (!mHelper.isAllHearingAidRelatedProfilesReady()) {
+            mProfileManager.addServiceListener(this);
         }
     }
 
     @Override
     public void onStop() {
-        if (mHearingAidProfileSupported) {
-            mContext.unregisterReceiver(mHearingAidChangedReceiver);
-        }
+        mContext.unregisterReceiver(mHearingAidChangedReceiver);
+        mLocalBluetoothManager.getEventManager().unregisterCallback(this);
+        mProfileManager.removeServiceListener(this);
     }
 
     @Override
     public boolean handlePreferenceTreeClick(Preference preference) {
-        if (TextUtils.equals(preference.getKey(), getPreferenceKey())){
-            final CachedBluetoothDevice device = getConnectedHearingAidDevice();
-            if (device == null) {
-                launchHearingAidInstructionDialog();
-            } else {
-                launchBluetoothDeviceDetailSetting(device);
-            }
+        if (TextUtils.equals(preference.getKey(), getPreferenceKey())) {
+            launchHearingAidPage();
             return true;
         }
         return false;
     }
 
     @Override
-    public CharSequence getSummary() {
-        final CachedBluetoothDevice device = getConnectedHearingAidDevice();
+    protected void refreshSummary(Preference preference) {
+        if (preference == null) {
+            return;
+        }
+
+        // Loading the hearing aids summary requires IPC call, which can block the UI thread.
+        // To reduce page loading latency, move loadSummary in the background thread.
+        ThreadUtils.postOnBackgroundThread(() -> {
+            CharSequence summary = loadSummary();
+            ThreadUtils.getUiThreadHandler().post(() -> preference.setSummary(summary));
+        });
+    }
+
+    private CharSequence loadSummary() {
+        final CachedBluetoothDevice device = mHelper.getConnectedHearingAidDevice();
         if (device == null) {
             return mContext.getText(R.string.accessibility_hearingaid_not_connected_summary);
         }
-        return device.getName();
+
+        final int connectedNum = getConnectedHearingAidDeviceNum();
+        final CharSequence name = device.getName();
+        if (connectedNum > 1) {
+            return mContext.getString(R.string.accessibility_hearingaid_more_device_summary, name);
+        }
+
+        // Check if another side of LE audio hearing aid is connected as a pair
+        final Set<CachedBluetoothDevice> memberDevices = device.getMemberDevice();
+        if (memberDevices.stream().anyMatch(m -> m.getDevice().isConnected())) {
+            return mContext.getString(
+                    R.string.accessibility_hearingaid_left_and_right_side_device_summary,
+                    name);
+        }
+
+        // Check if another side of ASHA hearing aid is connected as a pair
+        final CachedBluetoothDevice subDevice = device.getSubDevice();
+        if (subDevice != null && subDevice.getDevice().isConnected()) {
+            return mContext.getString(
+                    R.string.accessibility_hearingaid_left_and_right_side_device_summary, name);
+        }
+
+        final int side = device.getDeviceSide();
+        if (side == HearingAidInfo.DeviceSide.SIDE_LEFT_AND_RIGHT) {
+            return mContext.getString(
+                    R.string.accessibility_hearingaid_left_and_right_side_device_summary, name);
+        } else if (side == HearingAidInfo.DeviceSide.SIDE_LEFT) {
+            return mContext.getString(
+                    R.string.accessibility_hearingaid_left_side_device_summary, name);
+        } else if (side == HearingAidInfo.DeviceSide.SIDE_RIGHT) {
+            return mContext.getString(
+                    R.string.accessibility_hearingaid_right_side_device_summary, name);
+        }
+
+        // Invalid side
+        return mContext.getString(
+                R.string.accessibility_hearingaid_active_device_summary, name);
+    }
+
+    @Override
+    public void onActiveDeviceChanged(CachedBluetoothDevice activeDevice, int bluetoothProfile) {
+        if (activeDevice == null) {
+            return;
+        }
+
+        if (bluetoothProfile == BluetoothProfile.HEARING_AID) {
+            HearingAidUtils.launchHearingAidPairingDialog(
+                    mFragmentManager, activeDevice, getMetricsCategory());
+        }
+    }
+
+    @Override
+    public void onServiceConnected() {
+        if (mHelper.isAllHearingAidRelatedProfilesReady()) {
+            updateState(mHearingAidPreference);
+            mProfileManager.removeServiceListener(this);
+        }
+    }
+
+    @Override
+    public void onServiceDisconnected() {
+        // Do nothing
     }
 
     public void setFragmentManager(FragmentManager fragmentManager) {
         mFragmentManager = fragmentManager;
     }
 
-    @VisibleForTesting
-    CachedBluetoothDevice getConnectedHearingAidDevice() {
-        if (!mHearingAidProfileSupported) {
-            return null;
-        }
-        if (mBluetoothAdapter == null || !mBluetoothAdapter.isEnabled()) {
-            return null;
-        }
-        final List<BluetoothDevice> deviceList = mLocalBluetoothManager.getProfileManager()
-                .getHearingAidProfile().getConnectedDevices();
-        final Iterator it = deviceList.iterator();
-        while (it.hasNext()) {
-            BluetoothDevice obj = (BluetoothDevice)it.next();
-            if (!mLocalBluetoothManager.getCachedDeviceManager().isSubDevice(obj)) {
-                return mLocalBluetoothManager.getCachedDeviceManager().findDevice(obj);
-            }
-        }
-        return null;
-    }
-
-    private boolean isHearingAidProfileSupported() {
-        if (mBluetoothAdapter == null || !mBluetoothAdapter.isEnabled()) {
-            return false;
-        }
-        final List<Integer> supportedList = mBluetoothAdapter.getSupportedProfiles();
-        if (supportedList.contains(BluetoothProfile.HEARING_AID)) {
-            return true;
-        }
-        return false;
-    }
-
-    private LocalBluetoothManager getLocalBluetoothManager() {
-        final FutureTask<LocalBluetoothManager> localBtManagerFutureTask = new FutureTask<>(
-                // Avoid StrictMode ThreadPolicy violation
-                () -> com.android.settings.bluetooth.Utils.getLocalBtManager(mContext));
-        try {
-            localBtManagerFutureTask.run();
-            return localBtManagerFutureTask.get();
-        } catch (InterruptedException | ExecutionException e) {
-            Log.w(TAG, "Error getting LocalBluetoothManager.", e);
-            return null;
-        }
+    private int getConnectedHearingAidDeviceNum() {
+        return mHelper.getConnectedHearingAidDeviceList().size();
     }
 
     @VisibleForTesting(otherwise = VisibleForTesting.NONE)
@@ -197,26 +216,10 @@ public class AccessibilityHearingAidPreferenceController extends BasePreferenceC
         mHearingAidPreference = preference;
     }
 
-    @VisibleForTesting
-    void launchBluetoothDeviceDetailSetting(final CachedBluetoothDevice device) {
-        if (device == null) {
-            return;
-        }
-        final Bundle args = new Bundle();
-        args.putString(BluetoothDeviceDetailsFragment.KEY_DEVICE_ADDRESS,
-                device.getDevice().getAddress());
-
+    private void launchHearingAidPage() {
         new SubSettingLauncher(mContext)
-                .setDestination(BluetoothDeviceDetailsFragment.class.getName())
-                .setArguments(args)
-                .setTitleRes(R.string.device_details_title)
-                .setSourceMetricsCategory(SettingsEnums.ACCESSIBILITY)
+                .setDestination(AccessibilityHearingAidsFragment.class.getName())
+                .setSourceMetricsCategory(getMetricsCategory())
                 .launch();
-    }
-
-    @VisibleForTesting
-    void launchHearingAidInstructionDialog() {
-        HearingAidDialogFragment fragment = HearingAidDialogFragment.newInstance();
-        fragment.show(mFragmentManager, HearingAidDialogFragment.class.toString());
     }
 }

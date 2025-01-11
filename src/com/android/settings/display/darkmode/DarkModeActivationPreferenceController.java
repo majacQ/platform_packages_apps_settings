@@ -18,45 +18,31 @@ package com.android.settings.display.darkmode;
 import android.app.UiModeManager;
 import android.content.Context;
 import android.content.res.Configuration;
-import android.os.PowerManager;
-import android.widget.Switch;
+import android.widget.CompoundButton;
+import android.widget.CompoundButton.OnCheckedChangeListener;
 
 import androidx.preference.Preference;
 import androidx.preference.PreferenceScreen;
 
-import com.android.settings.R;
 import com.android.settings.core.BasePreferenceController;
 import com.android.settings.overlay.FeatureFactory;
 import com.android.settingslib.core.instrumentation.MetricsFeatureProvider;
 import com.android.settingslib.widget.MainSwitchPreference;
-import com.android.settingslib.widget.OnMainSwitchChangeListener;
-
-import java.time.LocalTime;
 
 /**
  * Controller for activate/deactivate night mode button
  */
 public class DarkModeActivationPreferenceController extends BasePreferenceController implements
-        OnMainSwitchChangeListener {
+        OnCheckedChangeListener {
 
     private final UiModeManager mUiModeManager;
     private final MetricsFeatureProvider mMetricsFeatureProvider;
-    private PowerManager mPowerManager;
-    private TimeFormatter mFormat;
     private MainSwitchPreference mPreference;
 
     public DarkModeActivationPreferenceController(Context context, String preferenceKey) {
         super(context, preferenceKey);
-        mPowerManager = context.getSystemService(PowerManager.class);
         mUiModeManager = context.getSystemService(UiModeManager.class);
-        mFormat = new TimeFormatter(context);
-        mMetricsFeatureProvider = FeatureFactory.getFactory(context).getMetricsFeatureProvider();
-    }
-
-    public DarkModeActivationPreferenceController(Context context, String preferenceKey,
-            TimeFormatter f) {
-        this(context, preferenceKey);
-        mFormat = f;
+        mMetricsFeatureProvider = FeatureFactory.getFeatureFactory().getMetricsFeatureProvider();
     }
 
     @Override
@@ -70,29 +56,11 @@ public class DarkModeActivationPreferenceController extends BasePreferenceContro
     public CharSequence getSummary() {
         final boolean isActivated = (mContext.getResources().getConfiguration().uiMode
                 & Configuration.UI_MODE_NIGHT_YES) != 0;
-        final int mode = mUiModeManager.getNightMode();
-        if (mode == UiModeManager.MODE_NIGHT_AUTO) {
-            return mContext.getString(isActivated
-                    ? R.string.dark_ui_summary_on_auto_mode_auto
-                    : R.string.dark_ui_summary_off_auto_mode_auto);
-        } else if (mode == UiModeManager.MODE_NIGHT_CUSTOM) {
-            final LocalTime time = isActivated
-                    ? mUiModeManager.getCustomNightModeEnd()
-                    : mUiModeManager.getCustomNightModeStart();
-            final String timeStr = mFormat.of(time);
-
-            return mContext.getString(isActivated
-                    ? R.string.dark_ui_summary_on_auto_mode_custom
-                    : R.string.dark_ui_summary_off_auto_mode_custom, timeStr);
-        } else {
-            return mContext.getString(isActivated
-                    ? R.string.dark_ui_summary_on_auto_mode_never
-                    : R.string.dark_ui_summary_off_auto_mode_never);
-        }
+        return AutoDarkTheme.getStatus(mContext, isActivated);
     }
 
     @Override
-    public void onSwitchChanged(Switch switchView, boolean isChecked) {
+    public void onCheckedChanged(CompoundButton buttonView, boolean isChecked) {
         mMetricsFeatureProvider.logClickedPreference(mPreference, getMetricsCategory());
         final boolean active = (mContext.getResources().getConfiguration().uiMode
                 & Configuration.UI_MODE_NIGHT_YES) != 0;

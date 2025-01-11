@@ -28,7 +28,7 @@
         android:persistent="false"
         android:title="@string/assistant_gesture_category_title">
 
-        <SwitchPreference
+        <SwitchPreferenceCompat
             android:key="assistant_gesture_corner_swipe"
             android:title="@string/assistant_corner_gesture_title"
             android:summary="@string/assistant_corner_gesture_summary"
@@ -46,7 +46,6 @@
             android:key="gesture_left_back_sensitivity"
             android:title="@string/left_edge"
             android:max="2"
-            android:selectable="true"
             settings:textStart="@string/low_label"
             settings:textEnd="@string/high_label"/>
 
@@ -54,7 +53,6 @@
             android:key="gesture_right_back_sensitivity"
             android:title="@string/right_edge"
             android:max="2"
-            android:selectable="true"
             settings:textStart="@string/low_label"
             settings:textEnd="@string/high_label"/>
     </PreferenceCategory>
