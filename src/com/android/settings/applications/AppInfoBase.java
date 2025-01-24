@@ -18,6 +18,7 @@ package com.android.settings.applications;
 
 import static com.android.settingslib.RestrictedLockUtils.EnforcedAdmin;
 
+import android.Manifest;
 import android.app.Activity;
 import android.app.Dialog;
 import android.app.admin.DevicePolicyManager;
@@ -26,6 +27,7 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.PackageManager.NameNotFoundException;
@@ -38,6 +40,7 @@ import android.os.UserManager;
 import android.text.TextUtils;
 import android.util.Log;
 
+import androidx.annotation.VisibleForTesting;
 import androidx.appcompat.app.AlertDialog;
 import androidx.fragment.app.DialogFragment;
 import androidx.fragment.app.Fragment;
@@ -89,8 +92,8 @@ public abstract class AppInfoBase extends SettingsPreferenceFragment
         super.onCreate(savedInstanceState);
         mFinishing = false;
         final Activity activity = getActivity();
-        mApplicationFeatureProvider = FeatureFactory.getFactory(activity)
-                .getApplicationFeatureProvider(activity);
+        mApplicationFeatureProvider = FeatureFactory.getFeatureFactory()
+                .getApplicationFeatureProvider();
         mState = ApplicationsState.getInstance(activity.getApplication());
         mSession = mState.newSession(this, getSettingsLifecycle());
         mDpm = (DevicePolicyManager) activity.getSystemService(Context.DEVICE_POLICY_SERVICE);
@@ -134,8 +137,13 @@ public abstract class AppInfoBase extends SettingsPreferenceFragment
             }
         }
         if (intent != null && intent.hasExtra(Intent.EXTRA_USER_HANDLE)) {
-            mUserId = ((UserHandle) intent.getParcelableExtra(
-                    Intent.EXTRA_USER_HANDLE)).getIdentifier();
+            mUserId = ((UserHandle) intent.getParcelableExtra(Intent.EXTRA_USER_HANDLE))
+                    .getIdentifier();
+            if (mUserId != UserHandle.myUserId() && !hasInteractAcrossUsersFullPermission()) {
+                Log.w(TAG, "Intent not valid.");
+                finish();
+                return "";
+            }
         } else {
             mUserId = UserHandle.myUserId();
         }
@@ -143,10 +151,14 @@ public abstract class AppInfoBase extends SettingsPreferenceFragment
         if (mAppEntry != null) {
             // Get application info again to refresh changed properties of application
             try {
-                mPackageInfo = mPm.getPackageInfoAsUser(mAppEntry.info.packageName,
-                        PackageManager.MATCH_DISABLED_COMPONENTS |
-                                PackageManager.GET_SIGNING_CERTIFICATES |
-                                PackageManager.GET_PERMISSIONS, mUserId);
+                mPackageInfo = mPm.getPackageInfoAsUser(
+                        mAppEntry.info.packageName,
+                        PackageManager.PackageInfoFlags.of(
+                                PackageManager.MATCH_DISABLED_COMPONENTS
+                                        | PackageManager.GET_SIGNING_CERTIFICATES
+                                        | PackageManager.GET_PERMISSIONS
+                                        | PackageManager.MATCH_ARCHIVED_PACKAGES),
+                        mUserId);
             } catch (NameNotFoundException e) {
                 Log.e(TAG, "Exception when retrieving package:" + mAppEntry.info.packageName, e);
             }
@@ -156,6 +168,28 @@ public abstract class AppInfoBase extends SettingsPreferenceFragment
         }
 
         return mPackageName;
+    }
+
+    @VisibleForTesting
+    protected boolean hasInteractAcrossUsersFullPermission() {
+        Activity activity = getActivity();
+        if (!(activity instanceof SettingsActivity)) {
+            return false;
+        }
+        final String callingPackageName =
+                ((SettingsActivity) activity).getInitialCallingPackage();
+
+        if (TextUtils.isEmpty(callingPackageName)) {
+            Log.w(TAG, "Not able to get calling package name for permission check");
+            return false;
+        }
+        if (mPm.checkPermission(Manifest.permission.INTERACT_ACROSS_USERS_FULL, callingPackageName)
+                != PackageManager.PERMISSION_GRANTED) {
+            Log.w(TAG, "Package " + callingPackageName + " does not have required permission "
+                    + Manifest.permission.INTERACT_ACROSS_USERS_FULL);
+            return false;
+        }
+        return true;
     }
 
     protected void setIntentAndFinish(boolean appChanged) {
@@ -219,7 +253,7 @@ public abstract class AppInfoBase extends SettingsPreferenceFragment
         }
     }
 
-    public static void startAppInfoFragment(Class<?> fragment, int titleRes,
+    public static void startAppInfoFragment(Class<?> fragment, String title,
             String pkg, int uid, Fragment source, int request, int sourceMetricsCategory) {
         final Bundle args = new Bundle();
         args.putString(AppInfoBase.ARG_PACKAGE_NAME, pkg);
@@ -228,10 +262,26 @@ public abstract class AppInfoBase extends SettingsPreferenceFragment
         new SubSettingLauncher(source.getContext())
                 .setDestination(fragment.getName())
                 .setSourceMetricsCategory(sourceMetricsCategory)
-                .setTitleRes(titleRes)
+                .setTitleText(title)
                 .setArguments(args)
                 .setUserHandle(new UserHandle(UserHandle.getUserId(uid)))
                 .setResultListener(source, request)
+                .launch();
+    }
+
+    /** Starts app info fragment from SPA pages. */
+    public static void startAppInfoFragment(Class<?> fragment, String title, ApplicationInfo app,
+            Context context, int sourceMetricsCategory) {
+        final Bundle args = new Bundle();
+        args.putString(AppInfoBase.ARG_PACKAGE_NAME, app.packageName);
+        args.putInt(AppInfoBase.ARG_PACKAGE_UID, app.uid);
+
+        new SubSettingLauncher(context)
+                .setDestination(fragment.getName())
+                .setSourceMetricsCategory(sourceMetricsCategory)
+                .setTitleText(title)
+                .setArguments(args)
+                .setUserHandle(UserHandle.getUserHandleForUid(app.uid))
                 .launch();
     }
 
@@ -241,7 +291,7 @@ public abstract class AppInfoBase extends SettingsPreferenceFragment
 
         @Override
         public int getMetricsCategory() {
-            return SettingsEnums.DIALOG_APP_INFO_ACTION;
+            return SettingsEnums.DIALOG_BASE_APP_INFO_ACTION;
         }
 
         @Override

@@ -20,10 +20,10 @@ import static com.android.settings.testutils.ApplicationTestUtils.buildInfo;
 
 import static com.google.common.truth.Truth.assertThat;
 
-import static org.mockito.ArgumentMatchers.anyInt;
-import static org.mockito.ArgumentMatchers.anyObject;
-import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.any;
+import static org.mockito.Mockito.anyInt;
 import static org.mockito.Mockito.atLeast;
+import static org.mockito.Mockito.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
@@ -37,12 +37,16 @@ import android.os.UserHandle;
 import android.os.UserManager;
 
 import org.junit.Before;
+import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.mockito.Mock;
-import org.mockito.MockitoAnnotations;
+import org.mockito.junit.MockitoJUnit;
+import org.mockito.junit.MockitoRule;
 import org.robolectric.RobolectricTestRunner;
-import org.robolectric.shadows.ShadowApplication;
+import org.robolectric.android.util.concurrent.PausedExecutorService;
+import org.robolectric.shadows.ShadowLooper;
+import org.robolectric.shadows.ShadowPausedAsyncTask;
 
 import java.util.Arrays;
 import java.util.Collections;
@@ -50,6 +54,9 @@ import java.util.List;
 
 @RunWith(RobolectricTestRunner.class)
 public final class AppWithAdminGrantedPermissionsListerTest {
+
+    @Rule
+    public final MockitoRule mMockitoRule = MockitoJUnit.rule();
 
     private final String APP_1 = "app1";
     private final String APP_2 = "app2";
@@ -83,10 +90,12 @@ public final class AppWithAdminGrantedPermissionsListerTest {
     private DevicePolicyManager mDevicePolicyManager;
 
     private List<UserAppInfo> mAppList = Collections.emptyList();
+    private PausedExecutorService mExecutorService;
 
     @Before
     public void setUp() {
-        MockitoAnnotations.initMocks(this);
+        mExecutorService = new PausedExecutorService();
+        ShadowPausedAsyncTask.overrideExecutor(mExecutorService);
     }
 
     @Test
@@ -122,19 +131,19 @@ public final class AppWithAdminGrantedPermissionsListerTest {
                 .thenReturn(DevicePolicyManager.PERMISSION_GRANT_STATE_GRANTED);
         when(mDevicePolicyManager.getPermissionGrantState(null, APP_1, PERMISSION_2))
                 .thenReturn(DevicePolicyManager.PERMISSION_GRANT_STATE_DENIED);
-        when(mDevicePolicyManager.getPermissionGrantState(eq(null), eq(APP_2), anyObject()))
+        when(mDevicePolicyManager.getPermissionGrantState(eq(null), eq(APP_2), any()))
                 .thenReturn(DevicePolicyManager.PERMISSION_GRANT_STATE_DENIED);
-        when(mDevicePolicyManager.getPermissionGrantState(eq(null), eq(APP_3), anyObject()))
+        when(mDevicePolicyManager.getPermissionGrantState(eq(null), eq(APP_3), any()))
                 .thenReturn(DevicePolicyManager.PERMISSION_GRANT_STATE_DENIED);
-        when(mDevicePolicyManager.getPermissionGrantState(eq(null), eq(APP_4), anyObject()))
+        when(mDevicePolicyManager.getPermissionGrantState(eq(null), eq(APP_4), any()))
                 .thenReturn(DevicePolicyManager.PERMISSION_GRANT_STATE_DENIED);
-        when(mDevicePolicyManager.getPermissionGrantState(eq(null), eq(APP_5), anyObject()))
+        when(mDevicePolicyManager.getPermissionGrantState(eq(null), eq(APP_5), any()))
                 .thenReturn(DevicePolicyManager.PERMISSION_GRANT_STATE_DENIED);
 
         // Grant install-time permissions as appropriate.
-        when(mPackageManagerService.checkUidPermission(anyObject(), eq(APP_1_UID)))
+        when(mPackageManagerService.checkUidPermission(any(), eq(APP_1_UID)))
                 .thenReturn(PackageManager.PERMISSION_DENIED);
-        when(mPackageManagerService.checkUidPermission(anyObject(), eq(APP_2_UID)))
+        when(mPackageManagerService.checkUidPermission(any(), eq(APP_2_UID)))
                 .thenReturn(PackageManager.PERMISSION_DENIED);
         when(mPackageManagerService.checkUidPermission(PERMISSION_1, APP_3_UID))
                 .thenReturn(PackageManager.PERMISSION_DENIED);
@@ -144,7 +153,7 @@ public final class AppWithAdminGrantedPermissionsListerTest {
                 .thenReturn(PackageManager.PERMISSION_DENIED);
         when(mPackageManagerService.checkUidPermission(PERMISSION_2, APP_4_UID))
                 .thenReturn(PackageManager.PERMISSION_GRANTED);
-        when(mPackageManagerService.checkUidPermission(anyObject(), eq(APP_5_UID)))
+        when(mPackageManagerService.checkUidPermission(any(), eq(APP_5_UID)))
                 .thenReturn(PackageManager.PERMISSION_DENIED);
 
         // app3 and app5 were installed by enterprise policy.
@@ -168,11 +177,11 @@ public final class AppWithAdminGrantedPermissionsListerTest {
                 buildInfo(APP_6_UID, APP_6, 0 /* flags */, Build.VERSION_CODES.M)));
 
         // Grant run-time permissions as appropriate.
-        when(mDevicePolicyManager.getPermissionGrantState(eq(null), eq(APP_6), anyObject()))
+        when(mDevicePolicyManager.getPermissionGrantState(eq(null), eq(APP_6), any()))
                 .thenReturn(DevicePolicyManager.PERMISSION_GRANT_STATE_GRANTED);
 
         // Grant install-time permissions as appropriate.
-        when(mPackageManagerService.checkUidPermission(anyObject(), eq(APP_6_UID)))
+        when(mPackageManagerService.checkUidPermission(any(), eq(APP_6_UID)))
                 .thenReturn(PackageManager.PERMISSION_DENIED);
 
         // app6 was not installed by enterprise policy.
@@ -183,9 +192,9 @@ public final class AppWithAdminGrantedPermissionsListerTest {
         // List all apps installed that were granted one or more permissions by the
         // admin.
         (new AppWithAdminGrantedPermissionsListerTestable(PERMISSIONS)).execute();
+        mExecutorService.runAll();
+        ShadowLooper.idleMainLooper();
 
-        // Wait for the background task to finish.
-        ShadowApplication.runBackgroundTasks();
         assertThat(mAppList.size()).isEqualTo(3);
         InstalledAppListerTest.verifyListUniqueness(mAppList);
 
@@ -202,7 +211,7 @@ public final class AppWithAdminGrantedPermissionsListerTest {
         verify(mPackageManager).getInstalledApplicationsAsUser(anyInt(), eq(MAIN_USER_ID));
         verify(mPackageManager).getInstalledApplicationsAsUser(anyInt(),
                 eq(MANAGED_PROFILE_ID));
-        verify(mPackageManager, atLeast(0)).getInstallReason(anyObject(), anyObject());
+        verify(mPackageManager, atLeast(0)).getInstallReason(any(), any());
         verifyNoMoreInteractions(mPackageManager);
     }
 

@@ -16,12 +16,15 @@
 
 package com.android.settings.password;
 
+import static android.app.admin.DevicePolicyResources.Strings.Settings.SET_WORK_PROFILE_PATTERN_HEADER;
 import static android.view.View.ACCESSIBILITY_LIVE_REGION_POLITE;
 
 import static com.android.settings.password.ChooseLockSettingsHelper.EXTRA_KEY_UNIFICATION_PROFILE_CREDENTIAL;
 import static com.android.settings.password.ChooseLockSettingsHelper.EXTRA_KEY_UNIFICATION_PROFILE_ID;
 
+import android.annotation.SuppressLint;
 import android.app.Activity;
+import android.app.admin.DevicePolicyManager;
 import android.app.settings.SettingsEnums;
 import android.content.Context;
 import android.content.Intent;
@@ -31,12 +34,13 @@ import android.os.Bundle;
 import android.os.UserHandle;
 import android.os.UserManager;
 import android.util.Log;
-import android.util.Pair;
 import android.util.TypedValue;
 import android.view.KeyEvent;
 import android.view.LayoutInflater;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.WindowManager;
 import android.widget.TextView;
 
 import androidx.fragment.app.Fragment;
@@ -48,8 +52,6 @@ import com.android.internal.widget.LockPatternView;
 import com.android.internal.widget.LockPatternView.Cell;
 import com.android.internal.widget.LockPatternView.DisplayMode;
 import com.android.internal.widget.LockscreenCredential;
-import com.android.internal.widget.VerifyCredentialResponse;
-import com.android.settings.EncryptionInterstitial;
 import com.android.settings.R;
 import com.android.settings.SettingsActivity;
 import com.android.settings.SetupWizardUtils;
@@ -101,7 +103,6 @@ public class ChooseLockPattern extends SettingsActivity {
 
         public IntentBuilder(Context context) {
             mIntent = new Intent(context, ChooseLockPattern.class);
-            mIntent.putExtra(EncryptionInterstitial.EXTRA_REQUIRE_PASSWORD, false);
             mIntent.putExtra(ChooseLockGeneric.CONFIRM_CREDENTIALS, false);
         }
 
@@ -171,6 +172,7 @@ public class ChooseLockPattern extends SettingsActivity {
         ThemeHelper.trySetDynamicColor(this);
         super.onCreate(savedInstanceState);
         findViewById(R.id.content_parent).setFitsSystemWindows(false);
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);
     }
 
     @Override
@@ -202,13 +204,15 @@ public class ChooseLockPattern extends SettingsActivity {
 
         private LockscreenCredential mCurrentCredential;
         private boolean mRequestGatekeeperPassword;
+        private boolean mRequestWriteRepairModePassword;
         protected TextView mHeaderText;
         protected LockPatternView mLockPatternView;
         protected TextView mFooterText;
         protected FooterButton mSkipOrClearButton;
-        private FooterButton mNextButton;
+        protected FooterButton mNextButton;
         @VisibleForTesting protected LockscreenCredential mChosenPattern;
         private ColorStateList mDefaultHeaderColorList;
+        private View mSudContent;
 
         /**
          * The patten used during the help screen to show how to draw a pattern.
@@ -361,54 +365,52 @@ public class ChooseLockPattern extends SettingsActivity {
 
             Introduction(
                     R.string.lock_settings_picker_biometrics_added_security_message,
-                    R.string.lockpattern_choose_pattern_description,
-                    R.string.lockpattern_recording_intro_header,
+                    R.string.lockpassword_choose_your_pattern_description,
                     LeftButtonMode.Gone, RightButtonMode.ContinueDisabled,
                     ID_EMPTY_MESSAGE, true),
             HelpScreen(
-                    ID_EMPTY_MESSAGE, ID_EMPTY_MESSAGE, R.string.lockpattern_settings_help_how_to_record,
+                    R.string.lockpattern_settings_help_how_to_record,
+                    R.string.lockpattern_settings_help_how_to_record,
                     LeftButtonMode.Gone, RightButtonMode.Ok, ID_EMPTY_MESSAGE, false),
             ChoiceTooShort(
-                    R.string.lock_settings_picker_biometrics_added_security_message,
-                    R.string.lockpattern_choose_pattern_description,
+                    R.string.lockpattern_recording_incorrect_too_short,
                     R.string.lockpattern_recording_incorrect_too_short,
                     LeftButtonMode.Retry, RightButtonMode.ContinueDisabled,
                     ID_EMPTY_MESSAGE, true),
             FirstChoiceValid(
-                    R.string.lock_settings_picker_biometrics_added_security_message,
-                    R.string.lockpattern_choose_pattern_description,
+                    R.string.lockpattern_pattern_entered_header,
                     R.string.lockpattern_pattern_entered_header,
                     LeftButtonMode.Retry, RightButtonMode.Continue, ID_EMPTY_MESSAGE, false),
             NeedToConfirm(
-                    ID_EMPTY_MESSAGE, ID_EMPTY_MESSAGE, R.string.lockpattern_need_to_confirm,
+                    R.string.lockpattern_need_to_confirm, R.string.lockpattern_need_to_confirm,
                     LeftButtonMode.Gone, RightButtonMode.ConfirmDisabled,
                     ID_EMPTY_MESSAGE, true),
             ConfirmWrong(
-                    ID_EMPTY_MESSAGE, ID_EMPTY_MESSAGE, R.string.lockpattern_need_to_unlock_wrong,
+                    R.string.lockpattern_need_to_unlock_wrong,
+                    R.string.lockpattern_need_to_unlock_wrong,
                     LeftButtonMode.Gone, RightButtonMode.ConfirmDisabled,
                     ID_EMPTY_MESSAGE, true),
             ChoiceConfirmed(
-                    ID_EMPTY_MESSAGE, ID_EMPTY_MESSAGE, R.string.lockpattern_pattern_confirmed_header,
+                    R.string.lockpattern_pattern_confirmed_header,
+                    R.string.lockpattern_pattern_confirmed_header,
                     LeftButtonMode.Gone, RightButtonMode.Confirm, ID_EMPTY_MESSAGE, false);
 
 
             /**
              * @param messageForBiometrics The message displayed at the top, above header for
              *                              fingerprint flow.
-             * @param message The message displayed at the top.
              * @param headerMessage The message displayed at the top.
              * @param leftMode The mode of the left button.
              * @param rightMode The mode of the right button.
              * @param footerMessage The footer message.
              * @param patternEnabled Whether the pattern widget is enabled.
              */
-            Stage(int messageForBiometrics, int message, int headerMessage,
+            Stage(int messageForBiometrics, int headerMessage,
                     LeftButtonMode leftMode,
                     RightButtonMode rightMode,
                     int footerMessage, boolean patternEnabled) {
                 this.headerMessage = headerMessage;
                 this.messageForBiometrics = messageForBiometrics;
-                this.message = message;
                 this.leftMode = leftMode;
                 this.rightMode = rightMode;
                 this.footerMessage = footerMessage;
@@ -417,7 +419,6 @@ public class ChooseLockPattern extends SettingsActivity {
 
             final int headerMessage;
             final int messageForBiometrics;
-            final int message;
             final LeftButtonMode leftMode;
             final RightButtonMode rightMode;
             final int footerMessage;
@@ -440,7 +441,8 @@ public class ChooseLockPattern extends SettingsActivity {
         protected boolean mForFace;
         protected boolean mForBiometrics;
 
-        private static final String KEY_UI_STAGE = "uiStage";
+        @VisibleForTesting
+        static final String KEY_UI_STAGE = "uiStage";
         private static final String KEY_PATTERN_CHOICE = "chosenPattern";
         private static final String KEY_CURRENT_PATTERN = "currentPattern";
 
@@ -457,18 +459,6 @@ public class ChooseLockPattern extends SettingsActivity {
 
             mLockPatternUtils = new LockPatternUtils(getActivity());
 
-            if (intent.getBooleanExtra(
-                    ChooseLockSettingsHelper.EXTRA_KEY_FOR_CHANGE_CRED_REQUIRED_FOR_BOOT, false)) {
-                SaveAndFinishWorker w = new SaveAndFinishWorker();
-                final boolean required = getActivity().getIntent().getBooleanExtra(
-                        EncryptionInterstitial.EXTRA_REQUIRE_PASSWORD, true);
-                LockscreenCredential current = intent.getParcelableExtra(
-                        ChooseLockSettingsHelper.EXTRA_KEY_PASSWORD);
-                w.setBlocking(true);
-                w.setListener(this);
-                w.start(mLockPatternUtils, required, false /* requestGatekeeperPassword */, current,
-                        current, mUserId);
-            }
             mForFingerprint = intent.getBooleanExtra(
                     ChooseLockSettingsHelper.EXTRA_KEY_FOR_FINGERPRINT, false);
             mForFace = intent.getBooleanExtra(
@@ -478,24 +468,42 @@ public class ChooseLockPattern extends SettingsActivity {
         }
 
         private void updateActivityTitle() {
-            final int msg;
-            if (mForFingerprint) {
-                msg = R.string.lockpassword_choose_your_pattern_header_for_fingerprint;
-            } else if (mForFace) {
-                msg = R.string.lockpassword_choose_your_pattern_header_for_face;
+            final String msg;
+            if (mForFingerprint && !shouldShowGenericTitle()) {
+                msg = getString(R.string.lockpassword_choose_your_pattern_header_for_fingerprint);
+            } else if (mForFace && !shouldShowGenericTitle()) {
+                msg = getString(R.string.lockpassword_choose_your_pattern_header_for_face);
+            } else if (mIsManagedProfile) {
+                msg = getContext().getSystemService(DevicePolicyManager.class).getResources()
+                        .getString(SET_WORK_PROFILE_PATTERN_HEADER,
+                                () -> getString(
+                                        R.string.lockpassword_choose_your_profile_pattern_header));
+            } else if (android.os.Flags.allowPrivateProfile()
+                    && android.multiuser.Flags.enablePrivateSpaceFeatures()
+                    && isPrivateProfile()) {
+                msg = getString(R.string.private_space_choose_your_pattern_header);
             } else {
-                msg = mIsManagedProfile
-                        ? R.string.lockpassword_choose_your_profile_pattern_header
-                        : R.string.lockpassword_choose_your_pattern_header;
+                msg = getString(R.string.lockpassword_choose_your_pattern_header);
             }
             getActivity().setTitle(msg);
         }
 
+        protected boolean shouldShowGenericTitle() {
+            return false;
+        }
+
+        @SuppressLint("ClickableViewAccessibility")
         @Override
         public View onCreateView(LayoutInflater inflater, ViewGroup container,
                 Bundle savedInstanceState) {
             final GlifLayout layout = (GlifLayout) inflater.inflate(
                     R.layout.choose_lock_pattern, container, false);
+            layout.findViewById(R.id.lockPattern).setOnTouchListener((v, event) -> {
+                if (event.getAction() == MotionEvent.ACTION_DOWN) {
+                    v.getParent().requestDisallowInterceptTouchEvent(true);
+                }
+                return false;
+            });
             updateActivityTitle();
             layout.setHeaderText(getActivity().getTitle());
             layout.getHeaderTextView().setAccessibilityLiveRegion(ACCESSIBILITY_LIVE_REGION_POLITE);
@@ -514,7 +522,8 @@ public class ChooseLockPattern extends SettingsActivity {
                             .setText(R.string.lockpattern_tutorial_cancel_label)
                             .setListener(this::onSkipOrClearButtonClick)
                             .setButtonType(FooterButton.ButtonType.OTHER)
-                            .setTheme(R.style.SudGlifButton_Secondary)
+                            .setTheme(
+                                    com.google.android.setupdesign.R.style.SudGlifButton_Secondary)
                             .build()
             );
             mixin.setPrimaryButton(
@@ -522,11 +531,16 @@ public class ChooseLockPattern extends SettingsActivity {
                             .setText(R.string.lockpattern_tutorial_continue_label)
                             .setListener(this::onNextButtonClick)
                             .setButtonType(FooterButton.ButtonType.NEXT)
-                            .setTheme(R.style.SudGlifButton_Primary)
+                            .setTheme(com.google.android.setupdesign.R.style.SudGlifButton_Primary)
                             .build()
             );
             mSkipOrClearButton = mixin.getSecondaryButton();
             mNextButton = mixin.getPrimaryButton();
+            // TODO(b/243008023) Workaround for Glif layout on 2 panel choose lock settings.
+            mSudContent = layout.findViewById(
+                    com.google.android.setupdesign.R.id.sud_layout_content);
+            mSudContent.setPadding(mSudContent.getPaddingLeft(), 0, mSudContent.getPaddingRight(),
+                    0);
 
             return layout;
         }
@@ -534,12 +548,12 @@ public class ChooseLockPattern extends SettingsActivity {
         @Override
         public void onViewCreated(View view, Bundle savedInstanceState) {
             super.onViewCreated(view, savedInstanceState);
-            mHeaderText = (TextView) view.findViewById(R.id.headerText);
+            final GlifLayout layout = getActivity().findViewById(R.id.setup_wizard_layout);
+            mHeaderText = layout.getDescriptionTextView();
+            mHeaderText.setMinLines(2);
             mDefaultHeaderColorList = mHeaderText.getTextColors();
             mLockPatternView = (LockPatternView) view.findViewById(R.id.lockPattern);
             mLockPatternView.setOnPatternListener(mChooseNewLockPatternListener);
-            mLockPatternView.setTactileFeedbackEnabled(
-                    mLockPatternUtils.isTactileFeedbackEnabled());
             mLockPatternView.setFadePattern(false);
 
             mFooterText = (TextView) view.findViewById(R.id.footerText);
@@ -558,6 +572,8 @@ public class ChooseLockPattern extends SettingsActivity {
                     intent.getParcelableExtra(ChooseLockSettingsHelper.EXTRA_KEY_PASSWORD);
             mRequestGatekeeperPassword = intent.getBooleanExtra(
                     ChooseLockSettingsHelper.EXTRA_KEY_REQUEST_GK_PW_HANDLE, false);
+            mRequestWriteRepairModePassword = intent.getBooleanExtra(
+                    ChooseLockSettingsHelper.EXTRA_KEY_REQUEST_WRITE_REPAIR_MODE_PW, false);
 
             if (savedInstanceState == null) {
                 if (confirmCredentials) {
@@ -571,6 +587,7 @@ public class ChooseLockPattern extends SettingsActivity {
                             .setTitle(getString(R.string.unlock_set_unlock_launch_picker_title))
                             .setReturnCredentials(true)
                             .setRequestGatekeeperPasswordHandle(mRequestGatekeeperPassword)
+                            .setRequestWriteRepairModePassword(mRequestWriteRepairModePassword)
                             .setUserId(mUserId)
                             .show();
 
@@ -711,27 +728,20 @@ public class ChooseLockPattern extends SettingsActivity {
          */
         protected void updateStage(Stage stage) {
             final Stage previousStage = mUiStage;
-
+            final GlifLayout layout = getActivity().findViewById(R.id.setup_wizard_layout);
             mUiStage = stage;
 
             // header text, footer text, visibility and
             // enabled state all known from the stage
             if (stage == Stage.ChoiceTooShort) {
-                mHeaderText.setText(
+                layout.setDescriptionText(
                         getResources().getString(
                                 stage.headerMessage,
                                 LockPatternUtils.MIN_LOCK_PATTERN_SIZE));
             } else {
-                mHeaderText.setText(stage.headerMessage);
+                layout.setDescriptionText(stage.headerMessage);
             }
-            final GlifLayout layout = getActivity().findViewById(R.id.setup_wizard_layout);
-            final boolean forAnyBiometric = mForFingerprint || mForFace || mForBiometrics;
-            int message = forAnyBiometric ? stage.messageForBiometrics : stage.message;
-            if (message == ID_EMPTY_MESSAGE) {
-                layout.setDescriptionText("");
-            } else {
-                layout.setDescriptionText(message);
-            }
+
             if (stage.footerMessage == ID_EMPTY_MESSAGE) {
                 mFooterText.setText("");
             } else {
@@ -741,18 +751,15 @@ public class ChooseLockPattern extends SettingsActivity {
             if (stage == Stage.ConfirmWrong || stage == Stage.ChoiceTooShort) {
                 TypedValue typedValue = new TypedValue();
                 Theme theme = getActivity().getTheme();
-                theme.resolveAttribute(R.attr.colorError, typedValue, true);
+                theme.resolveAttribute(androidx.appcompat.R.attr.colorError, typedValue, true);
                 mHeaderText.setTextColor(typedValue.data);
+            } else if (mDefaultHeaderColorList != null) {
+                mHeaderText.setTextColor(mDefaultHeaderColorList);
+            }
 
-            } else {
-                if (mDefaultHeaderColorList != null) {
-                    mHeaderText.setTextColor(mDefaultHeaderColorList);
-                }
 
-                if (stage == Stage.NeedToConfirm && forAnyBiometric) {
-                    mHeaderText.setText("");
-                    layout.setHeaderText(R.string.lockpassword_draw_your_pattern_again_header);
-                }
+            if (stage == Stage.ConfirmWrong || stage == Stage.NeedToConfirm) {
+                layout.setHeaderText(R.string.lockpassword_draw_your_pattern_again_header);
             }
 
             updateFooterLeftButton(stage);
@@ -780,6 +787,7 @@ public class ChooseLockPattern extends SettingsActivity {
                     mLockPatternView.setPattern(DisplayMode.Animate, mAnimatePattern);
                     break;
                 case ChoiceTooShort:
+                case ConfirmWrong:
                     mLockPatternView.setDisplayMode(DisplayMode.Wrong);
                     postClearPatternRunnable();
                     announceAlways = true;
@@ -789,11 +797,6 @@ public class ChooseLockPattern extends SettingsActivity {
                 case NeedToConfirm:
                     mLockPatternView.clearPattern();
                     break;
-                case ConfirmWrong:
-                    mLockPatternView.setDisplayMode(DisplayMode.Wrong);
-                    postClearPatternRunnable();
-                    announceAlways = true;
-                    break;
                 case ChoiceConfirmed:
                     break;
             }
@@ -801,7 +804,12 @@ public class ChooseLockPattern extends SettingsActivity {
             // If the stage changed, announce the header for accessibility. This
             // is a no-op when accessibility is disabled.
             if (previousStage != stage || announceAlways) {
-                mHeaderText.announceForAccessibility(mHeaderText.getText());
+                if (stage == Stage.NeedToConfirm) {
+                    // If the Stage is NeedToConfirm, move the a11y focus to the header.
+                    mHeaderText.requestAccessibilityFocus();
+                } else {
+                    mHeaderText.announceForAccessibility(mHeaderText.getText());
+                }
             }
         }
 
@@ -831,15 +839,16 @@ public class ChooseLockPattern extends SettingsActivity {
             setRightButtonEnabled(false);
 
             mSaveAndFinishWorker = new SaveAndFinishWorker();
-            mSaveAndFinishWorker.setListener(this);
+            mSaveAndFinishWorker
+                    .setListener(this)
+                    .setRequestGatekeeperPasswordHandle(mRequestGatekeeperPassword)
+                    .setRequestWriteRepairModePassword(mRequestWriteRepairModePassword);
 
             getFragmentManager().beginTransaction().add(mSaveAndFinishWorker,
                     FRAGMENT_TAG_SAVE_AND_FINISH).commit();
             getFragmentManager().executePendingTransactions();
 
             final Intent intent = getActivity().getIntent();
-            final boolean required = intent.getBooleanExtra(
-                    EncryptionInterstitial.EXTRA_REQUIRE_PASSWORD, true);
             if (intent.hasExtra(EXTRA_KEY_UNIFICATION_PROFILE_ID)) {
                 try (LockscreenCredential profileCredential = (LockscreenCredential)
                         intent.getParcelableExtra(EXTRA_KEY_UNIFICATION_PROFILE_CREDENTIAL)) {
@@ -849,8 +858,8 @@ public class ChooseLockPattern extends SettingsActivity {
                             profileCredential);
                 }
             }
-            mSaveAndFinishWorker.start(mLockPatternUtils, required,
-                    mRequestGatekeeperPassword, mChosenPattern, mCurrentCredential, mUserId);
+            mSaveAndFinishWorker.start(mLockPatternUtils,
+                    mChosenPattern, mCurrentCredential, mUserId);
         }
 
         @Override
@@ -870,66 +879,19 @@ public class ChooseLockPattern extends SettingsActivity {
                     startActivity(intent);
                 }
             }
+
+            if (mSudContent != null) {
+                mSudContent.announceForAccessibility(
+                        getString(R.string.accessibility_setup_password_complete));
+            }
+
             getActivity().finish();
         }
-    }
 
-    public static class SaveAndFinishWorker extends SaveChosenLockWorkerBase {
-
-        private LockscreenCredential mChosenPattern;
-        private LockscreenCredential mCurrentCredential;
-        private boolean mLockVirgin;
-
-        public void start(LockPatternUtils utils, boolean credentialRequired,
-                boolean requestGatekeeperPassword, LockscreenCredential chosenPattern,
-                LockscreenCredential currentCredential, int userId) {
-            prepare(utils, credentialRequired, requestGatekeeperPassword, userId);
-
-            mCurrentCredential = currentCredential != null ? currentCredential
-                    : LockscreenCredential.createNone();
-            mChosenPattern = chosenPattern;
-            mUserId = userId;
-
-            mLockVirgin = !mUtils.isPatternEverChosen(mUserId);
-
-            start();
-        }
-
-        @Override
-        protected Pair<Boolean, Intent> saveAndVerifyInBackground() {
-            final int userId = mUserId;
-            final boolean success = mUtils.setLockCredential(mChosenPattern, mCurrentCredential,
-                    userId);
-            if (success) {
-                unifyProfileCredentialIfRequested();
-            }
-            Intent result = null;
-            if (success && mRequestGatekeeperPassword) {
-                // If a Gatekeeper Password was requested, invoke the LockSettingsService code
-                // path to return a Gatekeeper Password based on the credential that the user
-                // chose. This should only be run if the credential was successfully set.
-                final VerifyCredentialResponse response = mUtils.verifyCredential(mChosenPattern,
-                        userId, LockPatternUtils.VERIFY_FLAG_REQUEST_GK_PW_HANDLE);
-
-                if (!response.isMatched() || !response.containsGatekeeperPasswordHandle()) {
-                    Log.e(TAG, "critical: bad response or missing GK PW handle for known good"
-                            + " pattern: " + response.toString());
-                }
-
-                result = new Intent();
-                result.putExtra(ChooseLockSettingsHelper.EXTRA_KEY_GK_PW_HANDLE,
-                        response.getGatekeeperPasswordHandle());
-            }
-            return Pair.create(success, result);
-        }
-
-        @Override
-        protected void finish(Intent resultData) {
-            if (mLockVirgin) {
-                mUtils.setVisiblePatternEnabled(true, mUserId);
-            }
-
-            super.finish(resultData);
+        private boolean isPrivateProfile() {
+            UserManager userManager = getContext().createContextAsUser(UserHandle.of(mUserId),
+                    /*flags=*/0).getSystemService(UserManager.class);
+            return userManager.isPrivateProfile();
         }
     }
 }

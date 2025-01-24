@@ -16,8 +16,6 @@
 
 package com.android.settings.biometrics.fingerprint;
 
-import static com.android.settings.core.BasePreferenceController.DISABLED_FOR_USER;
-
 import static com.google.common.truth.Truth.assertThat;
 
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -26,6 +24,7 @@ import static org.mockito.Mockito.when;
 
 import android.content.Context;
 import android.content.pm.PackageManager;
+import android.content.pm.UserInfo;
 import android.hardware.fingerprint.FingerprintManager;
 import android.os.UserManager;
 
@@ -40,6 +39,8 @@ import org.mockito.MockitoAnnotations;
 import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;
 import org.robolectric.shadows.ShadowApplication;
+
+import java.util.Arrays;
 
 @RunWith(RobolectricTestRunner.class)
 public class FingerprintProfileStatusPreferenceControllerTest {
@@ -73,34 +74,14 @@ public class FingerprintProfileStatusPreferenceControllerTest {
         mFeatureFactory = FakeFeatureFactory.setupForTest();
         when(mFeatureFactory.securityFeatureProvider.getLockPatternUtils(mContext))
                 .thenReturn(mLockPatternUtils);
-        when(mUm.getProfileIdsWithDisabled(anyInt())).thenReturn(new int[] {1234});
+        when(mUm.getProfiles(anyInt())).thenReturn(Arrays.asList(
+                new UserInfo(1234, "", UserInfo.FLAG_MANAGED_PROFILE | UserInfo.FLAG_PROFILE)));
         mController = new FingerprintProfileStatusPreferenceController(mContext, TEST_PREF_KEY);
     }
 
     @Test
     public void getUserId_shouldReturnProfileId() {
         assertThat(mController.getUserId()).isEqualTo(FAKE_PROFILE_USER_ID);
-    }
-
-    @Test
-    public void isUserSupported_separateChallengeAllowed_true() {
-        when(mLockPatternUtils.isSeparateProfileChallengeAllowed(anyInt())).thenReturn(true);
-        assertThat(mController.isUserSupported()).isTrue();
-    }
-
-    @Test
-    public void isUserSupported_separateChallengeNotAllowed_false() {
-        when(mLockPatternUtils.isSeparateProfileChallengeAllowed(anyInt())).thenReturn(false);
-
-        assertThat(mController.isUserSupported()).isFalse();
-    }
-
-    @Test
-    public void getAvailabilityStatus_userNotSupported_DISABLED() {
-        when(mFingerprintManager.isHardwareDetected()).thenReturn(true);
-        when(mLockPatternUtils.isSeparateProfileChallengeAllowed(anyInt())).thenReturn(false);
-
-        assertThat(mController.getAvailabilityStatus()).isEqualTo(DISABLED_FOR_USER);
     }
 
     @Test

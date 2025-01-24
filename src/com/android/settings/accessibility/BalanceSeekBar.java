@@ -17,8 +17,10 @@
 package com.android.settings.accessibility;
 
 import static android.view.HapticFeedbackConstants.CLOCK_TICK;
+
 import static com.android.settings.Utils.isNightMode;
 
+import android.annotation.StringRes;
 import android.content.Context;
 import android.content.res.ColorStateList;
 import android.content.res.Resources;
@@ -34,6 +36,7 @@ import android.widget.SeekBar;
 import androidx.annotation.VisibleForTesting;
 
 import com.android.settings.R;
+import com.android.settings.Utils;
 
 /**
  * A custom seekbar for the balance setting.
@@ -84,6 +87,14 @@ public class BalanceSeekBar extends SeekBar {
                 final float balance = (progress - mCenter) * 0.01f;
                 Settings.System.putFloatForUser(mContext.getContentResolver(),
                         Settings.System.MASTER_BALANCE, balance, UserHandle.USER_CURRENT);
+            }
+            final int max = getMax();
+            if (Flags.audioBalanceStateDescription() && max > 0) {
+                seekBar.setStateDescription(createStateDescription(mContext,
+                        R.string.audio_seek_bar_state_left_first,
+                        R.string.audio_seek_bar_state_right_first,
+                        progress,
+                        max));
             }
             // If fromUser is false, the call is a set from the framework on creation or on
             // internal update. The progress may be zero, ignore (don't change system settings).
@@ -154,11 +165,27 @@ public class BalanceSeekBar extends SeekBar {
         // Draw a vertical line at 50% that represents centred balance
         int seekBarCenter = (canvas.getHeight() - getPaddingBottom()) / 2;
         canvas.save();
-        canvas.translate((canvas.getWidth() - mCenterMarkerRect.right) / 2,
+        canvas.translate((canvas.getWidth() - mCenterMarkerRect.right - getPaddingEnd()) / 2,
                 seekBarCenter - (mCenterMarkerRect.bottom / 2));
         canvas.drawRect(mCenterMarkerRect, mCenterMarkerPaint);
         canvas.restore();
         super.onDraw(canvas);
+    }
+
+    private static CharSequence createStateDescription(Context context,
+            @StringRes int resIdLeftFirst, @StringRes int resIdRightFirst,
+            int progress, float max) {
+        final boolean isLayoutRtl = context.getResources().getConfiguration().getLayoutDirection()
+                == LAYOUT_DIRECTION_RTL;
+        final int rightPercent = (int) (100 * (progress / max));
+        final int leftPercent = 100 - rightPercent;
+        final String rightPercentString = Utils.formatPercentage(rightPercent);
+        final String leftPercentString = Utils.formatPercentage(leftPercent);
+        if (rightPercent > leftPercent || (rightPercent == leftPercent && isLayoutRtl)) {
+            return context.getString(resIdRightFirst, rightPercentString, leftPercentString);
+        } else {
+            return context.getString(resIdLeftFirst, leftPercentString, rightPercentString);
+        }
     }
 }
 

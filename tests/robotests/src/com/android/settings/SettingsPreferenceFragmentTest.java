@@ -23,11 +23,13 @@ import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import android.content.Context;
 import android.os.Bundle;
+import android.provider.Settings;
 import android.view.View;
 import android.widget.FrameLayout;
 
@@ -38,9 +40,9 @@ import androidx.preference.PreferenceManager;
 import androidx.preference.PreferenceScreen;
 
 import com.android.settings.testutils.FakeFeatureFactory;
-import com.android.settings.testutils.shadow.ShadowFragment;
 import com.android.settings.widget.WorkOnlyCategory;
 
+import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -52,6 +54,9 @@ import org.robolectric.annotation.Config;
 import org.robolectric.util.ReflectionHelpers;
 
 @RunWith(RobolectricTestRunner.class)
+@Config(shadows = {
+        com.android.settings.testutils.shadow.ShadowFragment.class,
+})
 public class SettingsPreferenceFragmentTest {
 
     private static final int ITEM_COUNT = 5;
@@ -64,7 +69,9 @@ public class SettingsPreferenceFragmentTest {
     private PreferenceScreen mPreferenceScreen;
     private Context mContext;
     private TestFragment mFragment;
+    private TestFragment2 mFragment2;
     private View mEmptyView;
+    private int mInitDeviceProvisionedValue;
 
     @Before
     public void setUp() {
@@ -72,13 +79,24 @@ public class SettingsPreferenceFragmentTest {
         FakeFeatureFactory.setupForTest();
         mContext = RuntimeEnvironment.application;
         mFragment = spy(new TestFragment());
+        mFragment2 = spy(new TestFragment2());
         doReturn(mActivity).when(mFragment).getActivity();
         when(mFragment.getContext()).thenReturn(mContext);
+        when(mFragment2.getContext()).thenReturn(mContext);
 
         mEmptyView = new View(mContext);
         ReflectionHelpers.setField(mFragment, "mEmptyView", mEmptyView);
 
         doReturn(ITEM_COUNT).when(mPreferenceScreen).getPreferenceCount();
+
+        mInitDeviceProvisionedValue = Settings.Global.getInt(mContext.getContentResolver(),
+                Settings.Global.DEVICE_PROVISIONED, 0);
+    }
+
+    @After
+    public void tearDown() {
+        Settings.Global.putInt(mContext.getContentResolver(),
+                Settings.Global.DEVICE_PROVISIONED, mInitDeviceProvisionedValue);
     }
 
     @Test
@@ -150,7 +168,6 @@ public class SettingsPreferenceFragmentTest {
     }
 
     @Test
-    @Config(shadows = ShadowFragment.class)
     public void onCreate_hasExtraFragmentKey_shouldExpandPreferences() {
         doReturn(mContext.getTheme()).when(mActivity).getTheme();
         doReturn(mContext.getResources()).when(mFragment).getResources();
@@ -165,7 +182,6 @@ public class SettingsPreferenceFragmentTest {
     }
 
     @Test
-    @Config(shadows = ShadowFragment.class)
     public void onCreate_noPreferenceScreen_shouldNotCrash() {
         doReturn(mContext.getTheme()).when(mActivity).getTheme();
         doReturn(mContext.getResources()).when(mFragment).getResources();
@@ -210,7 +226,65 @@ public class SettingsPreferenceFragmentTest {
         assertThat(mFragment.mPinnedHeaderFrameLayout.getVisibility()).isEqualTo(View.INVISIBLE);
     }
 
+    @Test
+    public void onAttach_shouldNotSkipForSUWAndDeviceIsProvisioned_notCallFinish() {
+        Settings.Global.putInt(mContext.getContentResolver(),
+                Settings.Global.DEVICE_PROVISIONED, 1);
+
+        mFragment.onAttach(mContext);
+
+        verify(mFragment, never()).finish();
+    }
+
+    @Test
+    public void onAttach_shouldNotSkipForSUWAndDeviceIsNotProvisioned_notCallFinish() {
+        Settings.Global.putInt(mContext.getContentResolver(),
+                Settings.Global.DEVICE_PROVISIONED, 0);
+
+        mFragment.onAttach(mContext);
+
+        verify(mFragment, never()).finish();
+    }
+
+    @Test
+    public void onAttach_shouldSkipForSUWAndDeviceIsDeviceProvisioned_notCallFinish() {
+        Settings.Global.putInt(mContext.getContentResolver(),
+                Settings.Global.DEVICE_PROVISIONED, 1);
+
+        mFragment2.onAttach(mContext);
+
+        verify(mFragment2, never()).finish();
+    }
+
+    @Test
+    public void onAttach_shouldSkipForSUWAndDeviceProvisioned_notCallFinish() {
+        Settings.Global.putInt(mContext.getContentResolver(),
+                Settings.Global.DEVICE_PROVISIONED, 0);
+
+        mFragment2.onAttach(mContext);
+
+        verify(mFragment2, times(1)).finish();
+    }
+
     public static class TestFragment extends SettingsPreferenceFragment {
+
+        @Override
+        protected boolean shouldSkipForInitialSUW() {
+            return false;
+        }
+
+        @Override
+        public int getMetricsCategory() {
+            return 0;
+        }
+    }
+
+    public static class TestFragment2 extends SettingsPreferenceFragment {
+
+        @Override
+        protected boolean shouldSkipForInitialSUW() {
+            return true;
+        }
 
         @Override
         public int getMetricsCategory() {

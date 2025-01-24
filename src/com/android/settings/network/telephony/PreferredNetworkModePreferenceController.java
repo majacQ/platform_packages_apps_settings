@@ -16,54 +16,45 @@
 
 package com.android.settings.network.telephony;
 
+import static com.android.settings.network.telephony.EnabledNetworkModePreferenceControllerHelperKt.getNetworkModePreferenceType;
+
 import android.content.Context;
 import android.os.PersistableBundle;
 import android.telephony.CarrierConfigManager;
 import android.telephony.SubscriptionManager;
 import android.telephony.TelephonyManager;
+import android.util.Log;
 
 import androidx.preference.ListPreference;
 import androidx.preference.Preference;
 
 import com.android.settings.R;
+import com.android.settings.core.BasePreferenceController;
+import com.android.settings.network.CarrierConfigCache;
 import com.android.settings.network.telephony.TelephonyConstants.TelephonyManagerConstants;
 
 /**
  * Preference controller for "Preferred network mode"
  */
-public class PreferredNetworkModePreferenceController extends TelephonyBasePreferenceController
+public class PreferredNetworkModePreferenceController extends BasePreferenceController
         implements ListPreference.OnPreferenceChangeListener {
+    private static final String TAG = "PrefNetworkModeCtrl";
 
-    private CarrierConfigManager mCarrierConfigManager;
+    private int mSubId = SubscriptionManager.INVALID_SUBSCRIPTION_ID;
+    private CarrierConfigCache mCarrierConfigCache;
     private TelephonyManager mTelephonyManager;
-    private PersistableBundle mPersistableBundle;
     private boolean mIsGlobalCdma;
 
     public PreferredNetworkModePreferenceController(Context context, String key) {
         super(context, key);
-        mCarrierConfigManager = context.getSystemService(CarrierConfigManager.class);
+        mCarrierConfigCache = CarrierConfigCache.getInstance(context);
     }
 
     @Override
-    public int getAvailabilityStatus(int subId) {
-        final PersistableBundle carrierConfig = mCarrierConfigManager.getConfigForSubId(subId);
-        boolean visible;
-        if (subId == SubscriptionManager.INVALID_SUBSCRIPTION_ID) {
-            visible = false;
-        } else if (carrierConfig == null) {
-            visible = false;
-        } else if (carrierConfig.getBoolean(
-                CarrierConfigManager.KEY_HIDE_CARRIER_NETWORK_SETTINGS_BOOL)
-                || carrierConfig.getBoolean(
-                CarrierConfigManager.KEY_HIDE_PREFERRED_NETWORK_TYPE_BOOL)) {
-            visible = false;
-        } else if (carrierConfig.getBoolean(CarrierConfigManager.KEY_WORLD_PHONE_BOOL)) {
-            visible = true;
-        } else {
-            visible = false;
-        }
-
-        return visible ? AVAILABLE : CONDITIONALLY_UNAVAILABLE;
+    public int getAvailabilityStatus() {
+        return getNetworkModePreferenceType(mContext, mSubId)
+                == NetworkModePreferenceType.PreferredNetworkMode
+                ? AVAILABLE : CONDITIONALLY_UNAVAILABLE;
     }
 
     @Override
@@ -90,7 +81,7 @@ public class PreferredNetworkModePreferenceController extends TelephonyBasePrefe
 
     public void init(int subId) {
         mSubId = subId;
-        final PersistableBundle carrierConfig = mCarrierConfigManager.getConfigForSubId(mSubId);
+        final PersistableBundle carrierConfig = mCarrierConfigCache.getConfigForSubId(mSubId);
         mTelephonyManager = mContext.getSystemService(TelephonyManager.class)
                 .createForSubscriptionId(mSubId);
 
@@ -99,6 +90,10 @@ public class PreferredNetworkModePreferenceController extends TelephonyBasePrefe
     }
 
     private int getPreferredNetworkMode() {
+        if (mTelephonyManager == null) {
+            Log.w(TAG, "TelephonyManager is null");
+            return TelephonyManagerConstants.NETWORK_MODE_UNKNOWN;
+        }
         return MobileNetworkUtils.getNetworkTypeFromRaf(
                 (int) mTelephonyManager.getAllowedNetworkTypesForReason(
                         TelephonyManager.ALLOWED_NETWORK_TYPES_REASON_USER));

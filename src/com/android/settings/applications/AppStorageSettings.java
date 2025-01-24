@@ -53,11 +53,13 @@ import androidx.preference.PreferenceCategory;
 import com.android.settings.R;
 import com.android.settings.Utils;
 import com.android.settings.deviceinfo.StorageWizardMoveConfirm;
+import com.android.settings.fuelgauge.datasaver.DynamicDenylistManager;
 import com.android.settingslib.RestrictedLockUtils;
 import com.android.settingslib.applications.AppUtils;
 import com.android.settingslib.applications.ApplicationsState.Callbacks;
 import com.android.settingslib.applications.StorageStatsSource;
 import com.android.settingslib.applications.StorageStatsSource.AppStorageStats;
+import com.android.settingslib.utils.StringUtil;
 import com.android.settingslib.widget.ActionButtonsPreference;
 import com.android.settingslib.widget.LayoutPreference;
 
@@ -309,11 +311,7 @@ public class AppStorageSettings extends AppInfoWithHeader
                     .setButton1Enabled(false);
             mCanClearData = false;
         } else {
-            if (appHasSpaceManagementUI) {
-                mButtonsPref.setButton1Text(R.string.manage_space_text);
-            } else {
-                mButtonsPref.setButton1Text(R.string.clear_user_data_text);
-            }
+            mButtonsPref.setButton1Text(R.string.clear_user_data_text);
             mButtonsPref.setButton1Icon(R.drawable.ic_settings_delete)
                     .setButton1OnClickListener(v -> handleClearDataClick());
         }
@@ -326,9 +324,11 @@ public class AppStorageSettings extends AppInfoWithHeader
     private void initMoveDialog() {
         final Context context = getActivity();
         final StorageManager storage = context.getSystemService(StorageManager.class);
-
-        final List<VolumeInfo> candidates = context.getPackageManager()
-                .getPackageCandidateVolumes(mAppEntry.info);
+        final PackageManager pm = context.getPackageManager();
+        final List<VolumeInfo> candidates =
+            mAppEntry != null && pm != null
+                ? pm.getPackageCandidateVolumes(mAppEntry.info)
+                : Collections.emptyList();
         if (candidates.size() > 1) {
             Collections.sort(candidates, VolumeInfo.getDescriptionComparator());
 
@@ -362,6 +362,8 @@ public class AppStorageSettings extends AppInfoWithHeader
         mButtonsPref.setButton1Enabled(false);
         // Invoke uninstall or clear user data based on sysPackage
         String packageName = mAppEntry.info.packageName;
+        DynamicDenylistManager.getInstance(getContext())
+                .resetDenylistIfNeeded(packageName, /* force= */ false);
         Log.i(TAG, "Clearing user data for package : " + packageName);
         if (mClearDataObserver == null) {
             mClearDataObserver = new ClearUserDataObserver();
@@ -442,9 +444,8 @@ public class AppStorageSettings extends AppInfoWithHeader
             int numberResources = entry.getValue().value;
             Preference pref = new Preference(getPrefContext());
             pref.setTitle(entry.getKey());
-            pref.setSummary(getPrefContext().getResources()
-                    .getQuantityString(R.plurals.uri_permissions_text, numberResources,
-                            numberResources));
+            pref.setSummary(StringUtil.getIcuPluralsString(mUri.getContext(), numberResources,
+                    R.string.uri_permissions_text));
             pref.setSelectable(false);
             pref.setLayoutResource(R.layout.horizontal_preference);
             pref.setOrder(order);
@@ -491,7 +492,8 @@ public class AppStorageSettings extends AppInfoWithHeader
                 return new AlertDialog.Builder(getActivity())
                         .setTitle(getActivity().getText(R.string.clear_data_dlg_title))
                         .setMessage(getActivity().getText(R.string.clear_data_dlg_text))
-                        .setPositiveButton(R.string.dlg_ok, new DialogInterface.OnClickListener() {
+                        .setPositiveButton(R.string.dlg_delete,
+                                new DialogInterface.OnClickListener() {
                             public void onClick(DialogInterface dialog, int which) {
                                 // Clear user data here
                                 initiateClearUserData();

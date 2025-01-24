@@ -23,8 +23,8 @@ import static android.app.NotificationManager.BUBBLE_PREFERENCE_SELECTED;
 import static android.app.NotificationManager.IMPORTANCE_HIGH;
 import static android.provider.Settings.Secure.NOTIFICATION_BUBBLES;
 
-import static com.android.settings.notification.app.BubblePreferenceController.SYSTEM_WIDE_OFF;
-import static com.android.settings.notification.app.BubblePreferenceController.SYSTEM_WIDE_ON;
+import static com.android.settings.notification.BubbleHelper.SYSTEM_WIDE_OFF;
+import static com.android.settings.notification.BubbleHelper.SYSTEM_WIDE_ON;
 
 import static junit.framework.TestCase.assertEquals;
 
@@ -43,23 +43,30 @@ import android.content.Context;
 import android.provider.Settings;
 
 import androidx.preference.Preference;
+import androidx.test.core.app.ApplicationProvider;
 
 import com.android.settings.R;
 import com.android.settings.notification.NotificationBackend;
 
 import org.junit.Before;
+import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.mockito.Mock;
-import org.mockito.MockitoAnnotations;
+import org.mockito.junit.MockitoJUnit;
+import org.mockito.junit.MockitoRule;
 import org.robolectric.RobolectricTestRunner;
-import org.robolectric.RuntimeEnvironment;
+import org.robolectric.annotation.Config;
 import org.robolectric.shadow.api.Shadow;
 import org.robolectric.shadows.ShadowActivityManager;
-import org.robolectric.shadows.ShadowApplication;
 
 @RunWith(RobolectricTestRunner.class)
+@Config(shadows = {
+        ShadowActivityManager.class,
+})
 public class BubbleSummaryPreferenceControllerTest {
+    @Rule
+    public final MockitoRule mMockitoRule = MockitoJUnit.rule();
 
     private Context mContext;
     @Mock
@@ -68,16 +75,17 @@ public class BubbleSummaryPreferenceControllerTest {
 
     private BubbleSummaryPreferenceController mController;
 
+    private ShadowActivityManager mActivityManager;
+
     @Before
     public void setUp() {
-        MockitoAnnotations.initMocks(this);
-        ShadowApplication shadowApplication = ShadowApplication.getInstance();
-        mContext = RuntimeEnvironment.application;
-        when(mBackend.hasSentValidMsg(anyString(), anyInt())).thenReturn(true);
+        mContext = ApplicationProvider.getApplicationContext();
+        when(mBackend.hasSentValidBubble(anyString(), anyInt())).thenReturn(true);
         mAppRow = new NotificationBackend.AppRow();
         mAppRow.pkg = "pkg";
         mAppRow.uid = 0;
         mController = spy(new BubbleSummaryPreferenceController(mContext, mBackend));
+        mActivityManager = Shadow.extract(mContext.getSystemService(ActivityManager.class));
     }
 
     @Test
@@ -103,10 +111,10 @@ public class BubbleSummaryPreferenceControllerTest {
     }
 
     @Test
-    public void isAvailable_NOTIFICATION_BUBBLESisOn_neverSentMsg_shouldReturnFalse() {
+    public void isAvailable_NOTIFICATION_BUBBLESisOn_neverSentBubble_shouldReturnFalse() {
         Settings.Secure.putInt(mContext.getContentResolver(), NOTIFICATION_BUBBLES, SYSTEM_WIDE_ON);
         mController.onResume(mAppRow, null, null, null, null, null, null);
-        when(mBackend.hasSentValidMsg(anyString(), anyInt())).thenReturn(false);
+        when(mBackend.hasSentValidBubble(anyString(), anyInt())).thenReturn(false);
 
         assertFalse(mController.isAvailable());
     }
@@ -147,9 +155,7 @@ public class BubbleSummaryPreferenceControllerTest {
         Settings.Secure.putInt(mContext.getContentResolver(), NOTIFICATION_BUBBLES, SYSTEM_WIDE_ON);
         mController.onResume(mAppRow, null, null, null, null, null, null);
 
-        final ShadowActivityManager activityManager =
-                Shadow.extract(mContext.getSystemService(ActivityManager.class));
-        activityManager.setIsLowRamDevice(true);
+        mActivityManager.setIsLowRamDevice(true);
         assertFalse(mController.isAvailable());
     }
 
@@ -158,9 +164,7 @@ public class BubbleSummaryPreferenceControllerTest {
         Settings.Secure.putInt(mContext.getContentResolver(), NOTIFICATION_BUBBLES, SYSTEM_WIDE_ON);
         mController.onResume(mAppRow, null, null, null, null, null, null);
 
-        final ShadowActivityManager activityManager =
-               Shadow.extract(mContext.getSystemService(ActivityManager.class));
-        activityManager.setIsLowRamDevice(false);
+        mActivityManager.setIsLowRamDevice(false);
         assertTrue(mController.isAvailable());
     }
 

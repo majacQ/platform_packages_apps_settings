@@ -16,6 +16,8 @@
 
 package com.android.settings.bluetooth;
 
+import static com.android.settings.bluetooth.Utils.preloadAndRun;
+
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
 import android.content.ContentResolver;
@@ -35,15 +37,19 @@ import android.util.Log;
 import android.util.Pair;
 import android.view.View;
 import android.view.ViewGroup;
+import android.widget.ImageButton;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
+import android.widget.ProgressBar;
 import android.widget.TextView;
 
 import androidx.annotation.VisibleForTesting;
+import androidx.preference.PreferenceFragmentCompat;
 import androidx.preference.PreferenceScreen;
 
 import com.android.settings.R;
 import com.android.settings.core.BasePreferenceController;
+import com.android.settings.flags.Flags;
 import com.android.settings.fuelgauge.BatteryMeterView;
 import com.android.settingslib.bluetooth.BluetoothUtils;
 import com.android.settingslib.bluetooth.CachedBluetoothDevice;
@@ -55,9 +61,15 @@ import com.android.settingslib.utils.StringUtil;
 import com.android.settingslib.utils.ThreadUtils;
 import com.android.settingslib.widget.LayoutPreference;
 
+import com.google.common.base.Supplier;
+import com.google.common.base.Suppliers;
+
 import java.io.IOException;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -87,26 +99,29 @@ public class AdvancedBluetoothDetailsHeaderController extends BasePreferenceCont
     private static final int MAIN_DEVICE_ID = 4;
     private static final float HALF_ALPHA = 0.5f;
 
+    PreferenceFragmentCompat mFragment;
     @VisibleForTesting
     LayoutPreference mLayoutPreference;
     @VisibleForTesting
     final Map<String, Bitmap> mIconCache;
     private CachedBluetoothDevice mCachedDevice;
+    private Set<BluetoothDevice> mBluetoothDevices;
     @VisibleForTesting
     BluetoothAdapter mBluetoothAdapter;
     @VisibleForTesting
     Handler mHandler = new Handler(Looper.getMainLooper());
     @VisibleForTesting
-    boolean mIsRegisterCallback = false;
+    boolean mIsLeftDeviceEstimateReady;
+    @VisibleForTesting
+    boolean mIsRightDeviceEstimateReady;
     @VisibleForTesting
     final BluetoothAdapter.OnMetadataChangedListener mMetadataListener =
             new BluetoothAdapter.OnMetadataChangedListener() {
                 @Override
                 public void onMetadataChanged(BluetoothDevice device, int key, byte[] value) {
-                    if (DEBUG) {
-                        Log.d(TAG, String.format("Metadata updated in Device %s: %d = %s.", device,
-                                key, value == null ? null : new String(value)));
-                    }
+                    Log.d(TAG, String.format("Metadata updated in Device %s: %d = %s.",
+                            device.getAnonymizedAddress(),
+                            key, value == null ? null : new String(value)));
                     refresh();
                 }
             };
@@ -122,7 +137,7 @@ public class AdvancedBluetoothDetailsHeaderController extends BasePreferenceCont
         if (mCachedDevice == null) {
             return CONDITIONALLY_UNAVAILABLE;
         }
-        return Utils.isAdvancedDetailsHeader(mCachedDevice.getDevice())
+        return BluetoothUtils.isAdvancedDetailsHeader(mCachedDevice.getDevice())
                 ? AVAILABLE : CONDITIONALLY_UNAVAILABLE;
     }
 
@@ -138,23 +153,13 @@ public class AdvancedBluetoothDetailsHeaderController extends BasePreferenceCont
         if (!isAvailable()) {
             return;
         }
-        mIsRegisterCallback = true;
-        mCachedDevice.registerCallback(this);
-        mBluetoothAdapter.addOnMetadataChangedListener(mCachedDevice.getDevice(),
-                mContext.getMainExecutor(), mMetadataListener);
-
+        registerBluetoothDevice();
         refresh();
     }
 
     @Override
     public void onStop() {
-        if (!mIsRegisterCallback) {
-            return;
-        }
-        mCachedDevice.unregisterCallback(this);
-        mBluetoothAdapter.removeOnMetadataChangedListener(mCachedDevice.getDevice(),
-                mMetadataListener);
-        mIsRegisterCallback = false;
+        unRegisterBluetoothDevice();
     }
 
     @Override
@@ -168,64 +173,171 @@ public class AdvancedBluetoothDetailsHeaderController extends BasePreferenceCont
         mIconCache.clear();
     }
 
-    public void init(CachedBluetoothDevice cachedBluetoothDevice) {
+    /** Initializes the controller. */
+    public void init(
+            CachedBluetoothDevice cachedBluetoothDevice, PreferenceFragmentCompat fragment) {
         mCachedDevice = cachedBluetoothDevice;
+        mFragment = fragment;
+    }
+
+    private void registerBluetoothDevice() {
+        if (mBluetoothAdapter == null) {
+            Log.d(TAG, "No mBluetoothAdapter");
+            return;
+        }
+        if (mBluetoothDevices == null) {
+            mBluetoothDevices = new HashSet<>();
+        }
+        mBluetoothDevices.clear();
+        if (mCachedDevice.getDevice() != null) {
+            mBluetoothDevices.add(mCachedDevice.getDevice());
+        }
+        mCachedDevice.getMemberDevice().forEach(cbd -> {
+            if (cbd != null) {
+                mBluetoothDevices.add(cbd.getDevice());
+            }
+        });
+        if (mBluetoothDevices.isEmpty()) {
+            Log.d(TAG, "No BT device to register.");
+            return;
+        }
+        mCachedDevice.registerCallback(this);
+        Set<BluetoothDevice> errorDevices = new HashSet<>();
+        mBluetoothDevices.forEach(bd -> {
+            try {
+                boolean isSuccess = mBluetoothAdapter.addOnMetadataChangedListener(bd,
+                        mContext.getMainExecutor(), mMetadataListener);
+                if (!isSuccess) {
+                    Log.e(TAG, bd.getAnonymizedAddress() + ": add into Listener failed");
+                    errorDevices.add(bd);
+                }
+            } catch (NullPointerException e) {
+                errorDevices.add(bd);
+                Log.e(TAG, bd.getAnonymizedAddress() + ":" + e.toString());
+            } catch (IllegalArgumentException e) {
+                errorDevices.add(bd);
+                Log.e(TAG, bd.getAnonymizedAddress() + ":" + e.toString());
+            }
+        });
+        for (BluetoothDevice errorDevice : errorDevices) {
+            mBluetoothDevices.remove(errorDevice);
+            Log.d(TAG, "mBluetoothDevices remove " + errorDevice.getAnonymizedAddress());
+        }
+    }
+
+    private void unRegisterBluetoothDevice() {
+        if (mBluetoothAdapter == null) {
+            Log.d(TAG, "No mBluetoothAdapter");
+            return;
+        }
+        if (mBluetoothDevices == null || mBluetoothDevices.isEmpty()) {
+            Log.d(TAG, "No BT device to unregister.");
+            return;
+        }
+        mCachedDevice.unregisterCallback(this);
+        mBluetoothDevices.forEach(bd -> {
+            try {
+                mBluetoothAdapter.removeOnMetadataChangedListener(bd, mMetadataListener);
+            } catch (NullPointerException e) {
+                Log.e(TAG, bd.getAnonymizedAddress() + ":" + e.toString());
+            } catch (IllegalArgumentException e) {
+                Log.e(TAG, bd.getAnonymizedAddress() + ":" + e.toString());
+            }
+        });
+        mBluetoothDevices.clear();
     }
 
     @VisibleForTesting
     void refresh() {
         if (mLayoutPreference != null && mCachedDevice != null) {
-            final TextView title = mLayoutPreference.findViewById(R.id.entity_header_title);
-            title.setText(mCachedDevice.getName());
-            final TextView summary = mLayoutPreference.findViewById(R.id.entity_header_summary);
-            summary.setText(mCachedDevice.getConnectionSummary(true /* shortSummary */));
+            Supplier<String> deviceName = Suppliers.memoize(() -> mCachedDevice.getName());
+            Supplier<Boolean> disconnected =
+                    Suppliers.memoize(() -> !mCachedDevice.isConnected() || mCachedDevice.isBusy());
+            Supplier<Boolean> isUntetheredHeadset =
+                    Suppliers.memoize(() -> isUntetheredHeadset(mCachedDevice.getDevice()));
+            Supplier<String> summaryText =
+                    Suppliers.memoize(
+                            () -> {
+                                if (disconnected.get() || isUntetheredHeadset.get()) {
+                                    return mCachedDevice.getConnectionSummary(
+                                            /* shortSummary= */ true);
+                                }
+                                return mCachedDevice.getConnectionSummary(
+                                        BluetoothUtils.getIntMetaData(
+                                                        mCachedDevice.getDevice(),
+                                                        BluetoothDevice.METADATA_MAIN_BATTERY)
+                                                != BluetoothUtils.META_INT_ERROR);
+                            });
+            preloadAndRun(
+                    List.of(deviceName, disconnected, isUntetheredHeadset, summaryText),
+                    () -> {
+                        final TextView title =
+                                mLayoutPreference.findViewById(R.id.entity_header_title);
+                        title.setText(deviceName.get());
+                        final TextView summary =
+                                mLayoutPreference.findViewById(R.id.entity_header_summary);
 
-            if (!mCachedDevice.isConnected() || mCachedDevice.isBusy()) {
-                updateDisconnectLayout();
-                return;
-            }
-            final BluetoothDevice device = mCachedDevice.getDevice();
-            final String deviceType = BluetoothUtils.getStringMetaData(device,
-                    BluetoothDevice.METADATA_DEVICE_TYPE);
-            if (TextUtils.equals(deviceType, BluetoothDevice.DEVICE_TYPE_WATCH)
-                    || TextUtils.equals(deviceType, BluetoothDevice.DEVICE_TYPE_DEFAULT)) {
-                mLayoutPreference.findViewById(R.id.layout_left).setVisibility(View.GONE);
-                mLayoutPreference.findViewById(R.id.layout_right).setVisibility(View.GONE);
+                        if (disconnected.get()) {
+                            summary.setText(summaryText.get());
+                            updateDisconnectLayout();
+                            return;
+                        }
+                        if (isUntetheredHeadset.get()) {
+                            summary.setText(summaryText.get());
+                            updateSubLayout(
+                                    mLayoutPreference.findViewById(R.id.layout_left),
+                                    BluetoothDevice.METADATA_UNTETHERED_LEFT_ICON,
+                                    BluetoothDevice.METADATA_UNTETHERED_LEFT_BATTERY,
+                                    BluetoothDevice.METADATA_UNTETHERED_LEFT_LOW_BATTERY_THRESHOLD,
+                                    BluetoothDevice.METADATA_UNTETHERED_LEFT_CHARGING,
+                                    R.string.bluetooth_left_name,
+                                    LEFT_DEVICE_ID);
 
-                updateSubLayout(mLayoutPreference.findViewById(R.id.layout_middle),
-                        BluetoothDevice.METADATA_MAIN_ICON,
-                        BluetoothDevice.METADATA_MAIN_BATTERY,
-                        BluetoothDevice.METADATA_MAIN_LOW_BATTERY_THRESHOLD,
-                        BluetoothDevice.METADATA_MAIN_CHARGING,
-                        /* titleResId */ 0,
-                        MAIN_DEVICE_ID);
-            } else if (TextUtils.equals(deviceType,
-                    BluetoothDevice.DEVICE_TYPE_UNTETHERED_HEADSET)
-                    || BluetoothUtils.getBooleanMetaData(device,
-                    BluetoothDevice.METADATA_IS_UNTETHERED_HEADSET)) {
-                updateSubLayout(mLayoutPreference.findViewById(R.id.layout_left),
-                        BluetoothDevice.METADATA_UNTETHERED_LEFT_ICON,
-                        BluetoothDevice.METADATA_UNTETHERED_LEFT_BATTERY,
-                        BluetoothDevice.METADATA_UNTETHERED_LEFT_LOW_BATTERY_THRESHOLD,
-                        BluetoothDevice.METADATA_UNTETHERED_LEFT_CHARGING,
-                        R.string.bluetooth_left_name,
-                        LEFT_DEVICE_ID);
+                            updateSubLayout(
+                                    mLayoutPreference.findViewById(R.id.layout_middle),
+                                    BluetoothDevice.METADATA_UNTETHERED_CASE_ICON,
+                                    BluetoothDevice.METADATA_UNTETHERED_CASE_BATTERY,
+                                    BluetoothDevice.METADATA_UNTETHERED_CASE_LOW_BATTERY_THRESHOLD,
+                                    BluetoothDevice.METADATA_UNTETHERED_CASE_CHARGING,
+                                    R.string.bluetooth_middle_name,
+                                    CASE_DEVICE_ID);
 
-                updateSubLayout(mLayoutPreference.findViewById(R.id.layout_middle),
-                        BluetoothDevice.METADATA_UNTETHERED_CASE_ICON,
-                        BluetoothDevice.METADATA_UNTETHERED_CASE_BATTERY,
-                        BluetoothDevice.METADATA_UNTETHERED_CASE_LOW_BATTERY_THRESHOLD,
-                        BluetoothDevice.METADATA_UNTETHERED_CASE_CHARGING,
-                        R.string.bluetooth_middle_name,
-                        CASE_DEVICE_ID);
+                            updateSubLayout(
+                                    mLayoutPreference.findViewById(R.id.layout_right),
+                                    BluetoothDevice.METADATA_UNTETHERED_RIGHT_ICON,
+                                    BluetoothDevice.METADATA_UNTETHERED_RIGHT_BATTERY,
+                                    BluetoothDevice.METADATA_UNTETHERED_RIGHT_LOW_BATTERY_THRESHOLD,
+                                    BluetoothDevice.METADATA_UNTETHERED_RIGHT_CHARGING,
+                                    R.string.bluetooth_right_name,
+                                    RIGHT_DEVICE_ID);
 
-                updateSubLayout(mLayoutPreference.findViewById(R.id.layout_right),
-                        BluetoothDevice.METADATA_UNTETHERED_RIGHT_ICON,
-                        BluetoothDevice.METADATA_UNTETHERED_RIGHT_BATTERY,
-                        BluetoothDevice.METADATA_UNTETHERED_RIGHT_LOW_BATTERY_THRESHOLD,
-                        BluetoothDevice.METADATA_UNTETHERED_RIGHT_CHARGING,
-                        R.string.bluetooth_right_name,
-                        RIGHT_DEVICE_ID);
+                            showBothDevicesBatteryPredictionIfNecessary();
+                        } else {
+                            mLayoutPreference
+                                    .findViewById(R.id.layout_left)
+                                    .setVisibility(View.GONE);
+                            mLayoutPreference
+                                    .findViewById(R.id.layout_right)
+                                    .setVisibility(View.GONE);
+
+                            summary.setText(summaryText.get());
+                            updateSubLayout(
+                                    mLayoutPreference.findViewById(R.id.layout_middle),
+                                    BluetoothDevice.METADATA_MAIN_ICON,
+                                    BluetoothDevice.METADATA_MAIN_BATTERY,
+                                    BluetoothDevice.METADATA_MAIN_LOW_BATTERY_THRESHOLD,
+                                    BluetoothDevice.METADATA_MAIN_CHARGING,
+                                    /* titleResId= */ 0,
+                                    MAIN_DEVICE_ID);
+                        }
+                    });
+            if (Flags.enableBluetoothDeviceDetailsPolish()) {
+                ImageButton renameButton = mLayoutPreference.findViewById(R.id.rename_button);
+                renameButton.setVisibility(View.VISIBLE);
+                renameButton.setOnClickListener(view -> {
+                    RemoteDeviceNameDialogFragment.newInstance(mCachedDevice).show(
+                            mFragment.getFragmentManager(), RemoteDeviceNameDialogFragment.TAG);
+                });
             }
         }
     }
@@ -234,7 +346,7 @@ public class AdvancedBluetoothDetailsHeaderController extends BasePreferenceCont
     Drawable createBtBatteryIcon(Context context, int level, boolean charging) {
         final BatteryMeterView.BatteryMeterDrawable drawable =
                 new BatteryMeterView.BatteryMeterDrawable(context,
-                        context.getColor(R.color.meter_background_color),
+                        context.getColor(com.android.settingslib.R.color.meter_background_color),
                         context.getResources().getDimensionPixelSize(
                                 R.dimen.advanced_bluetooth_battery_meter_width),
                         context.getResources().getDimensionPixelSize(
@@ -249,13 +361,87 @@ public class AdvancedBluetoothDetailsHeaderController extends BasePreferenceCont
         return drawable;
     }
 
-    private void updateSubLayout(LinearLayout linearLayout, int iconMetaKey, int batteryMetaKey,
-            int lowBatteryMetaKey, int chargeMetaKey, int titleResId, int deviceId) {
+    private void updateSubLayout(
+            LinearLayout linearLayout,
+            int iconMetaKey,
+            int batteryMetaKey,
+            int lowBatteryMetaKey,
+            int chargeMetaKey,
+            int titleResId,
+            int deviceId) {
         if (linearLayout == null) {
             return;
         }
+        BluetoothDevice bluetoothDevice = mCachedDevice.getDevice();
+        Supplier<String> iconUri =
+                Suppliers.memoize(
+                        () -> BluetoothUtils.getStringMetaData(bluetoothDevice, iconMetaKey));
+        Supplier<Integer> batteryLevel =
+                Suppliers.memoize(
+                        () -> BluetoothUtils.getIntMetaData(bluetoothDevice, batteryMetaKey));
+        Supplier<Boolean> charging =
+                Suppliers.memoize(
+                        () -> BluetoothUtils.getBooleanMetaData(bluetoothDevice, chargeMetaKey));
+        Supplier<Integer> lowBatteryLevel =
+                Suppliers.memoize(
+                        () -> {
+                            int level =
+                                    BluetoothUtils.getIntMetaData(
+                                            bluetoothDevice, lowBatteryMetaKey);
+                            if (level == BluetoothUtils.META_INT_ERROR) {
+                                if (batteryMetaKey
+                                        == BluetoothDevice.METADATA_UNTETHERED_CASE_BATTERY) {
+                                    level = CASE_LOW_BATTERY_LEVEL;
+                                } else {
+                                    level = LOW_BATTERY_LEVEL;
+                                }
+                            }
+                            return level;
+                        });
+        Supplier<Boolean> isUntethered =
+                Suppliers.memoize(() -> isUntetheredHeadset(bluetoothDevice));
+        Supplier<Integer> nativeBatteryLevel = Suppliers.memoize(bluetoothDevice::getBatteryLevel);
+        preloadAndRun(
+                List.of(
+                        iconUri,
+                        batteryLevel,
+                        charging,
+                        lowBatteryLevel,
+                        isUntethered,
+                        nativeBatteryLevel),
+                () ->
+                        updateSubLayoutUi(
+                                linearLayout,
+                                iconMetaKey,
+                                batteryMetaKey,
+                                lowBatteryMetaKey,
+                                chargeMetaKey,
+                                titleResId,
+                                deviceId,
+                                iconUri,
+                                batteryLevel,
+                                charging,
+                                lowBatteryLevel,
+                                isUntethered,
+                                nativeBatteryLevel));
+    }
+
+    private void updateSubLayoutUi(
+            LinearLayout linearLayout,
+            int iconMetaKey,
+            int batteryMetaKey,
+            int lowBatteryMetaKey,
+            int chargeMetaKey,
+            int titleResId,
+            int deviceId,
+            Supplier<String> preloadedIconUri,
+            Supplier<Integer> preloadedBatteryLevel,
+            Supplier<Boolean> preloadedCharging,
+            Supplier<Integer> preloadedLowBatteryLevel,
+            Supplier<Boolean> preloadedIsUntethered,
+            Supplier<Integer> preloadedNativeBatteryLevel) {
         final BluetoothDevice bluetoothDevice = mCachedDevice.getDevice();
-        final String iconUri = BluetoothUtils.getStringMetaData(bluetoothDevice, iconMetaKey);
+        final String iconUri = preloadedIconUri.get();
         final ImageView imageView = linearLayout.findViewById(R.id.header_icon);
         if (iconUri != null) {
             updateIcon(imageView, iconUri);
@@ -265,45 +451,45 @@ public class AdvancedBluetoothDetailsHeaderController extends BasePreferenceCont
             imageView.setImageDrawable(pair.first);
             imageView.setContentDescription(pair.second);
         }
-        final int batteryLevel = BluetoothUtils.getIntMetaData(bluetoothDevice, batteryMetaKey);
-        final boolean charging = BluetoothUtils.getBooleanMetaData(bluetoothDevice, chargeMetaKey);
-        if (DEBUG) {
-            Log.d(TAG, "updateSubLayout() icon : " + iconMetaKey + ", battery : " + batteryMetaKey
-                    + ", charge : " + chargeMetaKey + ", batteryLevel : " + batteryLevel
-                    + ", charging : " + charging + ", iconUri : " + iconUri);
-        }
+        final int batteryLevel = preloadedBatteryLevel.get();
+        final boolean charging = preloadedCharging.get();
+        int lowBatteryLevel = preloadedLowBatteryLevel.get();
+
+        Log.d(TAG, "buletoothDevice: " + bluetoothDevice.getAnonymizedAddress()
+                + ", updateSubLayout() icon : " + iconMetaKey + ", battery : " + batteryMetaKey
+                + ", charge : " + chargeMetaKey + ", batteryLevel : " + batteryLevel
+                + ", charging : " + charging + ", iconUri : " + iconUri
+                + ", lowBatteryLevel : " + lowBatteryLevel);
+
         if (deviceId == LEFT_DEVICE_ID || deviceId == RIGHT_DEVICE_ID) {
             showBatteryPredictionIfNecessary(linearLayout, deviceId, batteryLevel);
         }
         final TextView batterySummaryView = linearLayout.findViewById(R.id.bt_battery_summary);
-        if (isUntetheredHeadset(bluetoothDevice)) {
+        if (preloadedIsUntethered.get()) {
             if (batteryLevel != BluetoothUtils.META_INT_ERROR) {
                 linearLayout.setVisibility(View.VISIBLE);
                 batterySummaryView.setText(
                         com.android.settings.Utils.formatPercentage(batteryLevel));
                 batterySummaryView.setVisibility(View.VISIBLE);
-                int lowBatteryLevel = BluetoothUtils.getIntMetaData(bluetoothDevice,
-                        lowBatteryMetaKey);
-                if (lowBatteryLevel == BluetoothUtils.META_INT_ERROR) {
-                    if (batteryMetaKey == BluetoothDevice.METADATA_UNTETHERED_CASE_BATTERY) {
-                        lowBatteryLevel = CASE_LOW_BATTERY_LEVEL;
-                    } else {
-                        lowBatteryLevel = LOW_BATTERY_LEVEL;
-                    }
-                }
                 showBatteryIcon(linearLayout, batteryLevel, lowBatteryLevel, charging);
+                showBatteryRing(linearLayout, batteryLevel);
             } else {
                 if (deviceId == MAIN_DEVICE_ID) {
                     linearLayout.setVisibility(View.VISIBLE);
                     linearLayout.findViewById(R.id.bt_battery_icon).setVisibility(View.GONE);
-                    int level = bluetoothDevice.getBatteryLevel();
+
+                    int level = preloadedNativeBatteryLevel.get();
                     if (level != BluetoothDevice.BATTERY_LEVEL_UNKNOWN
                             && level != BluetoothDevice.BATTERY_LEVEL_BLUETOOTH_OFF) {
                         batterySummaryView.setText(
                                 com.android.settings.Utils.formatPercentage(level));
                         batterySummaryView.setVisibility(View.VISIBLE);
+                        showBatteryRing(linearLayout, level);
                     } else {
                         batterySummaryView.setVisibility(View.GONE);
+                        if (Flags.enableBluetoothDeviceDetailsPolish()) {
+                            linearLayout.findViewById(R.id.battery_ring).setVisibility(View.GONE);
+                        }
                     }
                 } else {
                     // Hide it if it doesn't have battery information
@@ -311,7 +497,16 @@ public class AdvancedBluetoothDetailsHeaderController extends BasePreferenceCont
                 }
             }
         } else {
-            batterySummaryView.setVisibility(View.GONE);
+            if (batteryLevel != BluetoothUtils.META_INT_ERROR) {
+                linearLayout.setVisibility(View.VISIBLE);
+                batterySummaryView.setText(
+                        com.android.settings.Utils.formatPercentage(batteryLevel));
+                batterySummaryView.setVisibility(View.VISIBLE);
+                showBatteryIcon(linearLayout, batteryLevel, lowBatteryLevel, charging);
+                showBatteryRing(linearLayout, batteryLevel);
+            } else {
+                batterySummaryView.setVisibility(View.GONE);
+            }
         }
         final TextView textView = linearLayout.findViewById(R.id.header_title);
         if (deviceId == MAIN_DEVICE_ID) {
@@ -365,8 +560,13 @@ public class AdvancedBluetoothDetailsHeaderController extends BasePreferenceCont
                                 + ", ESTIMATE_READY : " + estimateReady
                                 + ", BATTERY_ESTIMATE : " + batteryEstimate);
                     }
-                    showBatteryPredictionIfNecessary(estimateReady, batteryEstimate,
-                            linearLayout);
+
+                    showBatteryPredictionIfNecessary(estimateReady, batteryEstimate, linearLayout);
+                    if (batteryId == LEFT_DEVICE_ID) {
+                        mIsLeftDeviceEstimateReady = estimateReady == 1;
+                    } else if (batteryId == RIGHT_DEVICE_ID) {
+                        mIsRightDeviceEstimateReady = estimateReady == 1;
+                    }
                 }
             } finally {
                 cursor.close();
@@ -380,7 +580,6 @@ public class AdvancedBluetoothDetailsHeaderController extends BasePreferenceCont
         ThreadUtils.postOnMainThread(() -> {
             final TextView textView = linearLayout.findViewById(R.id.bt_battery_prediction);
             if (estimateReady == 1) {
-                textView.setVisibility(View.VISIBLE);
                 textView.setText(
                         StringUtil.formatElapsedTime(
                                 mContext,
@@ -390,6 +589,24 @@ public class AdvancedBluetoothDetailsHeaderController extends BasePreferenceCont
             } else {
                 textView.setVisibility(View.GONE);
             }
+        });
+    }
+
+    @VisibleForTesting
+    void showBothDevicesBatteryPredictionIfNecessary() {
+        TextView leftDeviceTextView =
+                mLayoutPreference.findViewById(R.id.layout_left)
+                        .findViewById(R.id.bt_battery_prediction);
+        TextView rightDeviceTextView =
+                mLayoutPreference.findViewById(R.id.layout_right)
+                        .findViewById(R.id.bt_battery_prediction);
+
+        boolean isBothDevicesEstimateReady =
+                mIsLeftDeviceEstimateReady && mIsRightDeviceEstimateReady;
+        int visibility = isBothDevicesEstimateReady ? View.VISIBLE : View.GONE;
+        ThreadUtils.postOnMainThread(() -> {
+            leftDeviceTextView.setVisibility(visibility);
+            rightDeviceTextView.setVisibility(visibility);
         });
     }
 
@@ -416,6 +633,14 @@ public class AdvancedBluetoothDetailsHeaderController extends BasePreferenceCont
         imageView.setVisibility(View.VISIBLE);
     }
 
+    private void showBatteryRing(LinearLayout linearLayout, int level) {
+        if (Flags.enableBluetoothDeviceDetailsPolish()) {
+            ProgressBar batteryProgress = linearLayout.findViewById(R.id.battery_ring);
+            batteryProgress.setProgress(level);
+            batteryProgress.setVisibility(View.VISIBLE);
+        }
+    }
+
     private void updateDisconnectLayout() {
         mLayoutPreference.findViewById(R.id.layout_left).setVisibility(View.GONE);
         mLayoutPreference.findViewById(R.id.layout_right).setVisibility(View.GONE);
@@ -426,6 +651,9 @@ public class AdvancedBluetoothDetailsHeaderController extends BasePreferenceCont
         linearLayout.findViewById(R.id.header_title).setVisibility(View.GONE);
         linearLayout.findViewById(R.id.bt_battery_summary).setVisibility(View.GONE);
         linearLayout.findViewById(R.id.bt_battery_icon).setVisibility(View.GONE);
+        if (Flags.enableBluetoothDeviceDetailsPolish()) {
+            linearLayout.findViewById(R.id.battery_ring).setVisibility(View.GONE);
+        }
 
         // Only show bluetooth icon
         final BluetoothDevice bluetoothDevice = mCachedDevice.getDevice();

@@ -20,6 +20,7 @@ import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import android.content.ContentResolver;
 import android.content.Context;
 import android.os.Bundle;
 
@@ -33,14 +34,20 @@ import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;
+import org.robolectric.annotation.Config;
 
 @RunWith(RobolectricTestRunner.class)
+@Config(shadows = {
+        com.android.settings.testutils.shadow.ShadowFragment.class,
+})
 public class LocationSettingsTest {
 
     @Mock
     private SettingsActivity mActivity;
     @Mock
     private SettingsMainSwitchBar mSwitchBar;
+    @Mock
+    private ContentResolver mContentResolver;
 
     private Context mContext;
     private LocationSettings mLocationSettings;
@@ -52,6 +59,7 @@ public class LocationSettingsTest {
         mLocationSettings = spy(new LocationSettings());
         doReturn(mActivity).when(mLocationSettings).getActivity();
         doReturn(mContext).when(mLocationSettings).getContext();
+        doReturn(mContentResolver).when(mActivity).getContentResolver();
         when(mActivity.getSwitchBar()).thenReturn(mSwitchBar);
     }
 

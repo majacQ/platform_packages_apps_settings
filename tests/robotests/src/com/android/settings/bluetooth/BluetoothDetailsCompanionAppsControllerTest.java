@@ -22,10 +22,11 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.when;
 
-import android.companion.Association;
+import android.companion.AssociationInfo;
 import android.companion.CompanionDeviceManager;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
+import android.net.MacAddress;
 
 import androidx.preference.Preference;
 import androidx.preference.PreferenceCategory;
@@ -62,7 +63,7 @@ public class BluetoothDetailsCompanionAppsControllerTest extends
     private PreferenceCategory mProfiles;
     private List<String> mPackages;
     private List<CharSequence> mAppNames;
-    private List<Association> mAssociations;
+    private List<AssociationInfo> mAssociations;
 
 
     @Override
@@ -97,8 +98,25 @@ public class BluetoothDetailsCompanionAppsControllerTest extends
 
     private void addFakeAssociation(String packageName, CharSequence appName) {
         setupFakeLabelAndInfo(packageName, appName);
-        Association association = new Association(
-                0, mCachedDevice.getAddress(), packageName, "", true, System.currentTimeMillis());
+
+        final int associationId = mAssociations.size() + 1;
+        final AssociationInfo association = new AssociationInfo(
+                associationId,
+                /* userId */ 0,
+                packageName,
+                /* tag */ null,
+                MacAddress.fromString(mCachedDevice.getAddress()),
+                /* displayName */ null,
+                /* deviceProfile */ "",
+                /* associatedDevice */ null,
+                /* selfManaged */ false,
+                /* notifyOnDeviceNearby */ true,
+                /* revoked */ false,
+                /* pending */ false,
+                /* timeApprovedMs */ System.currentTimeMillis(),
+                /* lastTimeConnected */ Long.MAX_VALUE,
+                /* systemDataSyncFlags */ -1);
+
         mAssociations.add(association);
         showScreen(mController);
     }

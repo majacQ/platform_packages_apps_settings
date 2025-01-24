@@ -19,6 +19,7 @@ package com.android.settings.wfd;
 import android.content.Context;
 import android.media.MediaRouter;
 import android.media.MediaRouter.RouteInfo;
+import android.text.TextUtils;
 
 import androidx.preference.Preference;
 import androidx.preference.PreferenceScreen;
@@ -64,7 +65,6 @@ public class WifiDisplayPreferenceController extends BasePreferenceController im
     public WifiDisplayPreferenceController(Context context, String key) {
         super(context, key);
         mRouter = context.getSystemService(MediaRouter.class);
-        mRouter.setRouterGroupId(MediaRouter.MIRRORING_GROUP_ID);
     }
 
     @Override
@@ -87,7 +87,12 @@ public class WifiDisplayPreferenceController extends BasePreferenceController im
             final MediaRouter.RouteInfo route = mRouter.getRouteAt(i);
             if (route.matchesTypes(MediaRouter.ROUTE_TYPE_REMOTE_DISPLAY)
                     && route.isSelected() && !route.isConnecting()) {
-                summary = mContext.getString(R.string.wifi_display_status_connected);
+                CharSequence status = route.getStatus();
+                if (!TextUtils.isEmpty(status)) {
+                    summary = status;
+                } else {
+                    summary = mContext.getString(R.string.wifi_display_status_connected);
+                }
                 break;
             }
         }

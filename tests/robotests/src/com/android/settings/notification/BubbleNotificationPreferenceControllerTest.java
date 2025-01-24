@@ -31,59 +31,70 @@ import static org.mockito.Mockito.when;
 import android.app.ActivityManager;
 import android.content.Context;
 import android.provider.Settings;
+import android.widget.Switch;
 
 import androidx.preference.PreferenceScreen;
+import androidx.test.core.app.ApplicationProvider;
 
+import com.android.settingslib.testutils.shadow.ShadowInteractionJankMonitor;
 import com.android.settingslib.widget.MainSwitchPreference;
 
 import org.junit.Before;
+import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.mockito.Answers;
 import org.mockito.Mock;
-import org.mockito.MockitoAnnotations;
+import org.mockito.junit.MockitoJUnit;
+import org.mockito.junit.MockitoRule;
 import org.robolectric.RobolectricTestRunner;
-import org.robolectric.RuntimeEnvironment;
+import org.robolectric.annotation.Config;
 import org.robolectric.shadow.api.Shadow;
 import org.robolectric.shadows.ShadowActivityManager;
 
 @RunWith(RobolectricTestRunner.class)
+@Config(shadows = {
+        ShadowInteractionJankMonitor.class,
+        ShadowActivityManager.class,
+})
 public class BubbleNotificationPreferenceControllerTest {
+    @Rule
+    public final MockitoRule mMockitoRule = MockitoJUnit.rule();
 
+    private static final String KEY_NOTIFICATION_BUBBLES = "notification_bubbles";
     private Context mContext;
     @Mock(answer = Answers.RETURNS_DEEP_STUBS)
     private PreferenceScreen mScreen;
 
+    @Mock
+    private Switch mSwitch;
+
     private BubbleNotificationPreferenceController mController;
     private MainSwitchPreference mPreference;
 
-    private static final String KEY_NOTIFICATION_BUBBLES = "notification_bubbles";
+    private ShadowActivityManager mActivityManager;
 
     @Before
     public void setUp() {
-        MockitoAnnotations.initMocks(this);
-        mContext = RuntimeEnvironment.application;
+        mContext = ApplicationProvider.getApplicationContext();
         mController = new BubbleNotificationPreferenceController(mContext,
                 KEY_NOTIFICATION_BUBBLES);
-        mPreference = new MainSwitchPreference(RuntimeEnvironment.application);
+        mPreference = new MainSwitchPreference(mContext);
         mPreference.setKey(mController.getPreferenceKey());
         when(mScreen.findPreference(mPreference.getKey())).thenReturn(mPreference);
         mController.displayPreference(mScreen);
+        mActivityManager = Shadow.extract(mContext.getSystemService(ActivityManager.class));
     }
 
     @Test
     public void isAvailable_lowRam_returnsUnsupported() {
-        final ShadowActivityManager activityManager =
-                Shadow.extract(mContext.getSystemService(ActivityManager.class));
-        activityManager.setIsLowRamDevice(true);
+        mActivityManager.setIsLowRamDevice(true);
         assertEquals(UNSUPPORTED_ON_DEVICE, mController.getAvailabilityStatus());
     }
 
     @Test
     public void isAvailable_notLowRam_returnsAvailable() {
-        final ShadowActivityManager activityManager =
-                Shadow.extract(mContext.getSystemService(ActivityManager.class));
-        activityManager.setIsLowRamDevice(false);
+        mActivityManager.setIsLowRamDevice(false);
         assertEquals(AVAILABLE, mController.getAvailabilityStatus());
     }
 
@@ -102,7 +113,7 @@ public class BubbleNotificationPreferenceControllerTest {
     public void onSwitchChanged_true_settingIsOff_flagShouldOn() {
         Settings.Global.putInt(mContext.getContentResolver(), NOTIFICATION_BUBBLES, OFF);
 
-        mController.onSwitchChanged(null, true);
+        mController.onCheckedChanged(mSwitch, true);
 
         assertThat(Settings.Global.getInt(mContext.getContentResolver(),
                 NOTIFICATION_BUBBLES, OFF)).isEqualTo(ON);
@@ -112,7 +123,7 @@ public class BubbleNotificationPreferenceControllerTest {
     public void onSwitchChanged_false_settingIsOn_flagShouldOff() {
         Settings.Global.putInt(mContext.getContentResolver(), NOTIFICATION_BUBBLES, ON);
 
-        mController.onSwitchChanged(null, false);
+        mController.onCheckedChanged(mSwitch, false);
 
         assertThat(Settings.Global.getInt(mContext.getContentResolver(),
                 NOTIFICATION_BUBBLES, ON)).isEqualTo(OFF);

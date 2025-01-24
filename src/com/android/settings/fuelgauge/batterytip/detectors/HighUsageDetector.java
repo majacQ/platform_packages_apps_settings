@@ -21,6 +21,7 @@ import static com.android.settings.Utils.SETTINGS_PACKAGE_NAME;
 import android.content.Context;
 import android.os.BatteryUsageStats;
 import android.os.UidBatteryConsumer;
+import android.util.Log;
 
 import androidx.annotation.VisibleForTesting;
 
@@ -37,37 +38,41 @@ import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 /**
- * Detector whether to show summary tip. This detector should be executed as the last
- * {@link BatteryTipDetector} since it need the most up-to-date {@code visibleTips}
+ * Detector whether to show summary tip. This detector should be executed as the last {@link
+ * BatteryTipDetector} since it need the most up-to-date {@code visibleTips}
  */
 public class HighUsageDetector implements BatteryTipDetector {
+    private static final String TAG = "HighUsageDetector";
+
     private BatteryTipPolicy mPolicy;
     private BatteryUsageStats mBatteryUsageStats;
     private final BatteryInfo mBatteryInfo;
     private List<AppInfo> mHighUsageAppList;
-    @VisibleForTesting
-    HighUsageDataParser mDataParser;
-    @VisibleForTesting
-    BatteryUtils mBatteryUtils;
-    @VisibleForTesting
-    boolean mDischarging;
+    @VisibleForTesting HighUsageDataParser mDataParser;
+    @VisibleForTesting BatteryUtils mBatteryUtils;
+    @VisibleForTesting boolean mDischarging;
 
-    public HighUsageDetector(Context context, BatteryTipPolicy policy,
-            BatteryUsageStats batteryUsageStats, BatteryInfo batteryInfo) {
+    public HighUsageDetector(
+            Context context,
+            BatteryTipPolicy policy,
+            BatteryUsageStats batteryUsageStats,
+            BatteryInfo batteryInfo) {
         mPolicy = policy;
         mBatteryUsageStats = batteryUsageStats;
         mBatteryInfo = batteryInfo;
         mHighUsageAppList = new ArrayList<>();
         mBatteryUtils = BatteryUtils.getInstance(context);
-        mDataParser = new HighUsageDataParser(mPolicy.highUsagePeriodMs,
-                mPolicy.highUsageBatteryDraining);
+        mDataParser =
+                new HighUsageDataParser(
+                        mPolicy.highUsagePeriodMs, mPolicy.highUsageBatteryDraining);
         mDischarging = batteryInfo.discharging;
     }
 
     @Override
     public BatteryTip detect() {
-        final long lastFullChargeTimeMs = mBatteryUtils.calculateLastFullChargeTime(
-                mBatteryUsageStats, System.currentTimeMillis());
+        final long lastFullChargeTimeMs =
+                mBatteryUtils.calculateLastFullChargeTime(
+                        mBatteryUsageStats, System.currentTimeMillis());
         if (mPolicy.highUsageEnabled && mDischarging) {
             parseBatteryData();
             if (mDataParser.isDeviceHeavilyUsed() || mPolicy.testHighUsageTip) {
@@ -77,22 +82,25 @@ public class HighUsageDetector implements BatteryTipDetector {
                         mBatteryUsageStats.getUidBatteryConsumers();
                 // Sort by descending power
                 uidBatteryConsumers.sort(
-                        (consumer1, consumer2) -> Double.compare(consumer2.getConsumedPower(),
-                                consumer1.getConsumedPower()));
+                        (consumer1, consumer2) ->
+                                Double.compare(
+                                        consumer2.getConsumedPower(),
+                                        consumer1.getConsumedPower()));
                 for (UidBatteryConsumer consumer : uidBatteryConsumers) {
-                    final double percent = mBatteryUtils.calculateBatteryPercent(
-                            consumer.getConsumedPower(), totalPower, dischargeAmount);
+                    final double percent =
+                            mBatteryUtils.calculateBatteryPercent(
+                                    consumer.getConsumedPower(), totalPower, dischargeAmount);
                     if ((percent + 0.5f < 1f)
                             || mBatteryUtils.shouldHideUidBatteryConsumer(consumer)) {
                         // Don't show it if we should hide or usage percentage is lower than 1%
                         continue;
                     }
 
-                    mHighUsageAppList.add(new AppInfo.Builder()
-                            .setUid(consumer.getUid())
-                            .setPackageName(
-                                    mBatteryUtils.getPackageName(consumer.getUid()))
-                            .build());
+                    mHighUsageAppList.add(
+                            new AppInfo.Builder()
+                                    .setUid(consumer.getUid())
+                                    .setPackageName(mBatteryUtils.getPackageName(consumer.getUid()))
+                                    .build());
                     if (mHighUsageAppList.size() >= mPolicy.highUsageAppCount) {
                         break;
                     }
@@ -100,10 +108,11 @@ public class HighUsageDetector implements BatteryTipDetector {
 
                 // When in test mode, add an app if necessary
                 if (mPolicy.testHighUsageTip && mHighUsageAppList.isEmpty()) {
-                    mHighUsageAppList.add(new AppInfo.Builder()
-                            .setPackageName(SETTINGS_PACKAGE_NAME)
-                            .setScreenOnTimeMs(TimeUnit.HOURS.toMillis(3))
-                            .build());
+                    mHighUsageAppList.add(
+                            new AppInfo.Builder()
+                                    .setPackageName(SETTINGS_PACKAGE_NAME)
+                                    .setScreenOnTimeMs(TimeUnit.HOURS.toMillis(3))
+                                    .build());
                 }
             }
         }
@@ -113,6 +122,10 @@ public class HighUsageDetector implements BatteryTipDetector {
 
     @VisibleForTesting
     void parseBatteryData() {
-        mBatteryInfo.parseBatteryHistory(mDataParser);
+        try {
+            mBatteryInfo.parseBatteryHistory(mDataParser);
+        } catch (IllegalStateException e) {
+            Log.e(TAG, "parseBatteryData() failed", e);
+        }
     }
 }

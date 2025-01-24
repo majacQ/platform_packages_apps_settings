@@ -19,31 +19,33 @@ package com.android.settings.notification;
 import android.content.ComponentName;
 import android.content.Context;
 import android.os.UserHandle;
-import android.os.UserManager;
 import android.provider.Settings;
 
 import androidx.fragment.app.Fragment;
+import androidx.preference.Preference;
 
+import com.android.settings.R;
 import com.android.settings.core.TogglePreferenceController;
 
 import com.google.common.annotations.VisibleForTesting;
 
 public class NotificationAssistantPreferenceController extends TogglePreferenceController {
     private static final String TAG = "NASPreferenceController";
-    private static final String KEY_NAS = "notification_assistant";
+    static final String KEY_NAS = "notification_assistant";
 
-    private static final int AVAILABLE = 1;
-    private final UserManager mUserManager;
     private Fragment mFragment;
     private int mUserId = UserHandle.myUserId();
 
     @VisibleForTesting
     protected NotificationBackend mNotificationBackend;
+    private ComponentName mDefaultNASComponent;
 
     public NotificationAssistantPreferenceController(Context context) {
         super(context, KEY_NAS);
-        mUserManager = UserManager.get(context);
+        mNotificationBackend = new NotificationBackend();
+        getDefaultNASIntent();
     }
+
 
     @Override
     public int getAvailabilityStatus() {
@@ -53,14 +55,13 @@ public class NotificationAssistantPreferenceController extends TogglePreferenceC
     @Override
     public boolean isChecked() {
         ComponentName acn = mNotificationBackend.getAllowedNotificationAssistant();
-        ComponentName dcn = mNotificationBackend.getDefaultNotificationAssistant();
-        return (acn != null && acn.equals(dcn));
+        return (acn != null && acn.equals(mDefaultNASComponent));
     }
 
     @Override
     public boolean setChecked(boolean isChecked) {
         ComponentName cn = isChecked
-                ? mNotificationBackend.getDefaultNotificationAssistant() : null;
+                ? mDefaultNASComponent : null;
         if (isChecked) {
             if (mFragment == null) {
                 throw new IllegalStateException("No fragment to start activity");
@@ -71,6 +72,11 @@ public class NotificationAssistantPreferenceController extends TogglePreferenceC
             setNotificationAssistantGranted(null);
             return true;
         }
+    }
+
+    @Override
+    public int getSliceHighlightMenuRes() {
+        return R.string.menu_key_notifications;
     }
 
     protected void setNotificationAssistantGranted(ComponentName cn) {
@@ -94,5 +100,23 @@ public class NotificationAssistantPreferenceController extends TogglePreferenceC
     @VisibleForTesting
     void setBackend(NotificationBackend backend) {
         mNotificationBackend = backend;
+    }
+
+    @VisibleForTesting
+    void getDefaultNASIntent() {
+        mDefaultNASComponent = mNotificationBackend.getDefaultNotificationAssistant();
+    }
+
+    @Override
+    public boolean isSliceable() {
+        return (mFragment != null && mFragment instanceof ConfigureNotificationSettings);
+    }
+
+    @Override
+    public void updateState(Preference preference) {
+        super.updateState(preference);
+        if (mDefaultNASComponent == null) {
+            preference.setEnabled(false);
+        }
     }
 }

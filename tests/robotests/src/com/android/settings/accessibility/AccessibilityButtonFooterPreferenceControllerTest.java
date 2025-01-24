@@ -16,6 +16,7 @@
 
 package com.android.settings.accessibility;
 
+import static android.view.WindowManagerPolicyConstants.NAV_BAR_MODE_2BUTTON;
 import static android.view.WindowManagerPolicyConstants.NAV_BAR_MODE_GESTURAL;
 
 import static com.google.common.truth.Truth.assertThat;
@@ -24,6 +25,8 @@ import static org.mockito.Mockito.when;
 
 import android.content.Context;
 import android.content.res.Resources;
+import android.icu.text.MessageFormat;
+import android.text.Html;
 
 import androidx.preference.PreferenceScreen;
 import androidx.test.core.app.ApplicationProvider;
@@ -46,7 +49,6 @@ public class AccessibilityButtonFooterPreferenceControllerTest {
 
     @Rule
     public final MockitoRule mockito = MockitoJUnit.rule();
-
     @Spy
     private final Context mContext = ApplicationProvider.getApplicationContext();
     @Spy
@@ -73,7 +75,26 @@ public class AccessibilityButtonFooterPreferenceControllerTest {
 
         mController.displayPreference(mScreen);
 
-        assertThat(mPreference.getTitle()).isEqualTo(
-                mContext.getText(R.string.accessibility_button_gesture_description));
+        assertThat(mPreference.getTitle().toString()).isEqualTo(
+                Html.fromHtml(
+                        MessageFormat.format(mContext.getString(
+                                R.string.accessibility_button_gesture_description), 1, 2, 3),
+                        Html.FROM_HTML_MODE_COMPACT).toString());
+    }
+
+    @Test
+    public void displayPreference_navigationGestureDisabled_setCorrectTitle() {
+        when(mResources.getInteger(
+                com.android.internal.R.integer.config_navBarInteractionMode)).thenReturn(
+                NAV_BAR_MODE_2BUTTON);
+
+        mController.displayPreference(mScreen);
+
+        assertThat(mPreference.getTitle().toString()).isEqualTo(
+                Html.fromHtml(
+                        MessageFormat.format(
+                                mContext.getString(
+                                        R.string.accessibility_button_description), 1, 2, 3),
+                        Html.FROM_HTML_MODE_COMPACT).toString());
     }
 }

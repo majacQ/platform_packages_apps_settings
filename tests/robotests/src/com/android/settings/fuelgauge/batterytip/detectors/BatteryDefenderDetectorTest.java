@@ -18,6 +18,10 @@ package com.android.settings.fuelgauge.batterytip.detectors;
 
 import static com.google.common.truth.Truth.assertThat;
 
+import android.content.Context;
+
+import androidx.test.core.app.ApplicationProvider;
+
 import com.android.settings.fuelgauge.BatteryInfo;
 import com.android.settings.fuelgauge.batterytip.tips.BatteryTip;
 
@@ -31,31 +35,29 @@ import org.robolectric.RobolectricTestRunner;
 @RunWith(RobolectricTestRunner.class)
 public class BatteryDefenderDetectorTest {
 
-    @Mock
-    private BatteryInfo mBatteryInfo;
+    @Mock private BatteryInfo mBatteryInfo;
     private BatteryDefenderDetector mBatteryDefenderDetector;
 
     @Before
     public void setUp() {
         MockitoAnnotations.initMocks(this);
-
-        mBatteryInfo.discharging = false;
-
-        mBatteryDefenderDetector = new BatteryDefenderDetector(mBatteryInfo);
+        final Context context = ApplicationProvider.getApplicationContext();
+        mBatteryDefenderDetector = new BatteryDefenderDetector(mBatteryInfo, context);
     }
 
     @Test
-    public void testDetect_notOverheated_tipInvisible() {
-        mBatteryInfo.isOverheated = false;
+    public void detect_notBatteryDefend_tipInvisible() {
+        mBatteryInfo.isBatteryDefender = false;
 
         assertThat(mBatteryDefenderDetector.detect().isVisible()).isFalse();
     }
 
     @Test
-    public void testDetect_isOverheated_tipNew() {
-        mBatteryInfo.isOverheated = true;
+    public void detect_isBatteryDefend_tipNew() {
+        mBatteryInfo.isBatteryDefender = true;
 
         assertThat(mBatteryDefenderDetector.detect().getState())
                 .isEqualTo(BatteryTip.StateType.NEW);
+        assertThat(mBatteryDefenderDetector.detect().isVisible()).isTrue();
     }
 }

@@ -21,12 +21,13 @@ import android.content.Context;
 import android.content.Intent;
 import android.os.Bundle;
 import android.provider.Settings;
+import android.util.Log;
 
 import com.android.settings.R;
 import com.android.settings.search.BaseSearchIndexProvider;
 import com.android.settingslib.search.Indexable;
-import com.android.settingslib.search.SearchIndexableRaw;
 import com.android.settingslib.search.SearchIndexable;
+import com.android.settingslib.search.SearchIndexableRaw;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -39,6 +40,9 @@ public class FlashlightHandleActivity extends Activity implements Indexable {
 
     public static final String EXTRA_FALLBACK_TO_HOMEPAGE = "fallback_to_homepage";
 
+    private static final String TAG = "FlashlightActivity";
+    private static final String DATA_KEY = "flashlight";
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -48,7 +52,7 @@ public class FlashlightHandleActivity extends Activity implements Indexable {
 
         // Caller's choice: fallback to homepage, or just exit?
         if (getIntent().getBooleanExtra(EXTRA_FALLBACK_TO_HOMEPAGE, false)) {
-            startActivity(new Intent(Settings.ACTION_SETTINGS));
+            startActivity(new Intent(Settings.ACTION_SETTINGS).setPackage(getPackageName()));
         }
         finish();
     }
@@ -61,6 +65,11 @@ public class FlashlightHandleActivity extends Activity implements Indexable {
                         boolean enabled) {
 
                     final List<SearchIndexableRaw> result = new ArrayList<>();
+                    if (!context.getResources().getBoolean(
+                            R.bool.config_settingsintelligence_slice_supported)) {
+                        Log.d(TAG, "Search doesn't support Slice");
+                        return result;
+                    }
 
                     SearchIndexableRaw data = new SearchIndexableRaw(context);
                     data.title = context.getString(R.string.power_flashlight);
@@ -69,10 +78,20 @@ public class FlashlightHandleActivity extends Activity implements Indexable {
                     data.intentTargetPackage = context.getPackageName();
                     data.intentTargetClass = FlashlightHandleActivity.class.getName();
                     data.intentAction = Intent.ACTION_MAIN;
-                    data.key = "flashlight";
+                    data.key = DATA_KEY;
                     result.add(data);
 
                     return result;
+                }
+
+                @Override
+                public List<String> getNonIndexableKeys(Context context) {
+                    List<String> keys = super.getNonIndexableKeys(context);
+                    if (!FlashlightSlice.isFlashlightAvailable(context)) {
+                        Log.i(TAG, "Flashlight is unavailable");
+                        keys.add(DATA_KEY);
+                    }
+                    return keys;
                 }
             };
 }

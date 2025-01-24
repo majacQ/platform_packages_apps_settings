@@ -55,7 +55,7 @@ public class ConnectedUsbDeviceUpdater {
 
     @VisibleForTesting
     UsbConnectionBroadcastReceiver.UsbConnectionListener mUsbConnectionListener =
-            (connected, functions, powerRole, dataRole) -> {
+            (connected, functions, powerRole, dataRole, isUsbConfigured) -> {
                 if (connected) {
                     mUsbPreference.setSummary(getSummary(dataRole == DATA_ROLE_DEVICE
                                     ? functions : UsbManager.FUNCTION_NONE, powerRole));
@@ -78,8 +78,7 @@ public class ConnectedUsbDeviceUpdater {
         mUsbBackend = usbBackend;
         mUsbReceiver = new UsbConnectionBroadcastReceiver(context,
                 mUsbConnectionListener, mUsbBackend);
-        mMetricsFeatureProvider = FeatureFactory.getFactory(mFragment.getContext())
-                .getMetricsFeatureProvider();
+        mMetricsFeatureProvider = FeatureFactory.getFeatureFactory().getMetricsFeatureProvider();
     }
 
     public void registerCallback() {
@@ -129,6 +128,8 @@ public class ConnectedUsbDeviceUpdater {
                     return R.string.usb_summary_photo_transfers;
                 } else if (functions == UsbManager.FUNCTION_MIDI) {
                     return R.string.usb_summary_MIDI;
+                } else if (functions == UsbManager.FUNCTION_UVC) {
+                    return R.string.usb_summary_UVC;
                 } else {
                     return R.string.usb_summary_charging_only;
                 }
@@ -141,6 +142,8 @@ public class ConnectedUsbDeviceUpdater {
                     return R.string.usb_summary_photo_transfers_power;
                 } else if (functions == UsbManager.FUNCTION_MIDI) {
                     return R.string.usb_summary_MIDI_power;
+                } else if (functions == UsbManager.FUNCTION_UVC) {
+                    return R.string.usb_summary_UVC_power;
                 } else {
                     return R.string.usb_summary_power_only;
                 }

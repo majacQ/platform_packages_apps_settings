@@ -48,8 +48,8 @@ import com.android.settings.SetupWizardUtils;
 import com.android.settings.wifi.dpp.AdbQrCode;
 import com.android.settings.wifi.dpp.WifiDppQrCodeBaseFragment;
 import com.android.settings.wifi.dpp.WifiNetworkConfig;
-import com.android.settings.wifi.qrcode.QrCamera;
-import com.android.settings.wifi.qrcode.QrDecorateView;
+import com.android.settingslib.qrcode.QrCamera;
+import com.android.settingslib.qrcode.QrDecorateView;
 
 import com.google.android.setupdesign.util.ThemeHelper;
 
@@ -177,7 +177,7 @@ public class AdbQrcodeScannerFragment extends WifiDppQrCodeBaseFragment implemen
         mVerifyingTextView = view.findViewById(R.id.verifying_textview);
 
         setHeaderTitle(R.string.wifi_dpp_scan_qr_code);
-        mSummary.setText(R.string.adb_wireless_qrcode_pairing_description);
+        mSummary.setText(com.android.settingslib.R.string.adb_wireless_qrcode_pairing_description);
 
         mErrorMessage = view.findViewById(R.id.error_message);
     }
@@ -189,7 +189,8 @@ public class AdbQrcodeScannerFragment extends WifiDppQrCodeBaseFragment implemen
         restartCamera();
 
         mAdbManager = IAdbManager.Stub.asInterface(ServiceManager.getService(Context.ADB_SERVICE));
-        getActivity().registerReceiver(mReceiver, mIntentFilter);
+        getActivity().registerReceiver(mReceiver, mIntentFilter,
+                Context.RECEIVER_EXPORTED_UNAUDITED);
     }
 
     @Override

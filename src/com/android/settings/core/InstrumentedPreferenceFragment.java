@@ -27,6 +27,7 @@ import android.util.Log;
 import androidx.annotation.XmlRes;
 import androidx.preference.Preference;
 import androidx.preference.PreferenceScreen;
+import androidx.preference.TwoStatePreference;
 import androidx.recyclerview.widget.RecyclerView;
 
 import com.android.internal.jank.InteractionJankMonitor;
@@ -34,8 +35,8 @@ import com.android.settings.overlay.FeatureFactory;
 import com.android.settings.survey.SurveyMixin;
 import com.android.settingslib.core.instrumentation.Instrumentable;
 import com.android.settingslib.core.instrumentation.MetricsFeatureProvider;
+import com.android.settingslib.core.instrumentation.SettingsJankMonitor;
 import com.android.settingslib.core.instrumentation.VisibilityLoggerMixin;
-import com.android.settingslib.core.lifecycle.ObservablePreferenceFragment;
 
 /**
  * Instrumented fragment that logs visibility state.
@@ -44,7 +45,6 @@ public abstract class InstrumentedPreferenceFragment extends ObservablePreferenc
         implements Instrumentable {
 
     private static final String TAG = "InstrumentedPrefFrag";
-
 
     protected MetricsFeatureProvider mMetricsFeatureProvider;
 
@@ -56,13 +56,26 @@ public abstract class InstrumentedPreferenceFragment extends ObservablePreferenc
 
     @Override
     public void onAttach(Context context) {
-        mMetricsFeatureProvider = FeatureFactory.getFactory(context).getMetricsFeatureProvider();
+        mMetricsFeatureProvider = FeatureFactory.getFeatureFactory().getMetricsFeatureProvider();
         // Mixin that logs visibility change for activity.
         mVisibilityLoggerMixin = new VisibilityLoggerMixin(getMetricsCategory(),
                 mMetricsFeatureProvider);
         getSettingsLifecycle().addObserver(mVisibilityLoggerMixin);
         getSettingsLifecycle().addObserver(new SurveyMixin(this, getClass().getSimpleName()));
         super.onAttach(context);
+    }
+
+    @Override
+    public void onStart() {
+        super.onStart();
+        // Override the OnPreferenceTreeClickListener in super.onStart() to inject jank detection.
+        getPreferenceManager().setOnPreferenceTreeClickListener((preference) -> {
+            if (preference instanceof TwoStatePreference twoStatePreference) {
+                SettingsJankMonitor.detectSwitchPreferenceClickJank(
+                        getListView(), twoStatePreference);
+            }
+            return onPreferenceTreeClick(preference);
+        });
     }
 
     @Override
@@ -158,8 +171,7 @@ public abstract class InstrumentedPreferenceFragment extends ObservablePreferenc
             switch (newState) {
                 case RecyclerView.SCROLL_STATE_DRAGGING:
                     final Configuration.Builder builder =
-                            new Configuration.Builder(CUJ_SETTINGS_PAGE_SCROLL)
-                                    .setView(recyclerView)
+                            Configuration.Builder.withView(CUJ_SETTINGS_PAGE_SCROLL, recyclerView)
                                     .setTag(mClassName);
                     mMonitor.begin(builder);
                     break;

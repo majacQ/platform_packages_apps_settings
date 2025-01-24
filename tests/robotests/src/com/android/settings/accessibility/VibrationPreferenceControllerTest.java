@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019 The Android Open Source Project
+ * Copyright (C) 2022 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,72 +16,145 @@
 
 package com.android.settings.accessibility;
 
+import static com.android.settings.core.BasePreferenceController.AVAILABLE;
+import static com.android.settings.core.BasePreferenceController.UNSUPPORTED_ON_DEVICE;
+
 import static com.google.common.truth.Truth.assertThat;
 
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doNothing;
+import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
 import android.content.Context;
+import android.content.res.Resources;
 import android.os.Vibrator;
 import android.provider.Settings;
 
+import androidx.preference.Preference;
+import androidx.preference.PreferenceScreen;
+import androidx.test.core.app.ApplicationProvider;
+
 import com.android.settings.R;
-import com.android.settings.core.BasePreferenceController;
 
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
+import org.mockito.Mock;
+import org.mockito.MockitoAnnotations;
 import org.robolectric.RobolectricTestRunner;
-import org.robolectric.RuntimeEnvironment;
 
 @RunWith(RobolectricTestRunner.class)
 public class VibrationPreferenceControllerTest {
+    private static final String PREFERENCE_KEY = "preference_key";
+    private static final int OFF = 0;
+    private static final int ON = 1;
 
-    private static final String VIBRATION_ON = "On";
-    private static final String VIBRATION_OFF = "Off";
+    @Mock private Vibrator mVibrator;
+    @Mock private PreferenceScreen mScreen;
 
     private Context mContext;
-    private VibrationPreferenceController mController;
+    private Resources mResources;
+    private Preference mPreference;
 
     @Before
     public void setUp() {
-        mContext = RuntimeEnvironment.application;
-        mController = new VibrationPreferenceController(mContext, "vibration_pref");
+        MockitoAnnotations.initMocks(this);
+        mContext = spy(ApplicationProvider.getApplicationContext());
+        mResources = spy(mContext.getResources());
+        when(mContext.getResources()).thenReturn(mResources);
+        when(mContext.getSystemService(Context.VIBRATOR_SERVICE)).thenReturn(mVibrator);
+        when(mVibrator.hasVibrator()).thenReturn(true);
     }
 
     @Test
-    public void getAvailabilityStatus_byDefault_shouldReturnAvailable() {
-        assertThat(mController.getAvailabilityStatus())
-                .isEqualTo(BasePreferenceController.AVAILABLE);
+    public void verifyConstants() {
+        VibrationPreferenceController controller = createPreferenceController();
+        assertThat(controller.getPreferenceKey()).isEqualTo(PREFERENCE_KEY);
     }
 
     @Test
-    public void getSummary_disabledVibration_shouldReturnOffSummary() {
-        Settings.System.putInt(mContext.getContentResolver(),
-                Settings.System.RING_VIBRATION_INTENSITY, Vibrator.VIBRATION_INTENSITY_OFF);
-        Settings.System.putInt(mContext.getContentResolver(),
-                Settings.System.NOTIFICATION_VIBRATION_INTENSITY, Vibrator.VIBRATION_INTENSITY_OFF);
-        Settings.System.putInt(mContext.getContentResolver(),
-                Settings.System.HAPTIC_FEEDBACK_INTENSITY, Vibrator.VIBRATION_INTENSITY_OFF);
-        final String expectedResult = mContext.getString(R.string.switch_off_text);
+    public void getAvailabilityStatus_noVibrator_returnUnsupportedOnDevice() {
+        when(mVibrator.hasVibrator()).thenReturn(false);
+        VibrationPreferenceController controller = createPreferenceController();
 
-        assertThat(mController.getSummary()).isEqualTo(expectedResult);
+        assertThat(controller.getAvailabilityStatus()).isEqualTo(UNSUPPORTED_ON_DEVICE);
     }
 
     @Test
-    public void getSummary_enabledSomeVibration_shouldReturnVibrationOnSummary() {
-        Settings.System.putInt(mContext.getContentResolver(),
-                Settings.System.RING_VIBRATION_INTENSITY, Vibrator.VIBRATION_INTENSITY_MEDIUM);
-        Settings.System.putInt(mContext.getContentResolver(),
-                Settings.System.VIBRATE_WHEN_RINGING, 1);
-        Settings.System.putInt(mContext.getContentResolver(),
-                Settings.System.NOTIFICATION_VIBRATION_INTENSITY, Vibrator.VIBRATION_INTENSITY_OFF);
-        Settings.System.putInt(mContext.getContentResolver(),
-                Settings.System.HAPTIC_FEEDBACK_INTENSITY, Vibrator.VIBRATION_INTENSITY_MEDIUM);
-        Settings.System.putInt(mContext.getContentResolver(),
-                Settings.System.HAPTIC_FEEDBACK_ENABLED, 1);
-        final String expectedResult = mContext.getString(R.string.accessibility_vibration_summary,
-                VIBRATION_ON /* ring */,
-                VIBRATION_OFF /* notification */,
-                VIBRATION_ON /* touch */);
+    public void getAvailabilityStatus_withVibrator_returnAvailable() {
+        when(mVibrator.hasVibrator()).thenReturn(true);
+        VibrationPreferenceController controller = createPreferenceController();
 
-        assertThat(mController.getSummary()).isEqualTo(expectedResult);
+        assertThat(controller.getAvailabilityStatus()).isEqualTo(AVAILABLE);
+    }
+
+    @Test
+    public void getSummary_vibrateSettingNotSet_returnsOnText() {
+        Settings.System.putString(mContext.getContentResolver(), Settings.System.VIBRATE_ON,
+                /* value= */ null);
+        VibrationPreferenceController controller = createPreferenceController();
+        controller.updateState(mPreference);
+
+        assertThat(mPreference.getSummary().toString()).isEqualTo(
+                mContext.getString(R.string.accessibility_vibration_settings_state_on));
+    }
+
+    @Test
+    public void getSummary_vibrateSettingOn_returnsOnText() {
+        Settings.System.putInt(mContext.getContentResolver(), Settings.System.VIBRATE_ON, ON);
+        VibrationPreferenceController controller = createPreferenceController();
+        controller.updateState(mPreference);
+
+        assertThat(mPreference.getSummary().toString()).isEqualTo(
+                mContext.getString(R.string.accessibility_vibration_settings_state_on));
+    }
+
+    @Test
+    public void getSummary_vibrateSettingOff_returnsOffText() {
+        Settings.System.putInt(mContext.getContentResolver(), Settings.System.VIBRATE_ON, OFF);
+        VibrationPreferenceController controller = createPreferenceController();
+        controller.updateState(mPreference);
+
+        assertThat(mPreference.getSummary().toString()).isEqualTo(
+                mContext.getString(R.string.accessibility_vibration_settings_state_off));
+    }
+
+    @Test
+    public void handlePreferenceTreeClick_oneIntensityLevel_opensVibrationSettings() {
+        when(mResources.getInteger(R.integer.config_vibration_supported_intensity_levels))
+                .thenReturn(1);
+        VibrationPreferenceController controller = spy(createPreferenceController());
+
+        doNothing().when(controller).launchVibrationSettingsFragment(any());
+        controller.handlePreferenceTreeClick(mPreference);
+
+        verify(controller).launchVibrationSettingsFragment(eq(VibrationSettings.class));
+    }
+
+    @Test
+    public void handlePreferenceTreeClick_multipleIntensityLevels_opensVibrationIntensity() {
+        when(mResources.getInteger(R.integer.config_vibration_supported_intensity_levels))
+                .thenReturn(2);
+        VibrationPreferenceController controller = spy(createPreferenceController());
+
+        doNothing().when(controller).launchVibrationSettingsFragment(any());
+        controller.handlePreferenceTreeClick(mPreference);
+
+        verify(controller).launchVibrationSettingsFragment(
+                eq(VibrationIntensitySettingsFragment.class));
+    }
+
+    private VibrationPreferenceController createPreferenceController() {
+        VibrationPreferenceController controller =
+                new VibrationPreferenceController(mContext, PREFERENCE_KEY);
+        mPreference = new Preference(mContext);
+        mPreference.setSummary("Test summary");
+        mPreference.setKey(PREFERENCE_KEY);
+        when(mScreen.findPreference(controller.getPreferenceKey())).thenReturn(mPreference);
+        controller.displayPreference(mScreen);
+        return controller;
     }
 }

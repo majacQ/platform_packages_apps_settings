@@ -32,6 +32,7 @@ import android.content.IntentFilter;
 import android.content.om.OverlayInfo;
 import android.content.om.OverlayManager;
 import android.content.pm.ApplicationInfo;
+import android.content.pm.Flags;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
@@ -102,8 +103,6 @@ public class AppButtonsPreferenceController extends BasePreferenceController imp
     @VisibleForTesting
     String mPackageName;
     @VisibleForTesting
-    boolean mDisableAfterUninstall = false;
-    @VisibleForTesting
     ActionButtonsPreference mButtonsPref;
 
     private final int mUserId;
@@ -124,7 +123,6 @@ public class AppButtonsPreferenceController extends BasePreferenceController imp
     private PreferenceScreen mScreen;
 
     private long mSessionId;
-    private boolean mUpdatedSysApp = false;
     private boolean mListeningToPackageRemove = false;
     private boolean mFinishing = false;
     private boolean mAppsControlDisallowedBySystem;
@@ -141,9 +139,9 @@ public class AppButtonsPreferenceController extends BasePreferenceController imp
                     "Fragment should implement AppButtonsDialogListener");
         }
 
-        final FeatureFactory factory = FeatureFactory.getFactory(activity);
+        final FeatureFactory factory = FeatureFactory.getFeatureFactory();
         mMetricsFeatureProvider = factory.getMetricsFeatureProvider();
-        mApplicationFeatureProvider = factory.getApplicationFeatureProvider(activity);
+        mApplicationFeatureProvider = factory.getApplicationFeatureProvider();
         mState = state;
         mDpm = (DevicePolicyManager) activity.getSystemService(Context.DEVICE_POLICY_SERVICE);
         mUserManager = (UserManager) activity.getSystemService(Context.USER_SERVICE);
@@ -197,7 +195,7 @@ public class AppButtonsPreferenceController extends BasePreferenceController imp
                     mActivity, UserManager.DISALLOW_APPS_CONTROL, mUserId);
 
             if (!refreshUi()) {
-                setIntentAndFinish(true, false);
+                setIntentAndFinish(false);
             }
         }
     }
@@ -241,14 +239,7 @@ public class AppButtonsPreferenceController extends BasePreferenceController imp
                 RestrictedLockUtils.sendShowAdminSupportDetailsIntent(mActivity, admin);
             } else if ((mAppEntry.info.flags & ApplicationInfo.FLAG_SYSTEM) != 0) {
                 if (mAppEntry.info.enabled && !isDisabledUntilUsed()) {
-                    // If the system app has an update and this is the only user on the device,
-                    // then offer to downgrade the app, otherwise only offer to disable the
-                    // app for this user.
-                    if (mUpdatedSysApp && isSingleUser()) {
-                        showDialogInner(ButtonActionDialogFragment.DialogType.SPECIAL_DISABLE);
-                    } else {
-                        showDialogInner(ButtonActionDialogFragment.DialogType.DISABLE);
-                    }
+                    showDialogInner(ButtonActionDialogFragment.DialogType.DISABLE);
                 } else {
                     mMetricsFeatureProvider.action(
                             mActivity,
@@ -260,9 +251,9 @@ public class AppButtonsPreferenceController extends BasePreferenceController imp
                             PackageManager.COMPONENT_ENABLED_STATE_DEFAULT));
                 }
             } else if ((mAppEntry.info.flags & ApplicationInfo.FLAG_INSTALLED) == 0) {
-                uninstallPkg(packageName, true, false);
+                uninstallPkg(packageName, true);
             } else {
-                uninstallPkg(packageName, false, false);
+                uninstallPkg(packageName, false);
             }
         }
     }
@@ -292,11 +283,6 @@ public class AppButtonsPreferenceController extends BasePreferenceController imp
 
     public void handleActivityResult(int requestCode, int resultCode, Intent data) {
         if (requestCode == mRequestUninstall) {
-            if (mDisableAfterUninstall) {
-                mDisableAfterUninstall = false;
-                AsyncTask.execute(new DisableChangerRunnable(mPm, mAppEntry.info.packageName,
-                        PackageManager.COMPONENT_ENABLED_STATE_DISABLED_USER));
-            }
             refreshAndFinishIfPossible(true);
         } else if (requestCode == mRequestRemoveDeviceAdmin) {
             refreshAndFinishIfPossible(false);
@@ -307,14 +293,10 @@ public class AppButtonsPreferenceController extends BasePreferenceController imp
         switch (id) {
             case ButtonActionDialogFragment.DialogType.DISABLE:
                 mMetricsFeatureProvider.action(mActivity,
-                        SettingsEnums.ACTION_SETTINGS_DISABLE_APP);
+                        SettingsEnums.ACTION_SETTINGS_DISABLE_APP,
+                        getPackageNameForMetric());
                 AsyncTask.execute(new DisableChangerRunnable(mPm, mAppEntry.info.packageName,
                         PackageManager.COMPONENT_ENABLED_STATE_DISABLED_USER));
-                break;
-            case ButtonActionDialogFragment.DialogType.SPECIAL_DISABLE:
-                mMetricsFeatureProvider.action(mActivity,
-                        SettingsEnums.ACTION_SETTINGS_DISABLE_APP);
-                uninstallPkg(mAppEntry.info.packageName, false, true);
                 break;
             case ButtonActionDialogFragment.DialogType.FORCE_STOP:
                 forceStopPackage(mAppEntry.info.packageName);
@@ -453,10 +435,17 @@ public class AppButtonsPreferenceController extends BasePreferenceController imp
                     // No preferred default, so permit uninstall only when
                     // there is more than one candidate
                     enabled = (mHomePackages.size() > 1);
-                } else {
-                    // There is an explicit default home app -- forbid uninstall of
-                    // that one, but permit it for installed-but-inactive ones.
-                    enabled = !mPackageInfo.packageName.equals(currentDefaultHome.getPackageName());
+                } else if (mPackageInfo.packageName.equals(currentDefaultHome.getPackageName())) {
+                    if (Flags.improveHomeAppBehavior()) {
+                        // Allow uninstallation of current home app if it is a non-system app
+                        // and/or there are other candidate apps available.
+                        if (mPackageInfo.applicationInfo.isSystemApp()
+                                || mHomePackages.size() == 1) {
+                            enabled = false;
+                        }
+                    } else {
+                        enabled = false;
+                    }
                 }
             }
         }
@@ -493,12 +482,9 @@ public class AppButtonsPreferenceController extends BasePreferenceController imp
     /**
      * Finish this fragment and return data if possible
      */
-    private void setIntentAndFinish(boolean appChanged, boolean removeTaskWhenFinishing) {
-        if (LOCAL_LOGV) {
-            Log.i(TAG, "appChanged=" + appChanged);
-        }
+    private void setIntentAndFinish(boolean removeTaskWhenFinishing) {
         Intent intent = new Intent();
-        intent.putExtra(APP_CHG, appChanged);
+        intent.putExtra(APP_CHG, true);
         intent.putExtra(KEY_REMOVE_TASK_WHEN_FINISHING, removeTaskWhenFinishing);
         mActivity.finishPreferencePanel(Activity.RESULT_OK, intent);
         mFinishing = true;
@@ -506,7 +492,7 @@ public class AppButtonsPreferenceController extends BasePreferenceController imp
 
     private void refreshAndFinishIfPossible(boolean removeTaskWhenFinishing) {
         if (!refreshUi()) {
-            setIntentAndFinish(true, removeTaskWhenFinishing);
+            setIntentAndFinish(removeTaskWhenFinishing);
         } else {
             startListeningToPackageRemove();
         }
@@ -526,12 +512,14 @@ public class AppButtonsPreferenceController extends BasePreferenceController imp
         } else {
             Intent intent = new Intent(Intent.ACTION_QUERY_PACKAGE_RESTART,
                     Uri.fromParts("package", mAppEntry.info.packageName, null));
+            intent.setPackage("android");
             intent.putExtra(Intent.EXTRA_PACKAGES, new String[]{mAppEntry.info.packageName});
             intent.putExtra(Intent.EXTRA_UID, mAppEntry.info.uid);
             intent.putExtra(Intent.EXTRA_USER_HANDLE, UserHandle.getUserId(mAppEntry.info.uid));
             Log.d(TAG, "Sending broadcast to query restart status for "
                     + mAppEntry.info.packageName);
-            mActivity.sendOrderedBroadcastAsUser(intent, UserHandle.CURRENT, null,
+            mActivity.sendOrderedBroadcastAsUser(intent, UserHandle.CURRENT,
+                    android.Manifest.permission.HANDLE_QUERY_PACKAGE_RESTART,
                     mCheckKillProcessesReceiver, null, Activity.RESULT_CANCELED, null, null);
         }
     }
@@ -546,17 +534,15 @@ public class AppButtonsPreferenceController extends BasePreferenceController imp
     }
 
     @VisibleForTesting
-    void uninstallPkg(String packageName, boolean allUsers, boolean andDisable) {
+    void uninstallPkg(String packageName, boolean allUsers) {
         stopListeningToPackageRemove();
         // Create new intent to launch Uninstaller activity
         Uri packageUri = Uri.parse("package:" + packageName);
         Intent uninstallIntent = new Intent(Intent.ACTION_UNINSTALL_PACKAGE, packageUri);
         uninstallIntent.putExtra(Intent.EXTRA_UNINSTALL_ALL_USERS, allUsers);
 
-        mMetricsFeatureProvider.action(
-                mActivity, SettingsEnums.ACTION_SETTINGS_UNINSTALL_APP);
+        mMetricsFeatureProvider.action(mActivity, SettingsEnums.ACTION_SETTINGS_UNINSTALL_APP);
         mFragment.startActivityForResult(uninstallIntent, mRequestUninstall);
-        mDisableAfterUninstall = andDisable;
     }
 
     @VisibleForTesting
@@ -570,6 +556,12 @@ public class AppButtonsPreferenceController extends BasePreferenceController imp
         ActivityManager am = (ActivityManager) mActivity.getSystemService(
                 Context.ACTIVITY_SERVICE);
         Log.d(TAG, "Stopping package " + pkgName);
+        if (android.app.Flags.appRestrictionsApi()) {
+            am.noteAppRestrictionEnabled(pkgName, mAppEntry.info.uid,
+                    ActivityManager.RESTRICTION_LEVEL_FORCE_STOPPED, true,
+                    ActivityManager.RESTRICTION_REASON_USER,
+                    "settings", ActivityManager.RESTRICTION_SOURCE_USER, 0L);
+        }
         am.forceStopPackage(pkgName);
         int userId = UserHandle.getUserId(mAppEntry.info.uid);
         mState.invalidatePackage(pkgName, userId);
@@ -621,12 +613,6 @@ public class AppButtonsPreferenceController extends BasePreferenceController imp
         newFragment.show(mActivity.getSupportFragmentManager(), "dialog " + id);
     }
 
-    /** Returns whether there is only one user on this device, not including the system-only user */
-    private boolean isSingleUser() {
-        final int userCount = mUserManager.getUserCount();
-        return userCount == 1;
-    }
-
     private final BroadcastReceiver mCheckKillProcessesReceiver = new BroadcastReceiver() {
         @Override
         public void onReceive(Context context, Intent intent) {
@@ -665,8 +651,7 @@ public class AppButtonsPreferenceController extends BasePreferenceController imp
         List<ResolveInfo> homeActivities = new ArrayList<>();
         mPm.getHomeActivities(homeActivities);
         mHomePackages.clear();
-        for (int i = 0, size = homeActivities.size(); i < size; i++) {
-            ResolveInfo ri = homeActivities.get(i);
+        for (ResolveInfo ri : homeActivities) {
             final String activityPkg = ri.activityInfo.packageName;
             mHomePackages.add(activityPkg);
 
@@ -693,8 +678,7 @@ public class AppButtonsPreferenceController extends BasePreferenceController imp
     }
 
     private void initButtonPreference() {
-        mButtonsPref = ((ActionButtonsPreference) mScreen.findPreference(
-                KEY_ACTION_BUTTONS))
+        mButtonsPref = ((ActionButtonsPreference) mScreen.findPreference(KEY_ACTION_BUTTONS))
                 .setButton1Text(R.string.launch_instant_app)
                 .setButton1Icon(R.drawable.ic_settings_open)
                 .setButton1OnClickListener(v -> launchApplication())

@@ -17,14 +17,16 @@
 package com.android.settings.development;
 
 import android.bluetooth.BluetoothCodecConfig;
+import android.bluetooth.BluetoothCodecType;
 
-/**
- * Utility class for storing current Bluetooth A2DP profile values
- */
+import androidx.annotation.Nullable;
+
+/** Utility class for storing current Bluetooth A2DP profile values */
 public class BluetoothA2dpConfigStore {
 
     // init default values
-    private int mCodecType = BluetoothCodecConfig.SOURCE_CODEC_TYPE_INVALID;
+    private int mCodecTypeNative = BluetoothCodecConfig.SOURCE_CODEC_TYPE_INVALID;
+    @Nullable private BluetoothCodecType mCodecType = null;
     private int mCodecPriority = BluetoothCodecConfig.CODEC_PRIORITY_DEFAULT;
     private int mSampleRate = BluetoothCodecConfig.SAMPLE_RATE_NONE;
     private int mBitsPerSample = BluetoothCodecConfig.BITS_PER_SAMPLE_NONE;
@@ -34,7 +36,7 @@ public class BluetoothA2dpConfigStore {
     private long mCodecSpecific3Value;
     private long mCodecSpecific4Value;
 
-    public void setCodecType(int codecType) {
+    public void setCodecType(@Nullable BluetoothCodecType codecType) {
         mCodecType = codecType;
     }
 
@@ -70,17 +72,18 @@ public class BluetoothA2dpConfigStore {
         mCodecSpecific4Value = codecSpecific4Value;
     }
 
+    /** Create codec config utilizing {@link BluetoothCodecConfig.SourceCodecType} */
     public BluetoothCodecConfig createCodecConfig() {
-        return new BluetoothCodecConfig.Builder()
-                .setCodecType(mCodecType)
+        BluetoothCodecConfig.Builder builder = new BluetoothCodecConfig.Builder()
                 .setCodecPriority(mCodecPriority)
+                .setExtendedCodecType(mCodecType)
                 .setSampleRate(mSampleRate)
                 .setBitsPerSample(mBitsPerSample)
                 .setChannelMode(mChannelMode)
                 .setCodecSpecific1(mCodecSpecific1Value)
                 .setCodecSpecific2(mCodecSpecific2Value)
                 .setCodecSpecific3(mCodecSpecific3Value)
-                .setCodecSpecific4(mCodecSpecific4Value)
-                .build();
+                .setCodecSpecific4(mCodecSpecific4Value);
+        return builder.build();
     }
 }

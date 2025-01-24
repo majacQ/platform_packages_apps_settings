@@ -19,6 +19,7 @@ import static com.google.common.truth.Truth.assertThat;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.spy;
@@ -33,13 +34,12 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.os.UserHandle;
 import android.os.UserManager;
+import android.util.AndroidRuntimeException;
 import android.view.View;
 
 import androidx.preference.PreferenceViewHolder;
 
 import com.android.settings.testutils.shadow.ShadowBluetoothAdapter;
-import com.android.settings.widget.SwitchBar;
-import com.android.settings.widget.SwitchBarController;
 import com.android.settings.widget.SwitchWidgetController;
 import com.android.settingslib.RestrictedLockUtils.EnforcedAdmin;
 import com.android.settingslib.RestrictedSwitchPreference;
@@ -79,6 +79,7 @@ public class BluetoothEnablerTest {
     private SwitchWidgetController.OnSwitchChangeListener mCallback;
 
     private Context mContext;
+    @Mock
     private SwitchWidgetController mSwitchController;
     private BluetoothEnabler mBluetoothEnabler;
     private ShadowBluetoothAdapter mShadowBluetoothAdapter;
@@ -89,7 +90,6 @@ public class BluetoothEnablerTest {
         mContext = spy(RuntimeEnvironment.application);
 
         mRestrictedSwitchPreference = new RestrictedSwitchPreference(mContext);
-        mSwitchController = spy(new SwitchBarController(new SwitchBar(mContext)));
         mBluetoothEnabler = new BluetoothEnabler(
                 mContext,
                 mSwitchController,
@@ -100,6 +100,19 @@ public class BluetoothEnablerTest {
         mRestrictedSwitchPreference.onBindViewHolder(mHolder);
         mBluetoothEnabler.setToggleCallback(mCallback);
         mShadowBluetoothAdapter = Shadow.extract(BluetoothAdapter.getDefaultAdapter());
+    }
+
+    @Test
+    public void onSwitchToggled_satelliteOn_showWarningDialog() {
+        mBluetoothEnabler.mIsSatelliteOn.set(true);
+
+        try {
+            mBluetoothEnabler.onSwitchToggled(true);
+        } catch (AndroidRuntimeException e) {
+            // Catch exception of starting activity .
+        }
+
+        verify(mContext).startActivity(any());
     }
 
     @Test
@@ -208,12 +221,13 @@ public class BluetoothEnablerTest {
     public void bluetoothTurnsOff_switchTurnsOff() {
         // Start up with bluetooth turned on. The switch should get turned on.
         ArgumentCaptor<BroadcastReceiver> captor = ArgumentCaptor.forClass(BroadcastReceiver.class);
-        when(mContext.registerReceiver(captor.capture(), any(IntentFilter.class))).thenReturn(null);
+        when(mContext.registerReceiver(captor.capture(), any(IntentFilter.class),
+                eq(Context.RECEIVER_EXPORTED_UNAUDITED))).thenReturn(null);
         mShadowBluetoothAdapter.setState(BluetoothAdapter.STATE_ON);
         verify(mSwitchController, never()).setChecked(anyBoolean());
         mBluetoothEnabler.resume(mContext);
         verify(mSwitchController, never()).setChecked(false);
-        verify(mSwitchController).setChecked(true);
+        when(mSwitchController.isChecked()).thenReturn(true);
 
         // Now simulate bluetooth being turned off via an event.
         BroadcastReceiver receiver = captor.getValue();
@@ -232,7 +246,8 @@ public class BluetoothEnablerTest {
     public void bluetoothTurnsOn_switchTurnsOn() {
         // Start up with bluetooth turned on. The switch should be left off.
         ArgumentCaptor<BroadcastReceiver> captor = ArgumentCaptor.forClass(BroadcastReceiver.class);
-        when(mContext.registerReceiver(captor.capture(), any(IntentFilter.class))).thenReturn(null);
+        when(mContext.registerReceiver(captor.capture(), any(IntentFilter.class),
+                eq(Context.RECEIVER_EXPORTED_UNAUDITED))).thenReturn(null);
         mShadowBluetoothAdapter.setState(BluetoothAdapter.STATE_OFF);
         verify(mSwitchController, never()).setChecked(anyBoolean());
         mBluetoothEnabler.resume(mContext);

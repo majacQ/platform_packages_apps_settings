@@ -18,10 +18,16 @@ package com.android.settings;
 
 import static android.content.Intent.EXTRA_USER;
 import static android.content.Intent.EXTRA_USER_ID;
+import static android.os.UserManager.USER_TYPE_FULL_SYSTEM;
+import static android.os.UserManager.USER_TYPE_PROFILE_MANAGED;
+import static android.os.UserManager.USER_TYPE_PROFILE_PRIVATE;
 import static android.text.format.DateUtils.FORMAT_ABBREV_MONTH;
 import static android.text.format.DateUtils.FORMAT_SHOW_DATE;
 
-import android.annotation.Nullable;
+import static com.android.settings.password.ConfirmDeviceCredentialActivity.BIOMETRIC_PROMPT_AUTHENTICATORS;
+import static com.android.settings.password.ConfirmDeviceCredentialActivity.BIOMETRIC_PROMPT_HIDE_BACKGROUND;
+import static com.android.settings.password.ConfirmDeviceCredentialActivity.BIOMETRIC_PROMPT_NEGATIVE_BUTTON_TEXT;
+
 import android.app.ActionBar;
 import android.app.Activity;
 import android.app.ActivityManager;
@@ -40,8 +46,8 @@ import android.content.pm.IPackageManager;
 import android.content.pm.IntentFilterVerificationInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.PackageManager.NameNotFoundException;
-import android.content.pm.ResolveInfo;
 import android.content.pm.UserInfo;
+import android.content.pm.UserProperties;
 import android.content.res.Configuration;
 import android.content.res.Resources;
 import android.content.res.TypedArray;
@@ -52,7 +58,12 @@ import android.graphics.drawable.AdaptiveIconDrawable;
 import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.VectorDrawable;
+import android.hardware.biometrics.BiometricManager;
+import android.hardware.biometrics.SensorProperties;
+import android.hardware.face.Face;
 import android.hardware.face.FaceManager;
+import android.hardware.face.FaceSensorPropertiesInternal;
+import android.hardware.fingerprint.Fingerprint;
 import android.hardware.fingerprint.FingerprintManager;
 import android.net.ConnectivityManager;
 import android.net.LinkAddress;
@@ -63,6 +74,7 @@ import android.os.BatteryManager;
 import android.os.Binder;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Flags;
 import android.os.IBinder;
 import android.os.INetworkManagementService;
 import android.os.RemoteException;
@@ -85,7 +97,6 @@ import android.text.TextUtils;
 import android.text.format.DateUtils;
 import android.text.style.TtsSpan;
 import android.util.ArraySet;
-import android.util.FeatureFlagUtils;
 import android.util.IconDrawableFactory;
 import android.util.Log;
 import android.view.LayoutInflater;
@@ -97,27 +108,34 @@ import android.widget.TabWidget;
 
 import androidx.annotation.ColorInt;
 import androidx.annotation.NonNull;
-import androidx.annotation.StringRes;
+import androidx.annotation.Nullable;
+import androidx.annotation.VisibleForTesting;
+import androidx.core.graphics.Insets;
 import androidx.core.graphics.drawable.IconCompat;
 import androidx.core.graphics.drawable.RoundedBitmapDrawable;
 import androidx.core.graphics.drawable.RoundedBitmapDrawableFactory;
+import androidx.core.view.ViewCompat;
+import androidx.core.view.WindowInsetsCompat;
 import androidx.fragment.app.Fragment;
+import androidx.fragment.app.FragmentActivity;
 import androidx.lifecycle.Lifecycle;
-import androidx.preference.Preference;
-import androidx.preference.PreferenceGroup;
 
 import com.android.internal.app.UnlaunchableAppActivity;
 import com.android.internal.util.ArrayUtils;
 import com.android.internal.widget.LockPatternUtils;
 import com.android.settings.dashboard.profileselector.ProfileFragmentBridge;
 import com.android.settings.dashboard.profileselector.ProfileSelectFragment;
+import com.android.settings.dashboard.profileselector.ProfileSelectFragment.ProfileType;
 import com.android.settings.password.ChooseLockSettingsHelper;
+import com.android.settings.password.ConfirmDeviceCredentialActivity;
 import com.android.settingslib.widget.ActionBarShadowController;
 import com.android.settingslib.widget.AdaptiveIcon;
 
 import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
+import java.util.Objects;
+import java.util.Set;
 
 public final class Utils extends com.android.settingslib.Utils {
 
@@ -132,6 +150,10 @@ public final class Utils extends com.android.settingslib.Utils {
 
     public static final String SETTINGS_PACKAGE_NAME = "com.android.settings";
 
+    public static final String SYSTEMUI_PACKAGE_NAME = "com.android.systemui";
+
+    public static final String PHONE_PACKAGE_NAME = "com.android.phone";
+
     public static final String OS_PKG = "os";
 
     /**
@@ -139,11 +161,6 @@ public final class Utils extends com.android.settingslib.Utils {
      */
     public static final String PROPERTY_DEVICE_IDENTIFIER_ACCESS_RESTRICTIONS_DISABLED =
             "device_identifier_access_restrictions_disabled";
-
-    /**
-     * Whether to show the Permissions Hub.
-     */
-    public static final String PROPERTY_PERMISSIONS_HUB_ENABLED = "permissions_hub_enabled";
 
     /**
      * Whether to show location indicators.
@@ -164,59 +181,16 @@ public final class Utils extends com.android.settingslib.Utils {
             "app_hibernation_targets_pre_s_apps";
 
     /**
-     * Finds a matching activity for a preference's intent. If a matching
-     * activity is not found, it will remove the preference.
-     *
-     * @param context The context.
-     * @param parentPreferenceGroup The preference group that contains the
-     *            preference whose intent is being resolved.
-     * @param preferenceKey The key of the preference whose intent is being
-     *            resolved.
-     * @param flags 0 or one or more of
-     *            {@link #UPDATE_PREFERENCE_FLAG_SET_TITLE_TO_MATCHING_ACTIVITY}
-     *            .
-     * @return Whether an activity was found. If false, the preference was
-     *         removed.
+     * Whether or not Cloned Apps menu is available in Apps page. Default is false.
      */
-    public static boolean updatePreferenceToSpecificActivityOrRemove(Context context,
-            PreferenceGroup parentPreferenceGroup, String preferenceKey, int flags) {
+    public static final String PROPERTY_CLONED_APPS_ENABLED = "cloned_apps_enabled";
 
-        final Preference preference = parentPreferenceGroup.findPreference(preferenceKey);
-        if (preference == null) {
-            return false;
-        }
-
-        final Intent intent = preference.getIntent();
-        if (intent != null) {
-            // Find the activity that is in the system image
-            final PackageManager pm = context.getPackageManager();
-            final List<ResolveInfo> list = pm.queryIntentActivities(intent, 0);
-            final int listSize = list.size();
-            for (int i = 0; i < listSize; i++) {
-                final ResolveInfo resolveInfo = list.get(i);
-                if ((resolveInfo.activityInfo.applicationInfo.flags & ApplicationInfo.FLAG_SYSTEM)
-                        != 0) {
-
-                    // Replace the intent with this specific activity
-                    preference.setIntent(new Intent().setClassName(
-                            resolveInfo.activityInfo.packageName,
-                            resolveInfo.activityInfo.name));
-
-                    if ((flags & UPDATE_PREFERENCE_FLAG_SET_TITLE_TO_MATCHING_ACTIVITY) != 0) {
-                        // Set the preference title to the activity's label
-                        preference.setTitle(resolveInfo.loadLabel(pm));
-                    }
-
-                    return true;
-                }
-            }
-        }
-
-        // Did not find a matching activity, so remove the preference
-        parentPreferenceGroup.removePreference(preference);
-
-        return false;
-    }
+    /**
+     * Whether or not Delete All App Clones sub-menu is available in the Cloned Apps page.
+     * Default is false.
+     */
+    public static final String PROPERTY_DELETE_ALL_APP_CLONES_ENABLED =
+            "delete_all_app_clones_enabled";
 
     /**
      * Returns true if Monkey is running.
@@ -224,6 +198,15 @@ public final class Utils extends com.android.settingslib.Utils {
     public static boolean isMonkeyRunning() {
         return ActivityManager.isUserAMonkey();
     }
+
+    /**
+     * Enum for returning biometric status.
+     * {@link OK} no error detected when requesting mandatory biometrics authentication
+     * {@link NOT_ACTIVE} mandatory biometrics is not active
+     * {@link LOCKOUT} biometric sensors are in lockout mode
+     * {@link ERROR} corresponds to other errors
+     */
+    public enum BiometricStatus {OK, NOT_ACTIVE, LOCKOUT, ERROR}
 
     /**
      * Returns whether the device is voice-capable (meaning, it is also a phone).
@@ -419,7 +402,7 @@ public final class Utils extends com.android.settingslib.Utils {
     public static UserHandle getManagedProfile(UserManager userManager) {
         final List<UserHandle> userProfiles = userManager.getUserProfiles();
         for (UserHandle profile : userProfiles) {
-            if (profile.getIdentifier() == userManager.getUserHandle()) {
+            if (profile.getIdentifier() == userManager.getProcessUserId()) {
                 continue;
             }
             final UserInfo userInfo = userManager.getUserInfo(profile.getIdentifier());
@@ -431,22 +414,72 @@ public final class Utils extends com.android.settingslib.Utils {
     }
 
     /**
+     * Returns the profile of userType of the current user or {@code null} if none is found or a
+     * profile exists, but it is disabled.
+     */
+    @Nullable
+    public static UserHandle getProfileOfType(
+            @NonNull UserManager userManager, @ProfileType int userType) {
+        final List<UserHandle> userProfiles = userManager.getUserProfiles();
+        String umUserType = getUmUserType(userType);
+        for (UserHandle profile : userProfiles) {
+            if (profile.getIdentifier() == UserHandle.myUserId()) {
+                continue;
+            }
+            final UserInfo userInfo = userManager.getUserInfo(profile.getIdentifier());
+            if (Objects.equals(umUserType, userInfo.userType)) {
+                return profile;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Returns true if a profile of specified userType exists. Note that it considers all profiles,
+     * including the disabled profiles and the parent user itself.
+     */
+    public static boolean doesProfileOfTypeExists(
+            @NonNull UserManager userManager, @ProfileType int userType) {
+        final List<UserInfo> userProfiles = userManager.getProfiles(UserHandle.myUserId());
+        String umUserType = getUmUserType(userType);
+        for (UserInfo profile : userProfiles) {
+            if (Objects.equals(umUserType, profile.userType)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static String getUmUserType(@ProfileType int userType) throws IllegalArgumentException {
+        if (userType == ProfileType.WORK) {
+            return USER_TYPE_PROFILE_MANAGED;
+        } else if (userType == ProfileType.PRIVATE) {
+            return USER_TYPE_PROFILE_PRIVATE;
+        } else if (userType == ProfileType.PERSONAL) {
+            return USER_TYPE_FULL_SYSTEM;
+        }
+        throw new IllegalArgumentException("Cannot get user type for ALL types");
+    }
+
+    /**
      * Returns the managed profile of the current user or {@code null} if none is found. Unlike
      * {@link #getManagedProfile} this method returns enabled and disabled managed profiles.
      */
     public static UserHandle getManagedProfileWithDisabled(UserManager userManager) {
-        // TODO: Call getManagedProfileId from here once Robolectric supports
-        // API level 24 and UserManager.getProfileIdsWithDisabled can be Mocked (to avoid having
-        // yet another implementation that loops over user profiles in this method). In the meantime
-        // we need to use UserManager.getProfiles that is available on API 23 (the one currently
-        // used for Settings Robolectric tests).
-        final int myUserId = UserHandle.myUserId();
-        final List<UserInfo> profiles = userManager.getProfiles(myUserId);
+        return getManagedProfileWithDisabled(userManager, UserHandle.myUserId());
+    }
+
+    /**
+     * Returns the managed profile of the given user or {@code null} if none is found. Unlike
+     * {@link #getManagedProfile} this method returns enabled and disabled managed profiles.
+     */
+    private static UserHandle getManagedProfileWithDisabled(UserManager um, int parentUserId) {
+        final List<UserInfo> profiles = um.getProfiles(parentUserId);
         final int count = profiles.size();
         for (int i = 0; i < count; i++) {
             final UserInfo profile = profiles.get(i);
             if (profile.isManagedProfile()
-                    && profile.getUserHandle().getIdentifier() != myUserId) {
+                    && profile.getUserHandle().getIdentifier() != parentUserId) {
                 return profile.getUserHandle();
             }
         }
@@ -455,28 +488,32 @@ public final class Utils extends com.android.settingslib.Utils {
 
     /**
      * Retrieves the id for the given user's managed profile.
+     * Unlike {@link #getManagedProfile} this method returns enabled and disabled managed profiles.
      *
      * @return the managed profile id or UserHandle.USER_NULL if there is none.
      */
     public static int getManagedProfileId(UserManager um, int parentUserId) {
-        final int[] profileIds = um.getProfileIdsWithDisabled(parentUserId);
-        for (int profileId : profileIds) {
-            if (profileId != parentUserId) {
-                return profileId;
-            }
+        final UserHandle profile = getManagedProfileWithDisabled(um, parentUserId);
+        if (profile != null) {
+            return profile.getIdentifier();
         }
         return UserHandle.USER_NULL;
     }
 
-    /** Returns user ID of current user, throws IllegalStateException if it's not available. */
-    public static int getCurrentUserId(UserManager userManager, boolean isWorkProfile)
-            throws IllegalStateException {
-        if (isWorkProfile) {
-            final UserHandle managedUserHandle = getManagedProfile(userManager);
-            if (managedUserHandle == null) {
-                throw new IllegalStateException("Work profile user ID is not available.");
+    /**
+     * Returns user ID of the user of specified type under the current context, throws
+     * IllegalStateException if it's not available.
+     */
+    public static int getCurrentUserIdOfType(
+            @NonNull UserManager userManager,
+            @ProfileType int userType) throws IllegalStateException {
+        if (userType != ProfileType.PERSONAL) {
+            final UserHandle userHandle = getProfileOfType(userManager, userType);
+            if (userHandle == null) {
+                throw new IllegalStateException("User ID of requested profile type is not "
+                        + "available.");
             }
-            return managedUserHandle.getIdentifier();
+            return userHandle.getIdentifier();
         }
         return UserHandle.myUserId();
     }
@@ -589,7 +626,9 @@ public final class Utils extends com.android.settingslib.Utils {
         return inflater.inflate(resId, parent, false);
     }
 
-    public static ArraySet<String> getHandledDomains(PackageManager pm, String packageName) {
+    /** Gets all the domains that the given package could handled. */
+    @NonNull
+    public static Set<String> getHandledDomains(PackageManager pm, String packageName) {
         final List<IntentFilterVerificationInfo> iviList =
                 pm.getIntentFilterVerifications(packageName);
         final List<IntentFilter> filters = pm.getAllIntentFilters(packageName);
@@ -597,9 +636,7 @@ public final class Utils extends com.android.settingslib.Utils {
         final ArraySet<String> result = new ArraySet<>();
         if (iviList != null && iviList.size() > 0) {
             for (IntentFilterVerificationInfo ivi : iviList) {
-                for (String host : ivi.getDomains()) {
-                    result.add(host);
-                }
+                result.addAll(ivi.getDomains());
             }
         }
         if (filters != null && filters.size() > 0) {
@@ -690,23 +727,40 @@ public final class Utils extends com.android.settingslib.Utils {
                 && bundle.getBoolean(ChooseLockSettingsHelper.EXTRA_KEY_ALLOW_ANY_USER, false);
         final int userId = bundle.getInt(Intent.EXTRA_USER_ID, UserHandle.myUserId());
         if (userId == LockPatternUtils.USER_FRP) {
-            return allowAnyUser ? userId : enforceSystemUser(context, userId);
-        } else {
-            return allowAnyUser ? userId : enforceSameOwner(context, userId);
+            return allowAnyUser ? userId : checkUserOwnsFrpCredential(context, userId);
         }
+        if (userId == LockPatternUtils.USER_REPAIR_MODE) {
+            enforceRepairModeActive(context);
+            // any users can exit repair mode
+            return userId;
+        }
+        return allowAnyUser ? userId : enforceSameOwner(context, userId);
     }
 
     /**
-     * Returns the given user id if the current user is the system user.
+     * Returns the given user id if the current user owns frp credential.
      *
-     * @throws SecurityException if the current user is not the system user.
+     * @throws SecurityException if the current user do not own the frp credential.
      */
-    public static int enforceSystemUser(Context context, int userId) {
-        if (UserHandle.myUserId() == UserHandle.USER_SYSTEM) {
+    @VisibleForTesting
+    static int checkUserOwnsFrpCredential(Context context, int userId) {
+        final UserManager um = context.getSystemService(UserManager.class);
+        if (LockPatternUtils.userOwnsFrpCredential(context,
+                um.getUserInfo(UserHandle.myUserId()))) {
             return userId;
         }
-        throw new SecurityException("Given user id " + userId + " must only be used from "
-                + "USER_SYSTEM, but current user is " + UserHandle.myUserId());
+        throw new SecurityException("Current user id " + UserHandle.myUserId()
+                + " does not own frp credential.");
+    }
+
+    /**
+     * Throws {@link SecurityException} if repair mode is not active on the device.
+     */
+    private static void enforceRepairModeActive(Context context) {
+        if (LockPatternUtils.isRepairModeActive(context)) {
+            return;
+        }
+        throw new SecurityException("Repair mode is not active on the device.");
     }
 
     /**
@@ -746,6 +800,26 @@ public final class Utils extends com.android.settingslib.Utils {
             int userId) {
         final LockPatternUtils lpu = new LockPatternUtils(context);
         return lpu.getCredentialTypeForUser(userId);
+    }
+
+    /**
+     * Returns the confirmation credential string of the given user id.
+     */
+    @Nullable public static String getConfirmCredentialStringForUser(@NonNull Context context,
+             int userId, @LockPatternUtils.CredentialType int credentialType) {
+        final int effectiveUserId = UserManager.get(context).getCredentialOwnerProfile(userId);
+        if (UserManager.get(context).isManagedProfile(effectiveUserId)) {
+            return null;
+        }
+        switch (credentialType) {
+            case LockPatternUtils.CREDENTIAL_TYPE_PIN:
+                return context.getString(R.string.lockpassword_confirm_your_pin_generic);
+            case LockPatternUtils.CREDENTIAL_TYPE_PATTERN:
+                return context.getString(R.string.lockpassword_confirm_your_pattern_generic);
+            case LockPatternUtils.CREDENTIAL_TYPE_PASSWORD:
+                return context.getString(R.string.lockpassword_confirm_your_password_generic);
+        }
+        return null;
     }
 
     private static final StringBuilder sBuilder = new StringBuilder(50);
@@ -799,7 +873,9 @@ public final class Utils extends com.android.settingslib.Utils {
         }
     }
 
-    public static CharSequence getApplicationLabel(Context context, String packageName) {
+    /** Gets the application label of the given package name. */
+    @Nullable
+    public static CharSequence getApplicationLabel(Context context, @NonNull String packageName) {
         try {
             final ApplicationInfo appInfo = context.getPackageManager().getApplicationInfo(
                     packageName,
@@ -866,6 +942,23 @@ public final class Utils extends com.android.settingslib.Utils {
      */
     public static boolean isMultipleBiometricsSupported(Context context) {
         return hasFingerprintHardware(context) && hasFaceHardware(context);
+    }
+
+    /**
+     * Return true if face is supported as Class 2 biometrics and above on the device, false
+     * otherwise.
+     */
+    public static boolean isFaceNotConvenienceBiometric(@NonNull Context context) {
+        FaceManager faceManager = getFaceManagerOrNull(context);
+        if (faceManager != null) {
+            final List<FaceSensorPropertiesInternal> faceProperties =
+                    faceManager.getSensorPropertiesInternal();
+            if (!faceProperties.isEmpty()) {
+                final FaceSensorPropertiesInternal props = faceProperties.get(0);
+                return props.sensorStrength != SensorProperties.STRENGTH_CONVENIENCE;
+            }
+        }
+        return false;
     }
 
     /**
@@ -966,17 +1059,6 @@ public final class Utils extends com.android.settingslib.Utils {
         return false;
     }
 
-    /**
-     * Return the resource id to represent the install status for an app
-     */
-    @StringRes
-    public static int getInstallationStatus(ApplicationInfo info) {
-        if ((info.flags & ApplicationInfo.FLAG_INSTALLED) == 0) {
-            return R.string.not_installed;
-        }
-        return info.enabled ? R.string.installed : R.string.disabled;
-    }
-
     private static boolean isVolumeValid(VolumeInfo volume) {
         return (volume != null) && (volume.getType() == VolumeInfo.TYPE_PRIVATE)
                 && volume.isMountedReadable();
@@ -1013,7 +1095,8 @@ public final class Utils extends com.android.settingslib.Utils {
         Drawable safeIcon = icon;
 
         if ((icon != null) && !(icon instanceof VectorDrawable)) {
-            safeIcon = getSafeDrawable(icon, 500, 500);
+            safeIcon = getSafeDrawable(icon,
+                    /* MAX_DRAWABLE_SIZE */ 600, /* MAX_DRAWABLE_SIZE */ 600);
         }
 
         return safeIcon;
@@ -1159,7 +1242,7 @@ public final class Utils extends com.android.settingslib.Utils {
         final boolean isWork = args != null ? args.getInt(ProfileSelectFragment.EXTRA_PROFILE)
                 == ProfileSelectFragment.ProfileType.WORK : false;
         try {
-            if (activity.getSystemService(UserManager.class).getUserProfiles().size() > 1
+            if (isNewTabNeeded(activity)
                     && ProfileFragmentBridge.FRAGMENT_MAP.get(fragmentName) != null
                     && !isWork && !isPersonal) {
                 f = Fragment.instantiate(activity,
@@ -1171,6 +1254,33 @@ public final class Utils extends com.android.settingslib.Utils {
             Log.e(TAG, "Unable to get target fragment", e);
         }
         return f;
+    }
+
+    /**
+     * Checks if a new tab is needed or not for any user profile associated with the context user.
+     *
+     * <p> Checks if any user has the property {@link UserProperties#SHOW_IN_SETTINGS_SEPARATE} set.
+     */
+    public static boolean isNewTabNeeded(Activity activity) {
+        UserManager userManager = activity.getSystemService(UserManager.class);
+        List<UserHandle> profiles = userManager.getUserProfiles();
+        for (UserHandle userHandle : profiles) {
+            UserProperties userProperties = userManager.getUserProperties(userHandle);
+            if (userProperties.getShowInSettings() == UserProperties.SHOW_IN_SETTINGS_SEPARATE) {
+                if (Flags.allowPrivateProfile()
+                        && android.multiuser.Flags.enablePrivateSpaceFeatures()
+                        && userProperties.getShowInQuietMode()
+                        == UserProperties.SHOW_IN_QUIET_MODE_HIDDEN) {
+                    if (!userManager.isQuietModeEnabled(userHandle)) {
+                        return true;
+                    } else {
+                        continue;
+                    }
+                }
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
@@ -1219,10 +1329,275 @@ public final class Utils extends com.android.settingslib.Utils {
      */
     @ColorInt
     public static int getHomepageIconColor(Context context) {
-        return getColorAttrDefaultColor(context, android.R.attr.textColorSecondary);
+        return getColorAttrDefaultColor(
+                context, com.android.internal.R.attr.materialColorOnSurface);
     }
 
-    public static boolean isProviderModelEnabled(Context context) {
-        return FeatureFlagUtils.isEnabled(context, FeatureFlagUtils.SETTINGS_PROVIDER_MODEL);
+    /**
+     * Returns the highlight color of homepage preference icons.
+     */
+    @ColorInt
+    public static int getHomepageIconColorHighlight(Context context) {
+        return context.getColor(R.color.accent_select_primary_text);
+    }
+
+    /**
+     * Returns user id of clone profile if present, else returns -1.
+     */
+    public static int getCloneUserId(Context context) {
+        UserManager userManager = (UserManager) context.getSystemService(Context.USER_SERVICE);
+        for (UserHandle userHandle : userManager.getUserProfiles()) {
+            if (userManager.getUserInfo(userHandle.getIdentifier()).isCloneProfile()) {
+                return userHandle.getIdentifier();
+            }
+        }
+        return -1;
+    }
+
+    /**
+     * Returns if the current user is able to use Dreams.
+     */
+    public static boolean canCurrentUserDream(Context context) {
+        final UserHandle mainUser = context.getSystemService(UserManager.class).getMainUser();
+        if (mainUser == null) {
+            return false;
+        }
+        return context.createContextAsUser(mainUser, 0).getSystemService(UserManager.class)
+               .isUserForeground();
+    }
+
+    /**
+     * Returns if dreams are available to the current user.
+     */
+    public static boolean areDreamsAvailableToCurrentUser(Context context) {
+        final boolean dreamsSupported = context.getResources().getBoolean(
+                com.android.internal.R.bool.config_dreamsSupported);
+        final boolean dreamsOnlyEnabledForDockUser = context.getResources().getBoolean(
+                com.android.internal.R.bool.config_dreamsOnlyEnabledForDockUser);
+        return dreamsSupported && (!dreamsOnlyEnabledForDockUser || canCurrentUserDream(context));
+    }
+
+
+    /**
+     * Removes fingerprint templates enrolled for a given user.
+     *
+     * @param context application context.
+     * @param userId the id of the relevant user
+     */
+    public static void removeEnrolledFingerprintForUser(Context context, int userId) {
+        FingerprintManager fingerprintManager = getFingerprintManagerOrNull(context);
+        if (fingerprintManager != null && fingerprintManager.hasEnrolledTemplates(userId)) {
+            fingerprintManager.removeAll(userId,
+                    fingerprintManagerRemovalCallback(userId));
+        }
+    }
+
+    /**
+     * Removes face templates enrolled for a given user.
+     *
+     * @param context application context.
+     * @param userId the id of the relevant user
+     */
+    public static void removeEnrolledFaceForUser(Context context, int userId) {
+        FaceManager faceManager  = getFaceManagerOrNull(context);
+        if (faceManager != null && faceManager.hasEnrolledTemplates(userId)) {
+            faceManager.removeAll(userId, faceManagerRemovalCallback(userId));
+        }
+    }
+
+    /**
+     * Returns true if the user should be hidden in Settings when it's in quiet mode.
+     */
+    public static boolean shouldHideUser(
+            @NonNull UserHandle userHandle, @NonNull UserManager userManager) {
+        UserProperties userProperties = userManager.getUserProperties(userHandle);
+        return userProperties.getShowInQuietMode() == UserProperties.SHOW_IN_QUIET_MODE_HIDDEN
+                && userManager.isQuietModeEnabled(userHandle);
+    }
+
+    /**
+     * Returns true if the userId is a private profile, false otherwise.
+     */
+    public static boolean isPrivateProfile(int userId, @NonNull Context context) {
+        final UserManager userManager = context.getSystemService(UserManager.class);
+        UserInfo userInfo = userManager.getUserInfo(userId);
+        return Flags.allowPrivateProfile() && android.multiuser.Flags.enablePrivateSpaceFeatures()
+                && userInfo.isPrivateProfile();
+    }
+
+    /**
+     * Enable new edge to edge feature.
+     *
+     * @param activity the Activity need to setup the edge to edge feature.
+     */
+    public static void setupEdgeToEdge(@NonNull FragmentActivity activity) {
+        ViewCompat.setOnApplyWindowInsetsListener(activity.findViewById(android.R.id.content),
+                (v, windowInsets) -> {
+                    final Insets insets = windowInsets.getInsets(
+                            WindowInsetsCompat.Type.systemBars() | WindowInsetsCompat.Type.ime()
+                                    | WindowInsetsCompat.Type.displayCutout());
+                    int newInsetsTop = activity.getWindow().getDecorView().getRootWindowInsets()
+                            .getInsets(WindowInsetsCompat.Type.statusBars()
+                                    | WindowInsetsCompat.Type.captionBar()).top;
+
+                    // Apply the insets paddings to the view.
+                    v.setPadding(insets.left, newInsetsTop, insets.right, insets.bottom);
+
+                    // Return CONSUMED if you don't want the window insets to keep being
+                    // passed down to descendant views.
+                    return WindowInsetsCompat.CONSUMED;
+                });
+    }
+
+    private static FaceManager.RemovalCallback faceManagerRemovalCallback(int userId) {
+        return new FaceManager.RemovalCallback() {
+            @Override
+            public void onRemovalError(@Nullable Face face, int errMsgId, CharSequence err) {
+                Log.e(TAG, "Unable to remove face template for user " + userId + ", error: " + err);
+            }
+
+            @Override
+            public void onRemovalSucceeded(Face face, int remaining) {
+                if (remaining == 0) {
+                    Log.d(TAG, "Enrolled face templates removed for user " + userId);
+                }
+            }
+        };
+    }
+
+    private static FingerprintManager.RemovalCallback fingerprintManagerRemovalCallback(
+            int userId) {
+        return new FingerprintManager.RemovalCallback() {
+            @Override
+            public void onRemovalError(@Nullable Fingerprint fp, int errMsgId, CharSequence err) {
+                Log.e(TAG, "Unable to remove fingerprint for user " + userId + " , error: " + err);
+            }
+
+            @Override
+            public void onRemovalSucceeded(Fingerprint fp, int remaining) {
+                if (remaining == 0) {
+                    Log.d(TAG, "Enrolled fingerprints removed for user " + userId);
+                }
+            }
+        };
+    }
+
+    /**
+     * Disables the launcher icon and shortcut picker component for the Settings app corresponding
+     * to the context user.
+     */
+    public static void disableComponentsToHideSettings(@NonNull Context context,
+            @NonNull PackageManager pm) {
+        // Disable settings app launcher icon
+        disableComponent(pm, new ComponentName(context, Settings.class));
+
+        //Disable Shortcut picker
+        disableComponent(pm, new ComponentName(context, Settings.CreateShortcutActivity.class));
+    }
+
+    /**
+     * Request biometric authentication if all requirements for mandatory biometrics is satisfied.
+     *
+     * @param context                           of the corresponding activity/fragment
+     * @param biometricsAuthenticationRequested if the activity/fragment has already requested for
+     *                                          biometric prompt
+     * @param userId                            user id for the authentication request
+     * @return biometric status when mandatory biometrics authentication is requested
+     */
+    public static BiometricStatus requestBiometricAuthenticationForMandatoryBiometrics(
+            @NonNull Context context, boolean biometricsAuthenticationRequested, int userId) {
+        final BiometricManager biometricManager = context.getSystemService(BiometricManager.class);
+        if (biometricManager == null) {
+            Log.e(TAG, "Biometric Manager is null.");
+            return BiometricStatus.NOT_ACTIVE;
+        }
+        if (android.hardware.biometrics.Flags.mandatoryBiometrics()
+                && !biometricsAuthenticationRequested) {
+            final UserManager userManager = context.getSystemService(
+                    UserManager.class);
+            final int status = biometricManager.canAuthenticate(getEffectiveUserId(
+                    userManager, userId), BiometricManager.Authenticators.MANDATORY_BIOMETRICS);
+            switch(status) {
+                case BiometricManager.BIOMETRIC_SUCCESS:
+                    return BiometricStatus.OK;
+                case BiometricManager.BIOMETRIC_ERROR_LOCKOUT:
+                    return BiometricStatus.LOCKOUT;
+                case BiometricManager.BIOMETRIC_ERROR_MANDATORY_NOT_ACTIVE:
+                case BiometricManager.BIOMETRIC_ERROR_NOT_ENABLED_FOR_APPS:
+                    return BiometricStatus.NOT_ACTIVE;
+                default:
+                    return BiometricStatus.ERROR;
+            }
+        }
+        return BiometricStatus.NOT_ACTIVE;
+    }
+
+    /**
+     * Launch biometric prompt for mandatory biometrics. Call
+     * {@link #requestBiometricAuthenticationForMandatoryBiometrics(Context, boolean, int)}
+     * to check if all requirements for mandatory biometrics is satisfied
+     * before launching biometric prompt.
+     *
+     * @param fragment       corresponding fragment of the surface
+     * @param requestCode    for starting the new activity
+     * @param userId         user id for the authentication request
+     * @param hideBackground if the background activity screen needs to be hidden
+     */
+    public static void launchBiometricPromptForMandatoryBiometrics(@NonNull Fragment fragment,
+            int requestCode, int userId, boolean hideBackground) {
+        final UserManager userManager = (UserManager) fragment.getContext().getSystemService(
+                UserManager.class);
+        fragment.startActivityForResult(getIntentForBiometricAuthentication(fragment.getResources(),
+                getEffectiveUserId(userManager, userId), hideBackground), requestCode);
+    }
+
+    /**
+     * Launch biometric prompt for mandatory biometrics. Call
+     * {@link #requestBiometricAuthenticationForMandatoryBiometrics(Context, boolean, int)}
+     * to check if all requirements for mandatory biometrics is satisfied
+     * before launching biometric prompt.
+     *
+     * @param activity       corresponding activity of the surface
+     * @param requestCode    for starting the new activity
+     * @param userId         user id for the authentication request
+     * @param hideBackground if the background activity screen needs to be hidden
+     */
+    public static void launchBiometricPromptForMandatoryBiometrics(@NonNull Activity activity,
+            int requestCode, int userId, boolean hideBackground) {
+        final UserManager userManager = activity.getSystemService(UserManager.class);
+        activity.startActivityForResult(getIntentForBiometricAuthentication(
+                activity.getResources(), getEffectiveUserId(userManager, userId),
+                hideBackground), requestCode);
+    }
+
+    private static int getEffectiveUserId(UserManager userManager, int userId) {
+        if (userManager != null) {
+            return userManager.getCredentialOwnerProfile(userId);
+        }
+        return userId;
+    }
+
+    private static Intent getIntentForBiometricAuthentication(Resources resources,
+            int effectiveUserId, boolean hideBackground) {
+        final Intent intent = new Intent();
+        if (android.hardware.biometrics.Flags.mandatoryBiometrics()) {
+            intent.putExtra(BIOMETRIC_PROMPT_AUTHENTICATORS,
+                    BiometricManager.Authenticators.MANDATORY_BIOMETRICS);
+        }
+        intent.putExtra(BIOMETRIC_PROMPT_NEGATIVE_BUTTON_TEXT,
+                resources.getString(R.string.cancel));
+        intent.putExtra(KeyguardManager.EXTRA_DESCRIPTION,
+                resources.getString(R.string.mandatory_biometrics_prompt_description));
+        intent.putExtra(ChooseLockSettingsHelper.EXTRA_KEY_ALLOW_ANY_USER, true);
+        intent.putExtra(EXTRA_USER_ID, effectiveUserId);
+        intent.putExtra(BIOMETRIC_PROMPT_HIDE_BACKGROUND, hideBackground);
+        intent.setClassName(SETTINGS_PACKAGE_NAME,
+                ConfirmDeviceCredentialActivity.InternalActivity.class.getName());
+        return intent;
+    }
+
+    private static void disableComponent(PackageManager pm, ComponentName componentName) {
+        pm.setComponentEnabledSetting(componentName,
+                PackageManager.COMPONENT_ENABLED_STATE_DISABLED, PackageManager.DONT_KILL_APP);
     }
 }

@@ -19,15 +19,18 @@ package com.android.settings.fuelgauge;
 import static com.google.common.truth.Truth.assertThat;
 
 import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.spy;
 
+import android.app.admin.DevicePolicyManager;
 import android.content.ContentResolver;
+import android.content.Context;
 import android.provider.Settings;
 
 import androidx.preference.SwitchPreference;
 
 import com.android.settings.core.BasePreferenceController;
 import com.android.settings.testutils.FakeFeatureFactory;
-import com.android.settingslib.widget.MainSwitchPreference;
 
 import org.junit.Before;
 import org.junit.Test;
@@ -42,6 +45,7 @@ public class SmartBatteryPreferenceControllerTest {
     private static final int ON = 1;
     private static final int OFF = 0;
 
+    private Context mContext = spy(RuntimeEnvironment.application);
     private SmartBatteryPreferenceController mController;
     private SwitchPreference mPreference;
     private ContentResolver mContentResolver;
@@ -50,11 +54,14 @@ public class SmartBatteryPreferenceControllerTest {
     @Before
     public void setUp() {
         MockitoAnnotations.initMocks(this);
+        doReturn(mock(DevicePolicyManager.class))
+                .when(mContext)
+                .getSystemService(Context.DEVICE_POLICY_SERVICE);
 
         mFeatureFactory = FakeFeatureFactory.setupForTest();
-        mContentResolver = RuntimeEnvironment.application.getContentResolver();
-        mController = new SmartBatteryPreferenceController(RuntimeEnvironment.application);
-        mPreference = new SwitchPreference(RuntimeEnvironment.application);
+        mContentResolver = mContext.getContentResolver();
+        mController = new SmartBatteryPreferenceController(mContext);
+        mPreference = new SwitchPreference(mContext);
     }
 
     @Test
@@ -93,32 +100,32 @@ public class SmartBatteryPreferenceControllerTest {
     public void testGetAvailabilityStatus_smartBatterySupported_returnAvailable() {
         doReturn(true).when(mFeatureFactory.powerUsageFeatureProvider).isSmartBatterySupported();
 
-        assertThat(mController.getAvailabilityStatus()).isEqualTo(
-                BasePreferenceController.AVAILABLE);
+        assertThat(mController.getAvailabilityStatus())
+                .isEqualTo(BasePreferenceController.AVAILABLE);
     }
 
     @Test
     public void testGetAvailabilityStatus_smartBatteryUnSupported_returnDisabled() {
         doReturn(false).when(mFeatureFactory.powerUsageFeatureProvider).isSmartBatterySupported();
 
-        assertThat(mController.getAvailabilityStatus()).isEqualTo(
-                BasePreferenceController.UNSUPPORTED_ON_DEVICE);
+        assertThat(mController.getAvailabilityStatus())
+                .isEqualTo(BasePreferenceController.UNSUPPORTED_ON_DEVICE);
     }
 
     private void putSmartBatteryValue(int value) {
-        Settings.Global.putInt(mContentResolver,
-                Settings.Global.ADAPTIVE_BATTERY_MANAGEMENT_ENABLED, value);
+        Settings.Global.putInt(
+                mContentResolver, Settings.Global.ADAPTIVE_BATTERY_MANAGEMENT_ENABLED, value);
     }
 
     private int getSmartBatteryValue() {
-        return Settings.Global.getInt(mContentResolver,
-                Settings.Global.ADAPTIVE_BATTERY_MANAGEMENT_ENABLED, ON);
+        return Settings.Global.getInt(
+                mContentResolver, Settings.Global.ADAPTIVE_BATTERY_MANAGEMENT_ENABLED, ON);
     }
 
     @Test
     public void isSliceableCorrectKey_returnsTrue() {
         final SmartBatteryPreferenceController controller =
-                new SmartBatteryPreferenceController(null);
+                new SmartBatteryPreferenceController(mContext);
         assertThat(controller.isSliceable()).isTrue();
     }
 

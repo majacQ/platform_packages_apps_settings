@@ -23,7 +23,8 @@ import static android.app.NotificationManager.IMPORTANCE_UNSPECIFIED;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.content.Context;
-import android.widget.Switch;
+import android.widget.CompoundButton;
+import android.widget.CompoundButton.OnCheckedChangeListener;
 
 import androidx.preference.Preference;
 
@@ -31,10 +32,9 @@ import com.android.settings.R;
 import com.android.settings.core.PreferenceControllerMixin;
 import com.android.settings.notification.NotificationBackend;
 import com.android.settings.widget.SettingsMainSwitchPreference;
-import com.android.settingslib.widget.OnMainSwitchChangeListener;
 
 public class BlockPreferenceController extends NotificationPreferenceController
-        implements PreferenceControllerMixin, OnMainSwitchChangeListener {
+        implements PreferenceControllerMixin, OnCheckedChangeListener {
 
     private static final String KEY_BLOCK = "block";
     private NotificationSettings.DependentFieldListener mDependentFieldListener;
@@ -80,7 +80,7 @@ public class BlockPreferenceController extends NotificationPreferenceController
             }
             bar.setDisabledByAdmin(mAdmin);
 
-            if (mChannel != null && !isChannelBlockable()) {
+            if (mChannel != null && (!isChannelBlockable() || !isChannelConfigurable(mChannel))) {
                 bar.setSwitchBarEnabled(false);
             }
 
@@ -88,8 +88,7 @@ public class BlockPreferenceController extends NotificationPreferenceController
                 bar.setSwitchBarEnabled(false);
             }
 
-            if (mChannel == null && mAppRow.systemApp
-                    && (!mAppRow.banned || mAppRow.lockedImportance)) {
+            if (mChannel == null && !isAppBlockable()) {
                 bar.setSwitchBarEnabled(false);
             }
 
@@ -105,7 +104,7 @@ public class BlockPreferenceController extends NotificationPreferenceController
     }
 
     @Override
-    public void onSwitchChanged(Switch switchView, boolean isChecked) {
+    public void onCheckedChanged(CompoundButton buttonView, boolean isChecked) {
         boolean blocked = !isChecked;
         if (mChannel != null) {
             final int originalImportance = mChannel.getImportance();

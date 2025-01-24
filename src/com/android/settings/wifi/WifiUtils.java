@@ -16,20 +16,33 @@
 
 package com.android.settings.wifi;
 
+import android.app.ActionBar;
+import android.app.Activity;
 import android.app.admin.DevicePolicyManager;
 import android.content.ComponentName;
 import android.content.ContentResolver;
 import android.content.Context;
 import android.content.pm.PackageManager;
 import android.net.NetworkCapabilities;
+import android.net.TetheringManager;
 import android.net.wifi.ScanResult;
 import android.net.wifi.SoftApConfiguration;
 import android.net.wifi.WifiConfiguration;
+import android.net.wifi.WifiManager;
 import android.os.UserHandle;
 import android.os.UserManager;
 import android.provider.Settings;
 import android.text.TextUtils;
+import android.util.Log;
+import android.util.TypedValue;
 
+import androidx.annotation.NonNull;
+import androidx.annotation.VisibleForTesting;
+import androidx.core.graphics.Insets;
+import androidx.core.view.ViewCompat;
+import androidx.core.view.WindowInsetsCompat;
+
+import com.android.settings.R;
 import com.android.settings.Utils;
 import com.android.wifitrackerlib.WifiEntry;
 
@@ -38,9 +51,15 @@ import java.nio.charset.StandardCharsets;
 /** A utility class for Wi-Fi functions. */
 public class WifiUtils extends com.android.settingslib.wifi.WifiUtils {
 
+    static final String TAG = "WifiUtils";
+
     private static final int SSID_ASCII_MIN_LENGTH = 1;
     private static final int SSID_ASCII_MAX_LENGTH = 32;
 
+    private static final int PSK_PASSPHRASE_ASCII_MIN_LENGTH = 8;
+    private static final int PSK_PASSPHRASE_ASCII_MAX_LENGTH = 63;
+
+    private static Boolean sCanShowWifiHotspotCached;
 
     public static boolean isSSIDTooLong(String ssid) {
         if (TextUtils.isEmpty(ssid)) {
@@ -62,8 +81,15 @@ public class WifiUtils extends com.android.settingslib.wifi.WifiUtils {
     public static boolean isHotspotPasswordValid(String password, int securityType) {
         final SoftApConfiguration.Builder configBuilder = new SoftApConfiguration.Builder();
         try {
+            if (securityType == SoftApConfiguration.SECURITY_TYPE_WPA2_PSK
+                    || securityType == SoftApConfiguration.SECURITY_TYPE_WPA3_SAE_TRANSITION) {
+                if (password.length() < PSK_PASSPHRASE_ASCII_MIN_LENGTH
+                        || password.length() > PSK_PASSPHRASE_ASCII_MAX_LENGTH) {
+                    return false;
+                }
+            }
             configBuilder.setPassphrase(password, securityType);
-        } catch (IllegalArgumentException e) {
+        } catch (Exception e) {
             return false;
         }
         return true;
@@ -77,7 +103,7 @@ public class WifiUtils extends com.android.settingslib.wifi.WifiUtils {
      * @return true if Settings cannot modify the config due to lockDown.
      */
     public static boolean isNetworkLockedDown(Context context, WifiConfiguration config) {
-        if (config == null) {
+        if (context == null || config == null) {
             return false;
         }
 
@@ -230,5 +256,93 @@ public class WifiUtils extends com.android.settingslib.wifi.WifiUtils {
         }
 
         return WifiEntry.SECURITY_NONE;
+    }
+
+    /**
+     * Check if Wi-Fi hotspot settings can be displayed.
+     *
+     * @param context Context of caller
+     * @return true if Wi-Fi hotspot settings can be displayed
+     */
+    public static boolean checkShowWifiHotspot(Context context) {
+        if (context == null) return false;
+
+        boolean showWifiHotspotSettings =
+                context.getResources().getBoolean(R.bool.config_show_wifi_hotspot_settings);
+        if (!showWifiHotspotSettings) {
+            Log.w(TAG, "config_show_wifi_hotspot_settings:false");
+            return false;
+        }
+
+        WifiManager wifiManager = context.getSystemService(WifiManager.class);
+        if (wifiManager == null) {
+            Log.e(TAG, "WifiManager is null");
+            return false;
+        }
+
+        TetheringManager tetheringManager = context.getSystemService(TetheringManager.class);
+        if (tetheringManager == null) {
+            Log.e(TAG, "TetheringManager is null");
+            return false;
+        }
+        String[] wifiRegexs = tetheringManager.getTetherableWifiRegexs();
+        if (wifiRegexs == null || wifiRegexs.length == 0) {
+            Log.w(TAG, "TetherableWifiRegexs is empty");
+            return false;
+        }
+        return true;
+    }
+
+    /**
+     * Return the cached result to see if Wi-Fi hotspot settings can be displayed.
+     *
+     * @param context Context of caller
+     * @return true if Wi-Fi hotspot settings can be displayed
+     */
+    public static boolean canShowWifiHotspot(Context context) {
+        if (sCanShowWifiHotspotCached == null) {
+            sCanShowWifiHotspotCached = checkShowWifiHotspot(context);
+        }
+        return sCanShowWifiHotspotCached;
+    }
+
+    /**
+     * Sets the sCanShowWifiHotspotCached for testing purposes.
+     *
+     * @param cached Cached value for #canShowWifiHotspot()
+     */
+    @VisibleForTesting
+    public static void setCanShowWifiHotspotCached(Boolean cached) {
+        sCanShowWifiHotspotCached = cached;
+    }
+
+    /**
+     * Enable new edge to edge feature.
+     *
+     * @param activity the Activity need to setup the edge to edge feature.
+     */
+    public static void setupEdgeToEdge(@NonNull Activity activity) {
+        final ActionBar actionBar = activity.getActionBar();
+        if (actionBar == null) {
+            return;
+        }
+
+        final TypedValue typedValue = new TypedValue();
+        if (activity.getTheme().resolveAttribute(
+                com.android.internal.R.attr.actionBarSize, typedValue, true)) {
+            ViewCompat.setOnApplyWindowInsetsListener(activity.findViewById(android.R.id.content),
+                    (v, windowInsets) -> {
+                        Insets insets = windowInsets.getInsets(
+                                WindowInsetsCompat.Type.systemBars() |
+                                WindowInsetsCompat.Type.ime());
+
+                        // Apply the insets paddings to the view.
+                        v.setPadding(insets.left, insets.top, insets.right, insets.bottom);
+
+                        // Return CONSUMED if you don't want the window insets to keep being
+                        // passed down to descendant views.
+                        return WindowInsetsCompat.CONSUMED;
+                    });
+        }
     }
 }

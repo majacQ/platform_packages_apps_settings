@@ -15,12 +15,17 @@
  */
 package com.android.settings.biometrics.combination;
 
+import android.app.admin.DevicePolicyManager;
 import android.content.Context;
 
 import androidx.lifecycle.Lifecycle;
+import androidx.preference.Preference;
 
 import com.android.settings.Utils;
 import com.android.settings.biometrics.face.FaceStatusPreferenceController;
+import com.android.settingslib.RestrictedLockUtils;
+import com.android.settingslib.RestrictedLockUtilsInternal;
+import com.android.settingslib.RestrictedPreference;
 
 /**
  * Preference controller for face settings within the biometrics settings page, that controls the
@@ -29,7 +34,7 @@ import com.android.settings.biometrics.face.FaceStatusPreferenceController;
 public class BiometricFaceStatusPreferenceController extends FaceStatusPreferenceController {
 
     public BiometricFaceStatusPreferenceController(Context context, String key) {
-        super(context, key);
+        super(context, key, null /* lifecycle */);
     }
 
     public BiometricFaceStatusPreferenceController(
@@ -38,7 +43,26 @@ public class BiometricFaceStatusPreferenceController extends FaceStatusPreferenc
     }
 
     @Override
+    public void updateState(Preference preference) {
+        super.updateState(preference);
+        final boolean isFaceEnrolled = mFaceStatusUtils.hasEnrolled();
+        final RestrictedLockUtils.EnforcedAdmin admin =
+                RestrictedLockUtilsInternal.checkIfKeyguardFeaturesDisabled(
+                        mContext, DevicePolicyManager.KEYGUARD_DISABLE_FACE, getUserId());
+        if (admin != null && !isFaceEnrolled) {
+            ((RestrictedPreference) preference).setDisabledByAdmin(admin);
+        } else {
+            preference.setEnabled(true);
+        }
+    }
+
+    @Override
     protected boolean isDeviceSupported() {
-        return Utils.isMultipleBiometricsSupported(mContext) && Utils.hasFaceHardware(mContext);
+        return Utils.isMultipleBiometricsSupported(mContext) && isHardwareSupported();
+    }
+
+    @Override
+    protected boolean isHardwareSupported() {
+        return Utils.hasFaceHardware(mContext);
     }
 }

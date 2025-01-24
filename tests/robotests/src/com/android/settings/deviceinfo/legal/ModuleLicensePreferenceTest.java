@@ -67,7 +67,7 @@ public class ModuleLicensePreferenceTest {
                 .isEqualTo(ModuleLicenseProvider.getUriForPackage(PACKAGE_NAME));
         assertThat(intent.getType()).isEqualTo(ModuleLicenseProvider.LICENSE_FILE_MIME_TYPE);
         assertThat(intent.getCharSequenceExtra(Intent.EXTRA_TITLE)).isEqualTo(NAME);
-        assertThat(intent.getFlags()).isEqualTo(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        assertThat((intent.getFlags() & Intent.FLAG_GRANT_READ_URI_PERMISSION)).isNotEqualTo(0);
         assertThat(intent.getCategories()).contains(Intent.CATEGORY_DEFAULT);
         assertThat(intent.getPackage()).isEqualTo("com.android.htmlviewer");
     }

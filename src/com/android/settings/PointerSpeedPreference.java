@@ -18,10 +18,13 @@ package com.android.settings;
 
 import static android.view.HapticFeedbackConstants.CLOCK_TICK;
 
+import static com.android.internal.jank.InteractionJankMonitor.CUJ_SETTINGS_SLIDER;
+
 import android.content.ContentResolver;
 import android.content.Context;
 import android.database.ContentObserver;
 import android.hardware.input.InputManager;
+import android.hardware.input.InputSettings;
 import android.os.Handler;
 import android.os.Parcel;
 import android.os.Parcelable;
@@ -30,9 +33,12 @@ import android.util.AttributeSet;
 import android.view.View;
 import android.widget.SeekBar;
 
+import com.android.internal.jank.InteractionJankMonitor;
+
 public class PointerSpeedPreference extends SeekBarDialogPreference implements
         SeekBar.OnSeekBarChangeListener {
     private final InputManager mIm;
+    private final InteractionJankMonitor mJankMonitor = InteractionJankMonitor.getInstance();
     private SeekBar mSeekBar;
 
     private int mOldSpeed;
@@ -69,16 +75,16 @@ public class PointerSpeedPreference extends SeekBarDialogPreference implements
         super.onBindDialogView(view);
 
         mSeekBar = getSeekBar(view);
-        mSeekBar.setMax(InputManager.MAX_POINTER_SPEED - InputManager.MIN_POINTER_SPEED);
-        mOldSpeed = mIm.getPointerSpeed(getContext());
-        mSeekBar.setProgress(mOldSpeed - InputManager.MIN_POINTER_SPEED);
+        mSeekBar.setMax(InputSettings.MAX_POINTER_SPEED - InputSettings.MIN_POINTER_SPEED);
+        mOldSpeed = InputSettings.getPointerSpeed(getContext());
+        mSeekBar.setProgress(mOldSpeed - InputSettings.MIN_POINTER_SPEED);
         mSeekBar.setOnSeekBarChangeListener(this);
         mSeekBar.setContentDescription(getTitle());
     }
 
     public void onProgressChanged(SeekBar seekBar, int progress, boolean fromTouch) {
         if (!mTouchInProgress) {
-            mIm.tryPointerSpeed(progress + InputManager.MIN_POINTER_SPEED);
+            mIm.tryPointerSpeed(progress + InputSettings.MIN_POINTER_SPEED);
         }
         if (progress != mLastProgress) {
             seekBar.performHapticFeedback(CLOCK_TICK);
@@ -88,16 +94,20 @@ public class PointerSpeedPreference extends SeekBarDialogPreference implements
 
     public void onStartTrackingTouch(SeekBar seekBar) {
         mTouchInProgress = true;
+        mJankMonitor.begin(InteractionJankMonitor.Configuration.Builder
+                .withView(CUJ_SETTINGS_SLIDER, seekBar)
+                .setTag(getKey()));
     }
 
     public void onStopTrackingTouch(SeekBar seekBar) {
         mTouchInProgress = false;
-        mIm.tryPointerSpeed(seekBar.getProgress() + InputManager.MIN_POINTER_SPEED);
+        mIm.tryPointerSpeed(seekBar.getProgress() + InputSettings.MIN_POINTER_SPEED);
+        mJankMonitor.end(CUJ_SETTINGS_SLIDER);
     }
 
     private void onSpeedChanged() {
-        int speed = mIm.getPointerSpeed(getContext());
-        mSeekBar.setProgress(speed - InputManager.MIN_POINTER_SPEED);
+        int speed = InputSettings.getPointerSpeed(getContext());
+        mSeekBar.setProgress(speed - InputSettings.MIN_POINTER_SPEED);
     }
 
     @Override
@@ -107,8 +117,8 @@ public class PointerSpeedPreference extends SeekBarDialogPreference implements
         final ContentResolver resolver = getContext().getContentResolver();
 
         if (positiveResult) {
-            mIm.setPointerSpeed(getContext(),
-                    mSeekBar.getProgress() + InputManager.MIN_POINTER_SPEED);
+            InputSettings.setPointerSpeed(getContext(),
+                    mSeekBar.getProgress() + InputSettings.MIN_POINTER_SPEED);
         } else {
             restoreOldState();
         }
@@ -149,7 +159,7 @@ public class PointerSpeedPreference extends SeekBarDialogPreference implements
         SavedState myState = (SavedState) state;
         super.onRestoreInstanceState(myState.getSuperState());
         mOldSpeed = myState.oldSpeed;
-        mIm.tryPointerSpeed(myState.progress + InputManager.MIN_POINTER_SPEED);
+        mIm.tryPointerSpeed(myState.progress + InputSettings.MIN_POINTER_SPEED);
     }
 
     private static class SavedState extends BaseSavedState {
