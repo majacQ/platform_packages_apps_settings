@@ -25,7 +25,6 @@ import androidx.appcompat.app.AlertDialog;
 import androidx.fragment.app.Fragment;
 import androidx.fragment.app.FragmentManager;
 
-import com.android.settings.R;
 import com.android.settings.core.instrumentation.InstrumentedDialogFragment;
 
 public class EnableAdbWarningDialog extends InstrumentedDialogFragment implements
@@ -50,10 +49,10 @@ public class EnableAdbWarningDialog extends InstrumentedDialogFragment implement
     @Override
     public Dialog onCreateDialog(Bundle savedInstanceState) {
         return new AlertDialog.Builder(getActivity())
-                .setTitle(R.string.adb_warning_title)
-                .setMessage(R.string.adb_warning_message)
-                .setPositiveButton(android.R.string.yes, this /* onClickListener */)
-                .setNegativeButton(android.R.string.no, this /* onClickListener */)
+                .setTitle(com.android.settingslib.R.string.adb_warning_title)
+                .setMessage(com.android.settingslib.R.string.adb_warning_message)
+                .setPositiveButton(android.R.string.ok, this /* onClickListener */)
+                .setNegativeButton(android.R.string.cancel, this /* onClickListener */)
                 .create();
     }
 

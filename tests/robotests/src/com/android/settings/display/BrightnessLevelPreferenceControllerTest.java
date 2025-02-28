@@ -33,16 +33,22 @@ import android.content.Context;
 import android.content.Intent;
 import android.hardware.display.BrightnessInfo;
 import android.os.PowerManager;
+import android.platform.test.annotations.DisableFlags;
+import android.platform.test.annotations.EnableFlags;
+import android.platform.test.flag.junit.SetFlagsRule;
 import android.provider.Settings.System;
 import android.view.Display;
 
 import androidx.preference.Preference;
 import androidx.preference.PreferenceScreen;
 
+import com.android.settings.R;
+import com.android.settings.accessibility.Flags;
 import com.android.settings.core.SettingsBaseActivity;
 import com.android.settingslib.transition.SettingsTransitionHelper;
 
 import org.junit.Before;
+import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.mockito.Mock;
@@ -57,6 +63,9 @@ import org.robolectric.shadows.ShadowContentResolver;
 
 @RunWith(RobolectricTestRunner.class)
 public class BrightnessLevelPreferenceControllerTest {
+
+    @Rule
+    public final SetFlagsRule mSetFlagsRule = new SetFlagsRule();
 
     @Mock
     private PowerManager mPowerManager;
@@ -82,27 +91,30 @@ public class BrightnessLevelPreferenceControllerTest {
                 PowerManager.BRIGHTNESS_CONSTRAINT_TYPE_MINIMUM)).thenReturn(0.0f);
         when(mPowerManager.getBrightnessConstraint(
                 PowerManager.BRIGHTNESS_CONSTRAINT_TYPE_MAXIMUM)).thenReturn(1.0f);
-        when(mPowerManager.getBrightnessConstraint(
-                PowerManager.BRIGHTNESS_CONSTRAINT_TYPE_MINIMUM_VR)).thenReturn(0.0f);
-        when(mPowerManager.getBrightnessConstraint(
-                PowerManager.BRIGHTNESS_CONSTRAINT_TYPE_MAXIMUM_VR)).thenReturn(1.0f);
         ShadowApplication.getInstance().setSystemService(POWER_SERVICE,
                 mPowerManager);
         when(mScreen.findPreference(anyString())).thenReturn(mPreference);
-        when(mContext.getDisplay()).thenReturn(mDisplay);
+        doReturn(mDisplay).when(mContext).getDisplay();
         mController = spy(new BrightnessLevelPreferenceController(mContext, null));
-        doReturn(false).when(mController).isInVrMode();
     }
 
     @Test
-    public void isAvailable_shouldAlwaysReturnTrue() {
+    public void isAvailable_shouldAlwaysReturnTrueWhenNotInSetupWizard() {
         assertThat(mController.isAvailable()).isTrue();
     }
 
     @Test
-    public void isInVrMode_noVrManager_shouldAlwaysReturnFalse() {
-        doReturn(null).when(mController).safeGetVrManager();
-        assertThat(mController.isInVrMode()).isFalse();
+    @EnableFlags(Flags.FLAG_ADD_BRIGHTNESS_SETTINGS_IN_SUW)
+    public void isAvailable_inSetupWizardAndFlagOn_shouldReturnTrue() {
+        mController.setInSetupWizard(true);
+        assertThat(mController.isAvailable()).isTrue();
+    }
+
+    @Test
+    @DisableFlags(Flags.FLAG_ADD_BRIGHTNESS_SETTINGS_IN_SUW)
+    public void isAvailable_inSetupWizardAndFlagOff_shouldReturnFalse() {
+        mController.setInSetupWizard(true);
+        assertThat(mController.isAvailable()).isFalse();
     }
 
     @Test
@@ -113,8 +125,6 @@ public class BrightnessLevelPreferenceControllerTest {
 
         controller.onStart();
 
-        assertThat(shadowContentResolver.getContentObservers(
-                System.getUriFor(System.SCREEN_BRIGHTNESS_FOR_VR))).isNotEmpty();
         assertThat(shadowContentResolver.getContentObservers(
                 System.getUriFor(System.SCREEN_AUTO_BRIGHTNESS_ADJ))).isNotEmpty();
     }
@@ -130,30 +140,32 @@ public class BrightnessLevelPreferenceControllerTest {
         controller.onStop();
 
         assertThat(shadowContentResolver.getContentObservers(
-                System.getUriFor(System.SCREEN_BRIGHTNESS_FOR_VR_FLOAT))).isEmpty();
-        assertThat(shadowContentResolver.getContentObservers(
                 System.getUriFor(System.SCREEN_AUTO_BRIGHTNESS_ADJ))).isEmpty();
     }
 
     @Test
-    public void updateState_inVrMode_shouldSetSummaryToVrBrightness() {
-        doReturn(true).when(mController).isInVrMode();
-        System.putFloat(mContentResolver, System.SCREEN_BRIGHTNESS_FOR_VR_FLOAT, 0.6f);
+    public void onStart_shouldSetSummary() {
+        BrightnessLevelPreferenceController controller =
+                new BrightnessLevelPreferenceController(mContext, null);
+        controller.displayPreference(mScreen);
 
-        mController.updateState(mPreference);
+        controller.onStop();
+        when(mDisplay.getBrightnessInfo()).thenReturn(
+                new BrightnessInfo(0.5f, 0.0f, 1.0f, BrightnessInfo.HIGH_BRIGHTNESS_MODE_OFF,
+                        0.5f, BrightnessInfo.BRIGHTNESS_MAX_REASON_NONE));
+        controller.onStart();
 
-        verify(mPreference).setSummary("91%");
+        verify(mPreference).setSummary("87%");
     }
 
     @Test
     public void updateState_autoBrightness_shouldSetSummaryToAutoBrightness() {
-        doReturn(false).when(mController).isInVrMode();
         System.putInt(mContentResolver, System.SCREEN_BRIGHTNESS_MODE,
                 System.SCREEN_BRIGHTNESS_MODE_AUTOMATIC);
 
         when(mDisplay.getBrightnessInfo()).thenReturn(
                 new BrightnessInfo(0.1f, 0.0f, 1.0f, BrightnessInfo.HIGH_BRIGHTNESS_MODE_OFF,
-                    0.5f));
+                    0.5f, BrightnessInfo.BRIGHTNESS_MAX_REASON_NONE));
 
         mController.updateState(mPreference);
 
@@ -162,31 +174,16 @@ public class BrightnessLevelPreferenceControllerTest {
 
     @Test
     public void updateState_manualBrightness_shouldSetSummaryToScreenBrightness() {
-        doReturn(false).when(mController).isInVrMode();
         System.putInt(mContentResolver, System.SCREEN_BRIGHTNESS_MODE,
                 System.SCREEN_BRIGHTNESS_MODE_MANUAL);
 
         when(mDisplay.getBrightnessInfo()).thenReturn(
                 new BrightnessInfo(0.5f, 0.0f, 1.0f, BrightnessInfo.HIGH_BRIGHTNESS_MODE_OFF,
-                    0.5f));
+                    0.5f, BrightnessInfo.BRIGHTNESS_MAX_REASON_NONE));
 
         mController.updateState(mPreference);
 
         verify(mPreference).setSummary("87%");
-    }
-
-    @Test
-    public void updateState_brightnessOutOfRange_shouldSetSummaryInRange() {
-        // VR mode
-        doReturn(true).when(mController).isInVrMode();
-
-        System.putFloat(mContentResolver, System.SCREEN_BRIGHTNESS_FOR_VR_FLOAT, 1.05f);
-        mController.updateState(mPreference);
-        verify(mPreference).setSummary("100%");
-
-        System.putFloat(mContentResolver, System.SCREEN_BRIGHTNESS_FOR_VR_FLOAT, -20f);
-        mController.updateState(mPreference);
-        verify(mPreference).setSummary("0%");
     }
 
     @Test
@@ -195,13 +192,14 @@ public class BrightnessLevelPreferenceControllerTest {
         final BrightnessLevelPreferenceController controller =
                 new BrightnessLevelPreferenceController(activity, null);
         final ShadowActivity shadowActivity = shadowOf(activity);
-        when(mPreference.getKey()).thenReturn("brightness");
+
+        String preferenceKey = mContext.getString(R.string.preference_key_brightness_level);
+        when(mPreference.getKey()).thenReturn(preferenceKey);
 
         controller.handlePreferenceTreeClick(mPreference);
 
         final Intent intent = shadowActivity.getNextStartedActivity();
         assertThat(intent.getIntExtra(SettingsBaseActivity.EXTRA_PAGE_TRANSITION_TYPE, 0))
                 .isEqualTo(SettingsTransitionHelper.TransitionType.TRANSITION_NONE);
-
     }
 }

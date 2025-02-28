@@ -16,24 +16,22 @@
 
 package com.android.settings.fuelgauge;
 
-import static com.android.settings.fuelgauge.BatteryOptimizeUtils.AppUsageState.UNRESTRICTED;
-
 import android.content.Context;
-import android.util.Log;
 
 import androidx.annotation.VisibleForTesting;
 import androidx.preference.Preference;
 
 import com.android.settings.core.PreferenceControllerMixin;
 import com.android.settingslib.core.AbstractPreferenceController;
-import com.android.settingslib.widget.RadioButtonPreference;
+import com.android.settingslib.widget.SelectorWithWidgetPreference;
 
 public class UnrestrictedPreferenceController extends AbstractPreferenceController
         implements PreferenceControllerMixin {
 
     private static final String TAG = "UNRESTRICTED_PREF";
 
-    @VisibleForTesting String KEY_UNRESTRICTED_PREF = "unrestricted_pref";
+    @VisibleForTesting static final String KEY_UNRESTRICTED_PREF = "unrestricted_preference";
+
     @VisibleForTesting BatteryOptimizeUtils mBatteryOptimizeUtils;
 
     public UnrestrictedPreferenceController(Context context, int uid, String packageName) {
@@ -43,24 +41,12 @@ public class UnrestrictedPreferenceController extends AbstractPreferenceControll
 
     @Override
     public void updateState(Preference preference) {
+        preference.setEnabled(mBatteryOptimizeUtils.isSelectorPreferenceEnabled());
 
-        if (!mBatteryOptimizeUtils.isValidPackageName()) {
-            Log.d(TAG, "invalid package name, disable pref");
-            preference.setEnabled(false);
-            return;
-        } else {
-            preference.setEnabled(true);
-        }
-
-        if (mBatteryOptimizeUtils.isSystemOrDefaultApp()) {
-            Log.d(TAG, "is system or default app, unrestricted states only");
-            ((RadioButtonPreference) preference).setChecked(true);
-        } else if (mBatteryOptimizeUtils.getAppUsageState() == UNRESTRICTED) {
-            Log.d(TAG, "is unrestricted states");
-            ((RadioButtonPreference) preference).setChecked(true);
-        } else {
-            ((RadioButtonPreference) preference).setChecked(false);
-        }
+        final boolean isUnrestricted =
+                mBatteryOptimizeUtils.getAppOptimizationMode()
+                        == BatteryOptimizeUtils.MODE_UNRESTRICTED;
+        ((SelectorWithWidgetPreference) preference).setChecked(isUnrestricted);
     }
 
     @Override
@@ -75,12 +61,6 @@ public class UnrestrictedPreferenceController extends AbstractPreferenceControll
 
     @Override
     public boolean handlePreferenceTreeClick(Preference preference) {
-        if (!KEY_UNRESTRICTED_PREF.equals(preference.getKey())) {
-            return false;
-        }
-
-        mBatteryOptimizeUtils.setAppUsageState(UNRESTRICTED);
-        Log.d(TAG, "Set unrestricted");
-        return true;
+        return getPreferenceKey().equals(preference.getKey());
     }
 }

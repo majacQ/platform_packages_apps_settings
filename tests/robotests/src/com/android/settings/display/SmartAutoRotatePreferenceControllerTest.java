@@ -40,7 +40,9 @@ import com.android.settings.R;
 import com.android.settings.core.BasePreferenceController;
 import com.android.settings.testutils.FakeFeatureFactory;
 import com.android.settings.testutils.ResolveInfoBuilder;
+import com.android.settings.testutils.shadow.ShadowDeviceStateRotationLockSettingsManager;
 import com.android.settings.testutils.shadow.ShadowSensorPrivacyManager;
+import com.android.settings.testutils.shadow.ShadowSystemSettings;
 
 import org.junit.Before;
 import org.junit.Test;
@@ -53,7 +55,11 @@ import org.robolectric.RuntimeEnvironment;
 import org.robolectric.annotation.Config;
 
 @RunWith(RobolectricTestRunner.class)
-@Config(shadows = ShadowSensorPrivacyManager.class)
+@Config(shadows = {
+        ShadowSystemSettings.class,
+        ShadowSensorPrivacyManager.class,
+        ShadowDeviceStateRotationLockSettingsManager.class
+})
 public class SmartAutoRotatePreferenceControllerTest {
 
     private static final String PACKAGE_NAME = "package_name";
@@ -76,6 +82,9 @@ public class SmartAutoRotatePreferenceControllerTest {
         when(mContext.getResources()).thenReturn(mResources);
         when(mContext.getContentResolver()).thenReturn(mContentResolver);
 
+        when(mResources.getBoolean(R.bool.config_auto_rotate_face_detection_available)).thenReturn(
+                true);
+
         doReturn(PACKAGE_NAME).when(mPackageManager).getRotationResolverPackageName();
         doReturn(PackageManager.PERMISSION_GRANTED).when(mPackageManager).checkPermission(
                 Manifest.permission.CAMERA, PACKAGE_NAME);
@@ -95,6 +104,7 @@ public class SmartAutoRotatePreferenceControllerTest {
                 new SmartAutoRotatePreferenceController(mContext, "smart_auto_rotate"));
         when(mController.isCameraLocked()).thenReturn(false);
         when(mController.isPowerSaveMode()).thenReturn(false);
+        ShadowDeviceStateRotationLockSettingsManager.setDeviceStateRotationLockEnabled(false);
     }
 
     @Test
@@ -199,6 +209,16 @@ public class SmartAutoRotatePreferenceControllerTest {
                 .UNSUPPORTED_ON_DEVICE);
     }
 
+
+    @Test
+    public void getAvailabilityStatus_deviceStateRotationEnabled_returnsUnsupported() {
+        enableAutoRotationPreference();
+        ShadowDeviceStateRotationLockSettingsManager.setDeviceStateRotationLockEnabled(true);
+
+        assertThat(mController.getAvailabilityStatus()).isEqualTo(
+                BasePreferenceController.UNSUPPORTED_ON_DEVICE);
+    }
+
     @Test
     public void isSliceableCorrectKey_returnsTrue() {
         final AutoRotatePreferenceController controller =
@@ -216,15 +236,17 @@ public class SmartAutoRotatePreferenceControllerTest {
     private void enableAutoRotationPreference() {
         when(mPackageManager.hasSystemFeature(anyString())).thenReturn(true);
         when(mResources.getBoolean(anyInt())).thenReturn(true);
-        Settings.System.putInt(mContentResolver,
-                Settings.System.HIDE_ROTATION_LOCK_TOGGLE_FOR_ACCESSIBILITY, 0);
+        Settings.System.putIntForUser(mContentResolver,
+                Settings.System.HIDE_ROTATION_LOCK_TOGGLE_FOR_ACCESSIBILITY, 0,
+                UserHandle.USER_CURRENT);
     }
 
     private void disableAutoRotationPreference() {
         when(mPackageManager.hasSystemFeature(anyString())).thenReturn(true);
         when(mResources.getBoolean(anyInt())).thenReturn(true);
-        Settings.System.putInt(mContentResolver,
-                Settings.System.HIDE_ROTATION_LOCK_TOGGLE_FOR_ACCESSIBILITY, 1);
+        Settings.System.putIntForUser(mContentResolver,
+                Settings.System.HIDE_ROTATION_LOCK_TOGGLE_FOR_ACCESSIBILITY, 1,
+                UserHandle.USER_CURRENT);
     }
 
     private void enableAutoRotation() {

@@ -58,7 +58,10 @@ import org.robolectric.util.ReflectionHelpers;
 import java.util.Arrays;
 
 @RunWith(RobolectricTestRunner.class)
-@Config(shadows = ShadowSecureSettings.class)
+@Config(shadows = {
+        ShadowSecureSettings.class,
+        ShadowFragment.class,
+})
 public class DefaultAutofillPickerTest {
 
     private static final String MAIN_APP_KEY = "main.foo.bar/foo.bar.Baz";
@@ -194,7 +197,7 @@ public class DefaultAutofillPickerTest {
                 .thenReturn(Arrays.asList(mainUserHandle, managedUserHandle));
         when(mUserManager.getUserInfo(MANAGED_PROFILE_UID))
                 .thenReturn(managedUserInfo);
-        when(mUserManager.getUserHandle()).thenReturn(MAIN_PROFILE_UID);
+        when(mUserManager.getProcessUserId()).thenReturn(MAIN_PROFILE_UID);
     }
 
     private void setupCaller() {

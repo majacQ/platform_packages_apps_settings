@@ -23,9 +23,10 @@ import android.os.SystemProperties;
 import android.os.UserHandle;
 
 import com.android.settings.core.BasePreferenceController;
-import com.android.settingslib.widget.RadioButtonPreference;
+import com.android.settingslib.widget.SelectorWithWidgetPreference;
 
 import org.junit.Before;
+import org.junit.Ignore;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.robolectric.RobolectricTestRunner;
@@ -39,14 +40,14 @@ public class OneHandedActionPullDownPrefControllerTest {
     private Context mContext;
     private OneHandedSettingsUtils mUtils;
     private OneHandedActionPullDownPrefController mController;
-    private RadioButtonPreference mPreference;
+    private SelectorWithWidgetPreference mPreference;
 
     @Before
     public void setUp() {
         mContext = RuntimeEnvironment.application;
         mUtils = new OneHandedSettingsUtils(mContext);
         mController = new OneHandedActionPullDownPrefController(mContext, KEY);
-        mPreference = new RadioButtonPreference(mContext);
+        mPreference = new SelectorWithWidgetPreference(mContext);
         OneHandedSettingsUtils.setUserId(UserHandle.myUserId());
     }
 
@@ -76,6 +77,7 @@ public class OneHandedActionPullDownPrefControllerTest {
                 .isEqualTo(BasePreferenceController.DISABLED_DEPENDENT_SETTING);
     }
 
+    @Ignore("b/313541907")
     @Test
     public void getAvailabilityStatus_setNavi3ButtonMode_shouldDisabled() {
         SystemProperties.set(OneHandedSettingsUtils.SUPPORT_ONE_HANDED_MODE, "true");

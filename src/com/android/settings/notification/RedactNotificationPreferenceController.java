@@ -22,6 +22,7 @@ import static android.provider.Settings.Secure.LOCK_SCREEN_ALLOW_PRIVATE_NOTIFIC
 
 import android.app.KeyguardManager;
 import android.content.Context;
+import android.content.pm.UserInfo;
 import android.database.ContentObserver;
 import android.os.Handler;
 import android.os.Looper;
@@ -32,6 +33,7 @@ import android.provider.Settings;
 import androidx.preference.PreferenceScreen;
 
 import com.android.internal.widget.LockPatternUtils;
+import com.android.settings.R;
 import com.android.settings.core.TogglePreferenceController;
 import com.android.settings.overlay.FeatureFactory;
 import com.android.settingslib.RestrictedLockUtils;
@@ -40,6 +42,8 @@ import com.android.settingslib.RestrictedSwitchPreference;
 import com.android.settingslib.core.lifecycle.LifecycleObserver;
 import com.android.settingslib.core.lifecycle.events.OnStart;
 import com.android.settingslib.core.lifecycle.events.OnStop;
+
+import java.util.List;
 
 /**
  * The controller of the sensitive notifications.
@@ -73,11 +77,13 @@ public class RedactNotificationPreferenceController extends TogglePreferenceCont
         mKm = context.getSystemService(KeyguardManager.class);
 
         mProfileUserId = UserHandle.myUserId();
-        final int[] profileIds = mUm.getProfileIdsWithDisabled(UserHandle.myUserId());
-
-        for (int profileId : profileIds) {
-            if (profileId != UserHandle.myUserId()) {
-                mProfileUserId = profileId;
+        final List<UserInfo> profiles = mUm.getProfiles(UserHandle.myUserId());
+        final int count = profiles.size();
+        for (int i = 0; i < count; i++) {
+            final UserInfo profile = profiles.get(i);
+            if (profile.isManagedProfile()
+                    && profile.getUserHandle().getIdentifier() !=  UserHandle.myUserId()) {
+                mProfileUserId = profile.getUserHandle().getIdentifier();
             }
         }
     }
@@ -124,7 +130,7 @@ public class RedactNotificationPreferenceController extends TogglePreferenceCont
                 ? UserHandle.myUserId() : mProfileUserId;
 
         // hide if lockscreen isn't secure for this user
-        final LockPatternUtils utils = FeatureFactory.getFactory(mContext)
+        final LockPatternUtils utils = FeatureFactory.getFeatureFactory()
                 .getSecurityFeatureProvider()
                 .getLockPatternUtils(mContext);
         if (!utils.isSecure(userId)) {
@@ -144,6 +150,11 @@ public class RedactNotificationPreferenceController extends TogglePreferenceCont
         }
 
         return AVAILABLE;
+    }
+
+    @Override
+    public int getSliceHighlightMenuRes() {
+        return R.string.menu_key_notifications;
     }
 
     @Override
@@ -172,7 +183,8 @@ public class RedactNotificationPreferenceController extends TogglePreferenceCont
 
     private boolean getAllowPrivateNotifications(int userId) {
         return Settings.Secure.getIntForUser(mContext.getContentResolver(),
-                LOCK_SCREEN_ALLOW_PRIVATE_NOTIFICATIONS, 1, userId) != 0;
+                LOCK_SCREEN_ALLOW_PRIVATE_NOTIFICATIONS, 1, userId) != 0
+                && getEnforcedAdmin(userId) == null;
     }
 
     private boolean getLockscreenNotificationsEnabled(int userId) {

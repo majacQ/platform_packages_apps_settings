@@ -20,6 +20,7 @@ import android.content.Context;
 import android.net.Uri;
 import android.util.Log;
 
+import androidx.annotation.Nullable;
 import androidx.annotation.VisibleForTesting;
 import androidx.lifecycle.LiveData;
 import androidx.lifecycle.Observer;
@@ -61,32 +62,50 @@ public class SlicePreferenceController extends BasePreferenceController implemen
         return mUri != null ? AVAILABLE : UNSUPPORTED_ON_DEVICE;
     }
 
-    public void setSliceUri(Uri uri) {
+    /** Sets Slice uri for the preference. */
+    public void setSliceUri(@Nullable Uri uri) {
         mUri = uri;
         mLiveData = SliceLiveData.fromUri(mContext, mUri, (int type, Throwable source) -> {
             Log.w(TAG, "Slice may be null. uri = " + uri + ", error = " + type);
         });
 
         //TODO(b/120803703): figure out why we need to remove observer first
-        mLiveData.removeObserver(this);
+        removeLiveDataObserver();
     }
 
     @Override
     public void onStart() {
-        if (mLiveData != null) {
+        if (mLiveData == null) {
+            return;
+        }
+
+        try {
             mLiveData.observeForever(this);
+        } catch (SecurityException e) {
+            Log.w(TAG, "observeForever - no permission");
         }
     }
 
     @Override
     public void onStop() {
-        if (mLiveData != null) {
-            mLiveData.removeObserver(this);
-        }
+        removeLiveDataObserver();
     }
 
     @Override
     public void onChanged(Slice slice) {
         mSlicePreference.onSliceUpdated(slice);
+        Log.w(TAG, "Slice UI updated, uri: " + mUri + ", slice content: " + slice);
+    }
+
+    private void removeLiveDataObserver() {
+        if (mLiveData == null) {
+            return;
+        }
+
+        try {
+            mLiveData.removeObserver(this);
+        } catch (SecurityException e) {
+            Log.w(TAG, "removeLiveDataObserver - no permission");
+        }
     }
 }

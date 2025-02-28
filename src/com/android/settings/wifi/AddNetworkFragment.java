@@ -16,17 +16,25 @@
 
 package com.android.settings.wifi;
 
+import static android.os.UserManager.DISALLOW_ADD_WIFI_CONFIG;
+
 import android.app.Activity;
 import android.app.settings.SettingsEnums;
+import android.content.Context;
 import android.content.Intent;
 import android.net.wifi.WifiConfiguration;
+import android.net.wifi.WifiManager;
 import android.os.Bundle;
+import android.os.UserManager;
+import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.WindowManager;
 import android.widget.Button;
 import android.widget.ImageButton;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import androidx.annotation.VisibleForTesting;
 
@@ -40,6 +48,7 @@ import com.android.settings.wifi.dpp.WifiDppUtils;
  */
 public class AddNetworkFragment extends InstrumentedFragment implements WifiConfigUiBase2,
         View.OnClickListener {
+    private static final String TAG = "AddNetworkFragment";
 
     public static final String WIFI_CONFIG_KEY = "wifi_config_key";
     @VisibleForTesting
@@ -50,6 +59,8 @@ public class AddNetworkFragment extends InstrumentedFragment implements WifiConf
 
     private static final int REQUEST_CODE_WIFI_DPP_ENROLLEE_QR_CODE_SCANNER = 0;
 
+    private static final String EXTRA_SAVE_WHEN_SUBMIT = ":settings:save_when_submit";
+
     private WifiConfigController2 mUIController;
     private Button mSubmitBtn;
     private Button mCancelBtn;
@@ -57,6 +68,10 @@ public class AddNetworkFragment extends InstrumentedFragment implements WifiConf
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        if (!isAddWifiConfigAllowed(getContext())) {
+            getActivity().finish();
+            return;
+        }
     }
 
     @Override
@@ -81,6 +96,10 @@ public class AddNetworkFragment extends InstrumentedFragment implements WifiConf
         mCancelBtn.setOnClickListener(this);
         ssidScannerButton.setOnClickListener(this);
         mUIController = new WifiConfigController2(this, rootView, null, getMode());
+
+        // Resize the layout when keyboard opens.
+        getActivity().getWindow().setSoftInputMode(
+                WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
 
         return rootView;
     }
@@ -109,7 +128,8 @@ public class AddNetworkFragment extends InstrumentedFragment implements WifiConf
             final String ssid = ssidEditText.getText().toString();
 
             // Launch QR code scanner to join a network.
-            startActivityForResult(WifiDppUtils.getEnrolleeQrCodeScannerIntent(ssid),
+            startActivityForResult(
+                    WifiDppUtils.getEnrolleeQrCodeScannerIntent(view.getContext(), ssid),
                     REQUEST_CODE_WIFI_DPP_ENROLLEE_QR_CODE_SCANNER);
         }
     }
@@ -190,11 +210,35 @@ public class AddNetworkFragment extends InstrumentedFragment implements WifiConf
     }
 
     private void successfullyFinish(WifiConfiguration config) {
-        final Intent intent = new Intent();
-        final Activity activity = getActivity();
-        intent.putExtra(WIFI_CONFIG_KEY, config);
-        activity.setResult(Activity.RESULT_OK, intent);
-        activity.finish();
+        Activity activity = getActivity();
+        boolean autoSave = activity.getIntent().getBooleanExtra(EXTRA_SAVE_WHEN_SUBMIT, false);
+        if (autoSave && config != null) {
+            WifiManager.ActionListener saveListener = new WifiManager.ActionListener() {
+                @Override
+                public void onSuccess() {
+                    if (activity != null && !activity.isFinishing()) {
+                        activity.setResult(Activity.RESULT_OK);
+                        activity.finish();
+                    }
+                }
+
+                @Override
+                public void onFailure(int reason) {
+                    if (activity != null && !activity.isFinishing()) {
+                        Toast.makeText(activity, R.string.wifi_failed_save_message,
+                                Toast.LENGTH_SHORT).show();
+                        activity.finish();
+                    }
+                }
+            };
+
+            activity.getSystemService(WifiManager.class).save(config, saveListener);
+        } else {
+            Intent intent = new Intent();
+            intent.putExtra(WIFI_CONFIG_KEY, config);
+            activity.setResult(Activity.RESULT_OK, intent);
+            activity.finish();
+        }
     }
 
     @VisibleForTesting
@@ -202,5 +246,15 @@ public class AddNetworkFragment extends InstrumentedFragment implements WifiConf
         final Activity activity = getActivity();
         activity.setResult(Activity.RESULT_CANCELED);
         activity.finish();
+    }
+
+    @VisibleForTesting
+    static boolean isAddWifiConfigAllowed(Context context) {
+        UserManager userManager = context.getSystemService(UserManager.class);
+        if (userManager != null && userManager.hasUserRestriction(DISALLOW_ADD_WIFI_CONFIG)) {
+            Log.e(TAG, "The user is not allowed to add Wi-Fi configuration.");
+            return false;
+        }
+        return true;
     }
 }

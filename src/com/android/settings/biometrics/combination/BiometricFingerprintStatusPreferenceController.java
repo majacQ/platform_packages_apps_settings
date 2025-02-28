@@ -15,12 +15,17 @@
  */
 package com.android.settings.biometrics.combination;
 
+import android.app.admin.DevicePolicyManager;
 import android.content.Context;
 
 import androidx.lifecycle.Lifecycle;
+import androidx.preference.Preference;
 
 import com.android.settings.Utils;
 import com.android.settings.biometrics.fingerprint.FingerprintStatusPreferenceController;
+import com.android.settingslib.RestrictedLockUtils;
+import com.android.settingslib.RestrictedLockUtilsInternal;
+import com.android.settingslib.RestrictedPreference;
 
 /**
  * Preference controller for fingerprint settings within the biometrics settings page of work
@@ -30,7 +35,7 @@ public class BiometricFingerprintStatusPreferenceController extends
         FingerprintStatusPreferenceController {
 
     public BiometricFingerprintStatusPreferenceController(Context context, String key) {
-        super(context, key);
+        super(context, key, null /* lifecycle */);
     }
 
     public BiometricFingerprintStatusPreferenceController(
@@ -39,8 +44,26 @@ public class BiometricFingerprintStatusPreferenceController extends
     }
 
     @Override
+    public void updateState(Preference preference) {
+        super.updateState(preference);
+        final boolean isFingerprintEnrolled = mFingerprintStatusUtils.hasEnrolled();
+        final RestrictedLockUtils.EnforcedAdmin admin =
+                RestrictedLockUtilsInternal.checkIfKeyguardFeaturesDisabled(
+                        mContext, DevicePolicyManager.KEYGUARD_DISABLE_FINGERPRINT, getUserId());
+        if (admin != null && !isFingerprintEnrolled) {
+            ((RestrictedPreference) preference).setDisabledByAdmin(admin);
+        } else {
+            preference.setEnabled(true);
+        }
+    }
+
+    @Override
     protected boolean isDeviceSupported() {
-        return Utils.isMultipleBiometricsSupported(mContext)
-                && Utils.hasFingerprintHardware(mContext);
+        return Utils.isMultipleBiometricsSupported(mContext) && isHardwareSupported();
+    }
+
+    @Override
+    protected boolean isHardwareSupported() {
+        return Utils.hasFingerprintHardware(mContext);
     }
 }

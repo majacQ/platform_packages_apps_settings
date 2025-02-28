@@ -24,13 +24,14 @@ import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.os.AsyncTask;
 
+import androidx.annotation.NonNull;
 import androidx.annotation.VisibleForTesting;
 import androidx.preference.Preference;
 import androidx.preference.PreferenceFragmentCompat;
-import androidx.preference.SwitchPreference;
 
 import com.android.settings.core.BasePreferenceController;
 import com.android.settings.overlay.FeatureFactory;
+import com.android.settingslib.RestrictedSwitchPreference;
 
 public class ApprovalPreferenceController extends BasePreferenceController {
 
@@ -41,6 +42,8 @@ public class ApprovalPreferenceController extends BasePreferenceController {
     private PreferenceFragmentCompat mParent;
     private NotificationManager mNm;
     private PackageManager mPm;
+    // The appOp representing this preference
+    private String mSettingIdentifier;
 
     public ApprovalPreferenceController(Context context, String key) {
         super(context, key);
@@ -71,6 +74,15 @@ public class ApprovalPreferenceController extends BasePreferenceController {
         return this;
     }
 
+    /**
+     * Set the associated appOp for the Setting
+     */
+    @NonNull
+    public ApprovalPreferenceController setSettingIdentifier(@NonNull String settingIdentifier) {
+        mSettingIdentifier = settingIdentifier;
+        return this;
+    }
+
     @Override
     public int getAvailabilityStatus() {
         return AVAILABLE;
@@ -78,9 +90,13 @@ public class ApprovalPreferenceController extends BasePreferenceController {
 
     @Override
     public void updateState(Preference pref) {
-        final SwitchPreference preference = (SwitchPreference) pref;
+        final RestrictedSwitchPreference preference =
+                (RestrictedSwitchPreference) pref;
         final CharSequence label = mPkgInfo.applicationInfo.loadLabel(mPm);
-        preference.setChecked(isServiceEnabled(mCn));
+        final boolean isAllowedCn = mCn.flattenToShortString().length()
+                <= NotificationManager.MAX_SERVICE_COMPONENT_NAME_LENGTH;
+        final boolean isEnabled = isServiceEnabled(mCn);
+        preference.setChecked(isEnabled);
         preference.setOnPreferenceChangeListener((p, newValue) -> {
             final boolean access = (Boolean) newValue;
             if (!access) {
@@ -103,17 +119,34 @@ public class ApprovalPreferenceController extends BasePreferenceController {
                 return false;
             }
         });
+
+        if (android.permission.flags.Flags.enhancedConfirmationModeApisEnabled()
+                && android.security.Flags.extendEcmToAllSettings()) {
+            if (!isAllowedCn && !isEnabled) {
+                preference.setEnabled(false);
+            } else if (isEnabled) {
+                preference.setEnabled(true);
+            } else {
+                preference.checkEcmRestrictionAndSetDisabled(mSettingIdentifier,
+                        mCn.getPackageName());
+            }
+        } else {
+            preference.updateState(
+                    mCn.getPackageName(), mPkgInfo.applicationInfo.uid, isAllowedCn, isEnabled);
+        }
     }
 
     public void disable(final ComponentName cn) {
         logSpecialPermissionChange(true, cn.getPackageName());
         mNm.setNotificationListenerAccessGranted(cn, false);
-        AsyncTask.execute(() -> {
-            if (!mNm.isNotificationPolicyAccessGrantedForPackage(
-                    cn.getPackageName())) {
+        if (!mNm.isNotificationPolicyAccessGrantedForPackage(
+                cn.getPackageName())) {
+            if (android.app.Flags.modesApi()) {
+                mNm.removeAutomaticZenRules(cn.getPackageName(), /* fromUser= */ true);
+            } else {
                 mNm.removeAutomaticZenRules(cn.getPackageName());
             }
-        });
+        }
     }
 
     protected void enable(ComponentName cn) {
@@ -129,7 +162,7 @@ public class ApprovalPreferenceController extends BasePreferenceController {
     void logSpecialPermissionChange(boolean enable, String packageName) {
         final int logCategory = enable ? SettingsEnums.APP_SPECIAL_PERMISSION_NOTIVIEW_ALLOW
                 : SettingsEnums.APP_SPECIAL_PERMISSION_NOTIVIEW_DENY;
-        FeatureFactory.getFactory(mContext).getMetricsFeatureProvider().action(mContext,
+        FeatureFactory.getFeatureFactory().getMetricsFeatureProvider().action(mContext,
                 logCategory, packageName);
     }
 }

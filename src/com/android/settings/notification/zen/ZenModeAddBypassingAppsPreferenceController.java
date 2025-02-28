@@ -19,6 +19,7 @@ package com.android.settings.notification.zen;
 import android.app.Application;
 import android.app.settings.SettingsEnums;
 import android.content.Context;
+import android.graphics.drawable.Drawable;
 import android.os.Bundle;
 import android.os.UserHandle;
 
@@ -35,8 +36,10 @@ import com.android.settings.core.PreferenceControllerMixin;
 import com.android.settings.core.SubSettingLauncher;
 import com.android.settings.notification.NotificationBackend;
 import com.android.settings.notification.app.AppChannelsBypassingDndSettings;
+import com.android.settingslib.applications.AppUtils;
 import com.android.settingslib.applications.ApplicationsState;
 import com.android.settingslib.core.AbstractPreferenceController;
+import com.android.settingslib.utils.ThreadUtils;
 import com.android.settingslib.widget.AppPreference;
 
 import java.util.ArrayList;
@@ -50,6 +53,7 @@ import java.util.List;
 public class ZenModeAddBypassingAppsPreferenceController extends AbstractPreferenceController
         implements PreferenceControllerMixin {
 
+    public static final String KEY_NO_APPS = "add_none";
     private static final String KEY = "zen_mode_non_bypassing_apps_list";
     private static final String KEY_ADD = "zen_mode_bypassing_apps_add";
     private final NotificationBackend mNotificationBackend;
@@ -114,10 +118,29 @@ public class ZenModeAddBypassingAppsPreferenceController extends AbstractPrefere
             return;
         }
 
-        ApplicationsState.AppFilter filter = ApplicationsState.FILTER_ALL_ENABLED;
-        List<ApplicationsState.AppEntry> apps = mAppSession.rebuild(filter,
-                ApplicationsState.ALPHA_COMPARATOR);
-        updateAppList(apps);
+        ApplicationsState.AppFilter filter = android.multiuser.Flags.enablePrivateSpaceFeatures()
+                && android.multiuser.Flags.handleInterleavedSettingsForPrivateSpace()
+                ? ApplicationsState.FILTER_ENABLED_NOT_QUIET
+                : ApplicationsState.FILTER_ALL_ENABLED;
+        mAppSession.rebuild(filter, ApplicationsState.ALPHA_COMPARATOR);
+    }
+
+    // Set the icon for the given preference to the entry icon from cache if available, or look
+    // it up.
+    private void updateIcon(Preference pref, ApplicationsState.AppEntry entry) {
+        synchronized (entry) {
+            final Drawable cachedIcon = AppUtils.getIconFromCache(entry);
+            if (cachedIcon != null && entry.mounted) {
+                pref.setIcon(cachedIcon);
+            } else {
+                ThreadUtils.postOnBackgroundThread(() -> {
+                    final Drawable icon = AppUtils.getIcon(mPrefContext, entry);
+                    if (icon != null) {
+                        ThreadUtils.postOnMainThread(() -> pref.setIcon(icon));
+                    }
+                });
+            }
+        }
     }
 
     @VisibleForTesting
@@ -132,58 +155,63 @@ public class ZenModeAddBypassingAppsPreferenceController extends AbstractPrefere
             mPreferenceScreen.addPreference(mPreferenceCategory);
         }
 
-        List<Preference> appsWithNoBypassingDndNotificationChannels = new ArrayList<>();
-        for (ApplicationsState.AppEntry entry : apps) {
-            String pkg = entry.info.packageName;
-            mApplicationsState.ensureIcon(entry);
-            final int appChannels = mNotificationBackend.getChannelCount(pkg, entry.info.uid);
+        boolean doAnyAppsPassCriteria = false;
+        for (ApplicationsState.AppEntry app : apps) {
+            String pkg = app.info.packageName;
+            final String key = getKey(pkg, app.info.uid);
+            final int appChannels = mNotificationBackend.getChannelCount(pkg, app.info.uid);
             final int appChannelsBypassingDnd = mNotificationBackend
-                    .getNotificationChannelsBypassingDnd(pkg, entry.info.uid).getList().size();
+                    .getNotificationChannelsBypassingDnd(pkg, app.info.uid).getList().size();
             if (appChannelsBypassingDnd == 0 && appChannels > 0) {
-                final String key = ZenModeAllBypassingAppsPreferenceController.getKey(pkg);
-                Preference pref = mPreferenceCategory.findPreference("");
-                if (pref == null) {
+                doAnyAppsPassCriteria = true;
+            }
+
+            Preference pref = mPreferenceCategory.findPreference(key);
+
+            if (pref == null) {
+                if (appChannelsBypassingDnd == 0 && appChannels > 0) {
+                    // does not exist but should
                     pref = new AppPreference(mPrefContext);
                     pref.setKey(key);
                     pref.setOnPreferenceClickListener(preference -> {
                         Bundle args = new Bundle();
-                        args.putString(AppInfoBase.ARG_PACKAGE_NAME, entry.info.packageName);
-                        args.putInt(AppInfoBase.ARG_PACKAGE_UID, entry.info.uid);
+                        args.putString(AppInfoBase.ARG_PACKAGE_NAME, app.info.packageName);
+                        args.putInt(AppInfoBase.ARG_PACKAGE_UID, app.info.uid);
                         new SubSettingLauncher(mContext)
                                 .setDestination(AppChannelsBypassingDndSettings.class.getName())
                                 .setArguments(args)
                                 .setResultListener(mHostFragment, 0)
-                                .setUserHandle(new UserHandle(UserHandle.getUserId(entry.info.uid)))
+                                .setUserHandle(new UserHandle(UserHandle.getUserId(app.info.uid)))
                                 .setSourceMetricsCategory(
                                         SettingsEnums.NOTIFICATION_ZEN_MODE_OVERRIDING_APP)
                                 .launch();
                         return true;
                     });
+                    pref.setTitle(BidiFormatter.getInstance().unicodeWrap(app.label));
+                    updateIcon(pref, app);
+                    mPreferenceCategory.addPreference(pref);
                 }
-                pref.setTitle(BidiFormatter.getInstance().unicodeWrap(entry.label));
-                pref.setIcon(entry.icon);
-                appsWithNoBypassingDndNotificationChannels.add(pref);
+            } else if (appChannelsBypassingDnd != 0 || appChannels == 0) {
+                // exists but shouldn't anymore
+                mPreferenceCategory.removePreference(pref);
             }
         }
 
-        if (appsWithNoBypassingDndNotificationChannels.size() == 0) {
-            Preference pref = mPreferenceCategory.findPreference(
-                    ZenModeAllBypassingAppsPreferenceController.KEY_NO_APPS);
+        Preference pref = mPreferenceCategory.findPreference(KEY_NO_APPS);
+        if (!doAnyAppsPassCriteria) {
             if (pref == null) {
                 pref = new Preference(mPrefContext);
-                pref.setKey(ZenModeAllBypassingAppsPreferenceController.KEY_NO_APPS);
-                pref.setTitle(R.string.zen_mode_bypassing_apps_subtext_none);
+                pref.setKey(KEY_NO_APPS);
+                pref.setTitle(R.string.zen_mode_bypassing_apps_none);
             }
             mPreferenceCategory.addPreference(pref);
+        } else if (pref != null) {
+            mPreferenceCategory.removePreference(pref);
         }
+    }
 
-        if (ZenModeAllBypassingAppsPreferenceController.hasAppListChanged(
-                appsWithNoBypassingDndNotificationChannels, mPreferenceCategory)) {
-            mPreferenceCategory.removeAll();
-            for (Preference prefToAdd : appsWithNoBypassingDndNotificationChannels) {
-                mPreferenceCategory.addPreference(prefToAdd);
-            }
-        }
+    static String getKey(String pkg, int uid) {
+        return "add|" + pkg + "|" + uid;
     }
 
     private final ApplicationsState.Callbacks mAppSessionCallbacks =
@@ -191,12 +219,12 @@ public class ZenModeAddBypassingAppsPreferenceController extends AbstractPrefere
 
                 @Override
                 public void onRunningStateChanged(boolean running) {
-                    updateAppList();
+
                 }
 
                 @Override
                 public void onPackageListChanged() {
-                    updateAppList();
+
                 }
 
                 @Override
@@ -211,7 +239,7 @@ public class ZenModeAddBypassingAppsPreferenceController extends AbstractPrefere
 
                 @Override
                 public void onPackageSizeChanged(String packageName) {
-                    updateAppList();
+
                 }
 
                 @Override
@@ -219,7 +247,7 @@ public class ZenModeAddBypassingAppsPreferenceController extends AbstractPrefere
 
                 @Override
                 public void onLauncherInfoChanged() {
-                    updateAppList();
+
                 }
 
                 @Override

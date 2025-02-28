@@ -29,6 +29,7 @@ import android.telephony.TelephonyManager;
 import android.text.TextUtils;
 import android.util.Log;
 
+import androidx.annotation.NonNull;
 import androidx.annotation.VisibleForTesting;
 
 import com.android.internal.telephony.TelephonyIntents;
@@ -173,7 +174,8 @@ public abstract class ActiveSubscriptionsListener
      */
     public SubscriptionManager getSubscriptionManager() {
         if (mSubscriptionManager == null) {
-            mSubscriptionManager = mContext.getSystemService(SubscriptionManager.class);
+            mSubscriptionManager = mContext.getSystemService(SubscriptionManager.class)
+                    .createForAllUserProfiles();
         }
         return mSubscriptionManager;
     }
@@ -278,6 +280,15 @@ public abstract class ActiveSubscriptionsListener
     }
 
     /**
+     * Gets a list of active, visible subscription Id(s) of the currently active SIM(s).
+     *
+     * @return the list of subId's that are active and visible; the length may be 0.
+     */
+    public @NonNull int[] getActiveSubscriptionIdList() {
+        return getSubscriptionManager().getActiveSubscriptionIdList();
+    }
+
+    /**
      * Clear data cached within listener
      */
     public void clearCache() {
@@ -302,7 +313,8 @@ public abstract class ActiveSubscriptionsListener
                 mSubscriptionChangeReceiver = getSubscriptionChangeReceiver();
             }
             mContext.registerReceiver(mSubscriptionChangeReceiver,
-                    mSubscriptionChangeIntentFilter, null, new Handler(mLooper));
+                    mSubscriptionChangeIntentFilter, null, new Handler(mLooper),
+                    Context.RECEIVER_EXPORTED_UNAUDITED);
             registerForSubscriptionsChange();
             mCacheState.compareAndSet(STATE_PREPARING, STATE_LISTENING);
             return;

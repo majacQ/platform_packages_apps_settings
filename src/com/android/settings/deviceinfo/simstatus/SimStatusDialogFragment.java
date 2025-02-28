@@ -20,16 +20,23 @@ import android.app.Dialog;
 import android.app.settings.SettingsEnums;
 import android.os.Bundle;
 import android.text.TextUtils;
+import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
+import android.view.WindowManager;
 import android.widget.TextView;
 
+import androidx.annotation.Nullable;
 import androidx.appcompat.app.AlertDialog;
 import androidx.fragment.app.Fragment;
 import androidx.fragment.app.FragmentManager;
 
 import com.android.settings.R;
 import com.android.settings.core.instrumentation.InstrumentedDialogFragment;
+import com.android.settings.deviceinfo.PhoneNumberUtil;
+
+import java.util.Arrays;
+import java.util.stream.IntStream;
 
 public class SimStatusDialogFragment extends InstrumentedDialogFragment {
 
@@ -71,13 +78,25 @@ public class SimStatusDialogFragment extends InstrumentedDialogFragment {
         mRootView = LayoutInflater.from(builder.getContext())
                 .inflate(R.layout.dialog_sim_status, null /* parent */);
         mController.initialize();
-        return builder.setView(mRootView).create();
+
+        Dialog dlg = builder.setView(mRootView).create();
+        dlg.getWindow().setFlags(WindowManager.LayoutParams.FLAG_SECURE,
+                WindowManager.LayoutParams.FLAG_SECURE);
+
+        return dlg;
     }
 
     @Override
     public void onDestroy() {
         mController.deinitialize();
         super.onDestroy();
+    }
+
+    public void setSettingVisibility(int viewId, boolean isVisible) {
+        final View view = mRootView.findViewById(viewId);
+        if (view != null) {
+            view.setVisibility(isVisible ? View.VISIBLE : View.GONE);
+        }
     }
 
     public void removeSettingFromScreen(int viewId) {
@@ -87,13 +106,29 @@ public class SimStatusDialogFragment extends InstrumentedDialogFragment {
         }
     }
 
-    public void setText(int viewId, CharSequence text) {
+    /**
+     * View ID(s) which is digit format (instead of decimal number) text.
+     **/
+    private static final int[] sViewIdsInDigitFormat = IntStream
+            .of(SimStatusDialogController.ICCID_INFO_VALUE_ID,
+                    SimStatusDialogController.PHONE_NUMBER_VALUE_ID)
+            .sorted().toArray();
+
+    public void setText(int viewId, @Nullable CharSequence text) {
+        if (!isAdded()) {
+            Log.d(TAG, "Fragment not attached yet.");
+            return;
+        }
+
         final TextView textView = mRootView.findViewById(viewId);
+        if (textView == null) {
+            return;
+        }
         if (TextUtils.isEmpty(text)) {
             text = getResources().getString(R.string.device_info_default);
+        } else if (Arrays.binarySearch(sViewIdsInDigitFormat, viewId) >= 0) {
+            text = PhoneNumberUtil.expandByTts(text);
         }
-        if (textView != null) {
-            textView.setText(text);
-        }
+        textView.setText(text);
     }
 }

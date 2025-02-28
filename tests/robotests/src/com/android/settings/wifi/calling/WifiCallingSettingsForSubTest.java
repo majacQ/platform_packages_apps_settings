@@ -16,17 +16,17 @@
 
 package com.android.settings.wifi.calling;
 
-import static junit.framework.Assert.assertEquals;
-
 import static com.android.settings.SettingsActivity.EXTRA_SHOW_FRAGMENT;
 
 import static com.google.common.truth.Truth.assertThat;
 
-import static org.mockito.Matchers.any;
-import static org.mockito.Matchers.anyInt;
-import static org.mockito.Matchers.eq;
+import static junit.framework.Assert.assertEquals;
+
+import static org.mockito.Mockito.any;
+import static org.mockito.Mockito.anyInt;
 import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.spy;
@@ -40,23 +40,34 @@ import android.content.Context;
 import android.content.Intent;
 import android.os.Bundle;
 import android.os.PersistableBundle;
+import android.platform.test.flag.junit.SetFlagsRule;
 import android.telephony.CarrierConfigManager;
+import android.telephony.NetworkRegistrationInfo;
+import android.telephony.ServiceState;
 import android.telephony.TelephonyManager;
 import android.telephony.ims.ImsMmTelManager;
 import android.view.View;
-import android.widget.TextView;
 
+import androidx.annotation.NonNull;
+import androidx.lifecycle.LifecycleOwner;
 import androidx.preference.Preference;
 import androidx.preference.PreferenceScreen;
 
+import com.android.internal.telephony.flags.Flags;
 import com.android.settings.R;
 import com.android.settings.SettingsActivity;
 import com.android.settings.network.ims.MockWifiCallingQueryImsState;
 import com.android.settings.network.ims.WifiCallingQueryImsState;
+import com.android.settings.network.telephony.wificalling.IWifiCallingRepository;
 import com.android.settings.testutils.shadow.ShadowFragment;
 import com.android.settings.widget.SettingsMainSwitchBar;
+import com.android.settings.widget.SettingsMainSwitchPreference;
+
+import kotlin.Unit;
+import kotlin.jvm.functions.Function1;
 
 import org.junit.Before;
+import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.mockito.ArgumentCaptor;
@@ -70,8 +81,10 @@ import org.robolectric.util.ReflectionHelpers;
 @Config(shadows = ShadowFragment.class)
 @RunWith(RobolectricTestRunner.class)
 public class WifiCallingSettingsForSubTest {
+    @Rule public final SetFlagsRule mSetFlagsRule = new SetFlagsRule();
     private static final int SUB_ID = 2;
 
+    private static final String SWITCH_BAR = "wifi_calling_switch_bar";
     private static final String BUTTON_WFC_MODE = "wifi_calling_mode";
     private static final String BUTTON_WFC_ROAMING_MODE = "wifi_calling_roaming_mode";
     private static final String PREFERENCE_NO_OPTIONS_DESC = "no_options_description";
@@ -100,6 +113,8 @@ public class WifiCallingSettingsForSubTest {
     @Mock
     private View mView;
     @Mock
+    private SettingsMainSwitchPreference mSwitchBarPreference;
+    @Mock
     private LinkifyDescriptionPreference mDescriptionView;
     @Mock
     private ListWithEntrySummaryPreference mButtonWfcMode;
@@ -116,6 +131,7 @@ public class WifiCallingSettingsForSubTest {
         doReturn(mContext.getTheme()).when(mActivity).getTheme();
 
         mFragment = spy(new TestFragment());
+        mFragment.setSwitchBar(mSwitchBarPreference);
         doReturn(mActivity).when(mFragment).getActivity();
         doReturn(mContext).when(mFragment).getContext();
         doReturn(mock(Intent.class)).when(mActivity).getIntent();
@@ -125,10 +141,6 @@ public class WifiCallingSettingsForSubTest {
         final Bundle bundle = new Bundle();
         when(mFragment.getArguments()).thenReturn(bundle);
         doNothing().when(mFragment).addPreferencesFromResource(anyInt());
-        doReturn(mock(ListWithEntrySummaryPreference.class)).when(mFragment).findPreference(any());
-        doReturn(mButtonWfcMode).when(mFragment).findPreference(BUTTON_WFC_MODE);
-        doReturn(mButtonWfcRoamingMode).when(mFragment).findPreference(BUTTON_WFC_ROAMING_MODE);
-        doReturn(mDescriptionView).when(mFragment).findPreference(PREFERENCE_NO_OPTIONS_DESC);
         doNothing().when(mFragment).finish();
         doReturn(mView).when(mFragment).getView();
 
@@ -158,6 +170,7 @@ public class WifiCallingSettingsForSubTest {
         mFragment.onAttach(mContext);
         mFragment.onCreate(null);
         mFragment.onActivityCreated(null);
+        mSetFlagsRule.disableFlags(Flags.FLAG_CARRIER_ENABLED_SATELLITE_FLAG);
     }
 
     private void setDefaultCarrierConfigValues() {
@@ -176,33 +189,22 @@ public class WifiCallingSettingsForSubTest {
     }
 
     @Test
-    public void onResume_provisioningAllowed_shouldNotFinish() {
-        // Call onResume while provisioning is allowed.
-        mFragment.onResume();
+    public void onViewCreated_provisioningAllowed_shouldNotFinish() {
+        // Call onViewCreated while provisioning is allowed.
+        mFragment.onViewCreated(mView, null);
 
         // Verify that finish() is not called.
         verify(mFragment, never()).finish();
     }
 
     @Test
-    public void onResume_provisioningDisallowed_shouldFinish() {
-        // Call onResume while provisioning is disallowed.
-        mQueryImsState.setIsProvisionedOnDevice(false);
-        mFragment.onResume();
+    public void onViewCreated_provisioningDisallowed_shouldFinish() {
+        // Call onViewCreated while provisioning is disallowed.
+        mFragment.mIsWifiCallingReady = false;
+        mFragment.onViewCreated(mView, null);
 
         // Verify that finish() is called
         verify(mFragment).finish();
-    }
-
-    @Test
-    public void onResumeOnPause_provisioningCallbackRegistration() throws Exception {
-        // Verify that provisioning callback is registered after call to onResume().
-        mFragment.onResume();
-        verify(mFragment).registerProvisioningChangedCallback();
-
-        // Verify that provisioning callback is unregistered after call to onPause.
-        mFragment.onPause();
-        verify(mFragment).unregisterProvisioningChangedCallback();
     }
 
     @Test
@@ -238,6 +240,31 @@ public class WifiCallingSettingsForSubTest {
 
         // Check that WFC roaming preference is hidden.
         verify(mButtonWfcRoamingMode, times(1)).setVisible(false);
+    }
+
+    @Test
+    public void onResume_overrideWfcRoamingModeWhileUsingNTN_shouldDisableWfcRoaming() {
+        mSetFlagsRule.enableFlags(Flags.FLAG_CARRIER_ENABLED_SATELLITE_FLAG);
+        mBundle.putBoolean(
+                CarrierConfigManager.KEY_USE_WFC_HOME_NETWORK_MODE_IN_ROAMING_NETWORK_BOOL, false);
+        mBundle.putBoolean(CarrierConfigManager.KEY_EDITABLE_WFC_ROAMING_MODE_BOOL, true);
+        mBundle.putBoolean(
+                CarrierConfigManager.KEY_OVERRIDE_WFC_ROAMING_MODE_WHILE_USING_NTN_BOOL, true);
+
+        // Phone connected to non-terrestrial network
+        NetworkRegistrationInfo nri = new NetworkRegistrationInfo.Builder()
+                .setIsNonTerrestrialNetwork(true)
+                .build();
+        ServiceState ss = new ServiceState();
+        ss.addNetworkRegistrationInfo(nri);
+        doReturn(ss).when(mTelephonyManager).getServiceState();
+
+        // Call onResume to update the WFC roaming preference.
+        mFragment.onResume();
+
+        // Check that WFC roaming preference is visible but disabled
+        verify(mButtonWfcRoamingMode, times(1)).setEnabled(false);
+        verify(mButtonWfcRoamingMode, times(1)).setVisible(true);
     }
 
     @Test
@@ -292,7 +319,7 @@ public class WifiCallingSettingsForSubTest {
     public void onSwitchChanged_enableSetting_shouldLaunchWfcDisclaimerFragment() {
         final ArgumentCaptor<Intent> intentCaptor = ArgumentCaptor.forClass(Intent.class);
 
-        mFragment.onSwitchChanged(null, true);
+        mFragment.onCheckedChanged(null, true);
 
         // Check the WFC disclaimer fragment is launched.
         verify(mFragment).startActivityForResult(intentCaptor.capture(),
@@ -337,13 +364,37 @@ public class WifiCallingSettingsForSubTest {
 
     @Test
     public void onSwitchChanged_disableSetting_shouldNotLaunchWfcDisclaimerFragment() {
-        mFragment.onSwitchChanged(null, false);
+        mFragment.onCheckedChanged(null, false);
 
         // Check the WFC disclaimer fragment is not launched.
         verify(mFragment, never()).startActivityForResult(any(Intent.class), anyInt());
     }
 
     protected class TestFragment extends WifiCallingSettingsForSub {
+        private SettingsMainSwitchPreference mSwitchPref;
+        protected boolean mIsWifiCallingReady = true;
+
+        protected void setSwitchBar(SettingsMainSwitchPreference switchPref) {
+            mSwitchPref = switchPref;
+        }
+
+        @Override
+        public <T extends Preference> T findPreference(CharSequence key) {
+            if (SWITCH_BAR.equals(key)) {
+                return (T) mSwitchPref;
+            }
+            if (BUTTON_WFC_MODE.equals(key)) {
+                return (T) mButtonWfcMode;
+            }
+            if (BUTTON_WFC_ROAMING_MODE.equals(key)) {
+                return (T) mButtonWfcRoamingMode;
+            }
+            if (PREFERENCE_NO_OPTIONS_DESC.equals(key)) {
+                return (T) mDescriptionView;
+            }
+            return (T) mock(ListWithEntrySummaryPreference.class);
+        }
+
         @Override
         protected Object getSystemService(final String name) {
             switch (name) {
@@ -364,6 +415,25 @@ public class WifiCallingSettingsForSubTest {
         @Override
         WifiCallingQueryImsState queryImsState(int subId) {
             return mQueryImsState;
+        }
+
+        @Override
+        @NonNull
+        IWifiCallingRepository getWifiCallingRepository() {
+            return new IWifiCallingRepository() {
+                @Override
+                public void collectIsWifiCallingReadyFlow(
+                        @NonNull LifecycleOwner lifecycleOwner,
+                        @NonNull Function1<? super Boolean, Unit> action) {
+                    action.invoke(mIsWifiCallingReady);
+                }
+            };
+        }
+
+        @NonNull
+        @Override
+        LifecycleOwner getLifecycleOwner() {
+            return this;
         }
 
         @Override

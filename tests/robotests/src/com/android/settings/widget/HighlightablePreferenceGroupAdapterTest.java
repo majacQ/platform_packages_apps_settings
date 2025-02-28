@@ -26,13 +26,14 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.verifyZeroInteractions;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import android.content.Context;
 import android.graphics.drawable.ColorDrawable;
 import android.os.Bundle;
 import android.view.View;
+import android.view.accessibility.AccessibilityManager;
 
 import androidx.preference.Preference;
 import androidx.preference.PreferenceCategory;
@@ -53,9 +54,15 @@ import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;
+import org.robolectric.annotation.Config;
+import org.robolectric.shadow.api.Shadow;
+import org.robolectric.shadows.ShadowAccessibilityManager;
 import org.robolectric.util.ReflectionHelpers;
 
 @RunWith(RobolectricTestRunner.class)
+@Config(shadows = {
+        com.android.settings.testutils.shadow.ShadowFragment.class,
+})
 public class HighlightablePreferenceGroupAdapterTest {
 
     private static final String TEST_KEY = "key";
@@ -63,7 +70,7 @@ public class HighlightablePreferenceGroupAdapterTest {
     @Mock
     private View mRoot;
     @Mock
-    private PreferenceCategory mPreferenceCatetory;
+    private PreferenceCategory mPreferenceCategory;
     @Mock
     private SettingsPreferenceFragment mFragment;
 
@@ -78,12 +85,12 @@ public class HighlightablePreferenceGroupAdapterTest {
         mContext = RuntimeEnvironment.application;
         mPreference = new Preference(mContext);
         mPreference.setKey(TEST_KEY);
-        when(mPreferenceCatetory.getContext()).thenReturn(mContext);
-        mAdapter = spy(new HighlightablePreferenceGroupAdapter(mPreferenceCatetory, TEST_KEY,
+        when(mPreferenceCategory.getContext()).thenReturn(mContext);
+        mAdapter = spy(new HighlightablePreferenceGroupAdapter(mPreferenceCategory, TEST_KEY,
                 false /* highlighted*/));
         when(mAdapter.getItem(anyInt())).thenReturn(mPreference);
         mViewHolder = PreferenceViewHolder.createInstanceForTests(
-                View.inflate(mContext, R.layout.app_preference_item, null));
+                View.inflate(mContext, androidx.preference.R.layout.preference, null));
     }
 
     @Test
@@ -95,6 +102,18 @@ public class HighlightablePreferenceGroupAdapterTest {
                 eq(HighlightablePreferenceGroupAdapter.DELAY_COLLAPSE_DURATION_MILLIS));
         verify(mRoot).postDelayed(any(),
                 eq(HighlightablePreferenceGroupAdapter.DELAY_HIGHLIGHT_DURATION_MILLIS));
+    }
+
+    @Test
+    public void requestHighlight_enableTouchExploration_shouldHaveA11yHighlightDelay() {
+        ShadowAccessibilityManager am = Shadow.extract(AccessibilityManager.getInstance(mContext));
+        am.setTouchExplorationEnabled(true);
+        when(mAdapter.getPreferenceAdapterPosition(anyString())).thenReturn(1);
+        mAdapter.requestHighlight(mRoot, mock(RecyclerView.class), mock(AppBarLayout.class));
+
+        // DELAY_HIGHLIGHT_DURATION_MILLIS_A11Y = DELAY_COLLAPSE_DURATION_MILLIS
+        verify(mRoot, times(2)).postDelayed(any(),
+                eq(HighlightablePreferenceGroupAdapter.DELAY_HIGHLIGHT_DURATION_MILLIS_A11Y));
     }
 
     @Test
@@ -111,7 +130,7 @@ public class HighlightablePreferenceGroupAdapterTest {
         ReflectionHelpers.setField(mAdapter, "mHighlightRequested", false);
         mAdapter.requestHighlight(mRoot, null /* recyclerView */,  mock(AppBarLayout.class));
 
-        verifyZeroInteractions(mRoot);
+        verifyNoInteractions(mRoot);
     }
 
     @Test
@@ -125,11 +144,11 @@ public class HighlightablePreferenceGroupAdapterTest {
         when(mFragment.getArguments()).thenReturn(null);
         when(mFragment.getPreferenceScreen()).thenReturn(screen);
         HighlightablePreferenceGroupAdapter.adjustInitialExpandedChildCount(mFragment);
-        verifyZeroInteractions(screen);
+        verifyNoInteractions(screen);
     }
 
     @Test
-    public void adjustInitialExpandedChildCount_hasHightlightKey_shouldExpandAllChildren() {
+    public void adjustInitialExpandedChildCount_hasHighlightKey_shouldExpandAllChildren() {
         final Bundle args = new Bundle();
         when(mFragment.getArguments()).thenReturn(args);
         args.putString(SettingsActivity.EXTRA_FRAGMENT_ARG_KEY, "testkey");
@@ -150,7 +169,7 @@ public class HighlightablePreferenceGroupAdapterTest {
         HighlightablePreferenceGroupAdapter.adjustInitialExpandedChildCount(mFragment);
 
         verify(mFragment).getInitialExpandedChildCount();
-        verifyZeroInteractions(screen);
+        verifyNoInteractions(screen);
     }
 
     @Test
@@ -175,8 +194,36 @@ public class HighlightablePreferenceGroupAdapterTest {
     }
 
     @Test
+    public void updateBackground_itemViewIsInvisible_shouldNotSetHighlightedTag() {
+        ReflectionHelpers.setField(mAdapter, "mHighlightPosition", 10);
+        ReflectionHelpers.setField(mViewHolder, "itemView", spy(mViewHolder.itemView));
+        when(mViewHolder.itemView.isShown()).thenReturn(false);
+
+        mAdapter.updateBackground(mViewHolder, 0);
+
+        assertThat(mViewHolder.itemView.getTag(R.id.preference_highlighted)).isNull();
+    }
+
+    /**
+     * When background is being updated, we also request the a11y focus on the preference
+     */
+    @Test
+    public void updateBackground_shouldRequestAccessibilityFocus() {
+        View viewItem = mock(View.class);
+        when(viewItem.isShown()).thenReturn(true);
+        mViewHolder = PreferenceViewHolder.createInstanceForTests(viewItem);
+        ReflectionHelpers.setField(mAdapter, "mHighlightPosition", 10);
+
+        mAdapter.updateBackground(mViewHolder, 10);
+
+        verify(viewItem).requestAccessibilityFocus();
+    }
+
+    @Test
     public void updateBackground_highlight_shouldAnimateBackgroundAndSetHighlightedTag() {
         ReflectionHelpers.setField(mAdapter, "mHighlightPosition", 10);
+        ReflectionHelpers.setField(mViewHolder, "itemView", spy(mViewHolder.itemView));
+        when(mViewHolder.itemView.isShown()).thenReturn(true);
         assertThat(mAdapter.mFadeInAnimated).isFalse();
 
         mAdapter.updateBackground(mViewHolder, 10);
@@ -188,9 +235,21 @@ public class HighlightablePreferenceGroupAdapterTest {
     }
 
     @Test
+    public void updateBackground_highlight_itemViewIsInvisible_shouldNotAnimate() {
+        ReflectionHelpers.setField(mAdapter, "mHighlightPosition", 10);
+        ReflectionHelpers.setField(mViewHolder, "itemView", spy(mViewHolder.itemView));
+        when(mViewHolder.itemView.isShown()).thenReturn(false);
+
+        mAdapter.updateBackground(mViewHolder, 10);
+
+        assertThat(mAdapter.mFadeInAnimated).isFalse();
+    }
+
+    @Test
     public void updateBackgroundTwice_highlight_shouldAnimateOnce() {
         ReflectionHelpers.setField(mAdapter, "mHighlightPosition", 10);
         ReflectionHelpers.setField(mViewHolder, "itemView", spy(mViewHolder.itemView));
+        when(mViewHolder.itemView.isShown()).thenReturn(true);
         assertThat(mAdapter.mFadeInAnimated).isFalse();
         mAdapter.updateBackground(mViewHolder, 10);
         // mFadeInAnimated change from false to true - indicating background change is scheduled
@@ -208,7 +267,7 @@ public class HighlightablePreferenceGroupAdapterTest {
     }
 
     @Test
-    public void updateBackground_reuseHightlightedRowForNormalRow_shouldResetBackgroundAndTag() {
+    public void updateBackground_reuseHighlightedRowForNormalRow_shouldResetBackgroundAndTag() {
         ReflectionHelpers.setField(mAdapter, "mHighlightPosition", 10);
         mViewHolder.itemView.setTag(R.id.preference_highlighted, true);
 

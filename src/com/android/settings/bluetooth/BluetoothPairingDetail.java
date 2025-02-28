@@ -16,28 +16,37 @@
 
 package com.android.settings.bluetooth;
 
-import static android.os.UserManager.DISALLOW_CONFIG_BLUETOOTH;
+import static com.android.settings.network.SatelliteWarningDialogActivity.EXTRA_TYPE_OF_SATELLITE_WARNING_DIALOG;
+import static com.android.settings.network.SatelliteWarningDialogActivity.TYPE_IS_BLUETOOTH;
 
 import android.app.settings.SettingsEnums;
 import android.bluetooth.BluetoothAdapter;
-import android.bluetooth.BluetoothDevice;
 import android.content.Context;
+import android.content.Intent;
 import android.os.Bundle;
 import android.util.Log;
-import android.widget.Toast;
+import android.view.View;
 
+import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
 import androidx.annotation.VisibleForTesting;
 
 import com.android.settings.R;
+import com.android.settings.network.SatelliteRepository;
+import com.android.settings.network.SatelliteWarningDialogActivity;
 import com.android.settingslib.bluetooth.BluetoothDeviceFilter;
-import com.android.settingslib.bluetooth.CachedBluetoothDevice;
 import com.android.settingslib.search.Indexable;
 import com.android.settingslib.widget.FooterPreference;
+
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 /**
  * BluetoothPairingDetail is a page to scan bluetooth devices and pair them.
  */
-public class BluetoothPairingDetail extends DeviceListPreferenceFragment implements
+public class BluetoothPairingDetail extends BluetoothDevicePairingDetailBase implements
         Indexable {
     private static final String TAG = "BluetoothPairingDetail";
 
@@ -47,68 +56,69 @@ public class BluetoothPairingDetail extends DeviceListPreferenceFragment impleme
     static final String KEY_FOOTER_PREF = "footer_preference";
 
     @VisibleForTesting
-    BluetoothProgressCategory mAvailableDevicesCategory;
-    @VisibleForTesting
     FooterPreference mFooterPreference;
     @VisibleForTesting
     AlwaysDiscoverable mAlwaysDiscoverable;
 
-    private boolean mInitialScanStarted;
-
     public BluetoothPairingDetail() {
-        super(DISALLOW_CONFIG_BLUETOOTH);
+        super();
     }
 
     @Override
-    public void onActivityCreated(Bundle savedInstanceState) {
-        super.onActivityCreated(savedInstanceState);
-        mInitialScanStarted = false;
+    public void onAttach(Context context) {
+        super.onAttach(context);
+        if (mayStartSatelliteWarningDialog()) {
+            finish();
+            return;
+        }
+        use(BluetoothDeviceRenamePreferenceController.class).setFragment(this);
+    }
+
+    private boolean mayStartSatelliteWarningDialog() {
+        SatelliteRepository satelliteRepository = new SatelliteRepository(this.getContext());
+        boolean isSatelliteOn = true;
+        try {
+            isSatelliteOn =
+                    satelliteRepository.requestIsSessionStarted(
+                            Executors.newSingleThreadExecutor()).get(3000, TimeUnit.MILLISECONDS);
+        } catch (InterruptedException | ExecutionException | TimeoutException e) {
+            Log.e(TAG, "Error to get satellite status : " + e);
+        }
+        if (!isSatelliteOn) {
+            return false;
+        }
+        startActivity(
+                new Intent(getContext(), SatelliteWarningDialogActivity.class)
+                        .putExtra(
+                                EXTRA_TYPE_OF_SATELLITE_WARNING_DIALOG,
+                                TYPE_IS_BLUETOOTH)
+        );
+        return true;
+    }
+
+    @Override
+    public void onViewCreated(@NonNull View view, @Nullable Bundle savedInstanceState) {
+        super.onViewCreated(view, savedInstanceState);
         mAlwaysDiscoverable = new AlwaysDiscoverable(getContext());
     }
 
     @Override
     public void onStart() {
         super.onStart();
-        if (mLocalManager == null){
-            Log.e(TAG, "Bluetooth is not supported on this device");
-            return;
-        }
-        updateBluetooth();
         mAvailableDevicesCategory.setProgress(mBluetoothAdapter.isDiscovering());
-    }
-
-    @Override
-    public void onAttach(Context context) {
-        super.onAttach(context);
-        use(BluetoothDeviceRenamePreferenceController.class).setFragment(this);
-    }
-
-    @VisibleForTesting
-    void updateBluetooth() {
-        if (mBluetoothAdapter.isEnabled()) {
-            updateContent(mBluetoothAdapter.getState());
-        } else {
-            // Turn on bluetooth if it is disabled
-            mBluetoothAdapter.enable();
-        }
     }
 
     @Override
     public void onStop() {
         super.onStop();
-        if (mLocalManager == null){
-            Log.e(TAG, "Bluetooth is not supported on this device");
-            return;
-        }
         // Make the device only visible to connected devices.
         mAlwaysDiscoverable.stop();
-        disableScanning();
     }
 
     @Override
-    void initPreferencesFromPreferenceScreen() {
-        mAvailableDevicesCategory = (BluetoothProgressCategory) findPreference(KEY_AVAIL_DEVICES);
-        mFooterPreference = (FooterPreference) findPreference(KEY_FOOTER_PREF);
+    public void initPreferencesFromPreferenceScreen() {
+        super.initPreferencesFromPreferenceScreen();
+        mFooterPreference = findPreference(KEY_FOOTER_PREF);
         mFooterPreference.setSelectable(false);
     }
 
@@ -117,23 +127,23 @@ public class BluetoothPairingDetail extends DeviceListPreferenceFragment impleme
         return SettingsEnums.BLUETOOTH_PAIRING;
     }
 
+    /**
+     * {@inheritDoc}
+     *
+     * Will update footer and keep the device discoverable as long as the page is visible.
+     */
+    @VisibleForTesting
     @Override
-    void enableScanning() {
-        // Clear all device states before first scan
-        if (!mInitialScanStarted) {
-            if (mAvailableDevicesCategory != null) {
-                removeAllDevices();
+    public void updateContent(int bluetoothState) {
+        super.updateContent(bluetoothState);
+        if (bluetoothState == BluetoothAdapter.STATE_ON) {
+            if (mInitialScanStarted) {
+                // Don't show bonded devices when screen turned back on
+                addCachedDevices(BluetoothDeviceFilter.UNBONDED_DEVICE_FILTER);
             }
-            mLocalManager.getCachedDeviceManager().clearNonBondedDevices();
-            mInitialScanStarted = true;
+            updateFooterPreference(mFooterPreference);
+            mAlwaysDiscoverable.start();
         }
-        super.enableScanning();
-    }
-
-    @Override
-    void onDevicePreferenceClick(BluetoothDevicePreference btPreference) {
-        disableScanning();
-        super.onDevicePreferenceClick(btPreference);
     }
 
     @Override
@@ -141,71 +151,6 @@ public class BluetoothPairingDetail extends DeviceListPreferenceFragment impleme
         super.onScanningStateChanged(started);
         started |= mScanEnabled;
         mAvailableDevicesCategory.setProgress(started);
-    }
-
-    @VisibleForTesting
-    void updateContent(int bluetoothState) {
-        switch (bluetoothState) {
-            case BluetoothAdapter.STATE_ON:
-                mDevicePreferenceMap.clear();
-                mBluetoothAdapter.enable();
-
-                addDeviceCategory(mAvailableDevicesCategory,
-                        R.string.bluetooth_preference_found_media_devices,
-                        BluetoothDeviceFilter.ALL_FILTER, mInitialScanStarted);
-                updateFooterPreference(mFooterPreference);
-                mAlwaysDiscoverable.start();
-                enableScanning();
-                break;
-
-            case BluetoothAdapter.STATE_OFF:
-                finish();
-                break;
-        }
-    }
-
-    @Override
-    public void onBluetoothStateChanged(int bluetoothState) {
-        super.onBluetoothStateChanged(bluetoothState);
-        updateContent(bluetoothState);
-        if (bluetoothState == BluetoothAdapter.STATE_ON) {
-            showBluetoothTurnedOnToast();
-        }
-    }
-
-    @Override
-    public void onDeviceBondStateChanged(CachedBluetoothDevice cachedDevice, int bondState) {
-        if (bondState == BluetoothDevice.BOND_BONDED) {
-            // If one device is connected(bonded), then close this fragment.
-            finish();
-            return;
-        }
-        if (mSelectedDevice != null && cachedDevice != null) {
-            BluetoothDevice device = cachedDevice.getDevice();
-            if (device != null && mSelectedDevice.equals(device)
-                    && bondState == BluetoothDevice.BOND_NONE) {
-                // If currently selected device failed to bond, restart scanning
-                enableScanning();
-            }
-        }
-    }
-
-    @Override
-    public void onProfileConnectionStateChanged(CachedBluetoothDevice cachedDevice, int state,
-            int bluetoothProfile) {
-        // This callback is used to handle the case that bonded device is connected in pairing list.
-        // 1. If user selected multiple bonded devices in pairing list, after connected
-        // finish this page.
-        // 2. If the bonded devices auto connected in paring list, after connected it will be
-        // removed from paring list.
-        if (cachedDevice != null && cachedDevice.isConnected()) {
-            final BluetoothDevice device = cachedDevice.getDevice();
-            if (device != null && mSelectedList.contains(device)) {
-                finish();
-            } else if (mDevicePreferenceMap.containsKey(cachedDevice)) {
-                onDeviceDeleted(cachedDevice);
-            }
-        }
     }
 
     @Override
@@ -226,11 +171,5 @@ public class BluetoothPairingDetail extends DeviceListPreferenceFragment impleme
     @Override
     public String getDeviceListKey() {
         return KEY_AVAIL_DEVICES;
-    }
-
-    @VisibleForTesting
-    void showBluetoothTurnedOnToast() {
-        Toast.makeText(getContext(), R.string.connected_device_bluetooth_turned_on_toast,
-                Toast.LENGTH_SHORT).show();
     }
 }

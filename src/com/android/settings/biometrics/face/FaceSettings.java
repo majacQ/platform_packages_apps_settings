@@ -17,12 +17,16 @@
 package com.android.settings.biometrics.face;
 
 import static android.app.Activity.RESULT_OK;
+import static android.app.admin.DevicePolicyResources.Strings.Settings.FACE_SETTINGS_FOR_WORK_TITLE;
 
+import static com.android.settings.Utils.isPrivateProfile;
+import static com.android.settings.biometrics.BiometricEnrollBase.BIOMETRIC_AUTH_REQUEST;
 import static com.android.settings.biometrics.BiometricEnrollBase.CONFIRM_REQUEST;
 import static com.android.settings.biometrics.BiometricEnrollBase.ENROLL_REQUEST;
 import static com.android.settings.biometrics.BiometricEnrollBase.RESULT_FINISHED;
 import static com.android.settings.biometrics.BiometricEnrollBase.RESULT_TIMEOUT;
 
+import android.app.admin.DevicePolicyManager;
 import android.app.settings.SettingsEnums;
 import android.content.Context;
 import android.content.Intent;
@@ -31,20 +35,26 @@ import android.os.Bundle;
 import android.os.UserHandle;
 import android.os.UserManager;
 import android.util.Log;
+import android.widget.Button;
 
 import androidx.preference.Preference;
+import androidx.preference.PreferenceCategory;
 
 import com.android.settings.R;
 import com.android.settings.SettingsActivity;
 import com.android.settings.Utils;
 import com.android.settings.biometrics.BiometricEnrollBase;
 import com.android.settings.biometrics.BiometricUtils;
+import com.android.settings.biometrics.IdentityCheckBiometricErrorDialog;
 import com.android.settings.dashboard.DashboardFragment;
 import com.android.settings.overlay.FeatureFactory;
 import com.android.settings.password.ChooseLockSettingsHelper;
+import com.android.settings.password.ConfirmDeviceCredentialActivity;
 import com.android.settings.search.BaseSearchIndexProvider;
+import com.android.settingslib.RestrictedLockUtilsInternal;
 import com.android.settingslib.core.AbstractPreferenceController;
 import com.android.settingslib.search.SearchIndexable;
+import com.android.settingslib.widget.LayoutPreference;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -58,14 +68,20 @@ public class FaceSettings extends DashboardFragment {
 
     private static final String TAG = "FaceSettings";
     private static final String KEY_TOKEN = "hw_auth_token";
+    private static final String KEY_RE_ENROLL_FACE = "re_enroll_face_unlock";
+    private static final String KEY_BIOMETRICS_SUCCESSFULLY_AUTHENTICATED =
+            "biometrics_successfully_authenticated";
 
     private static final String PREF_KEY_DELETE_FACE_DATA =
             "security_settings_face_delete_faces_container";
     private static final String PREF_KEY_ENROLL_FACE_UNLOCK =
             "security_settings_face_enroll_faces_container";
+    public static final String SECURITY_SETTINGS_FACE_MANAGE_CATEGORY =
+            "security_settings_face_manage_category";
 
     private UserManager mUserManager;
     private FaceManager mFaceManager;
+    private DevicePolicyManager mDevicePolicyManager;
     private int mUserId;
     private int mSensorId;
     private long mChallenge;
@@ -82,6 +98,7 @@ public class FaceSettings extends DashboardFragment {
     private FaceFeatureProvider mFaceFeatureProvider;
 
     private boolean mConfirmingPassword;
+    private boolean mBiometricsAuthenticationRequested;
 
     private final FaceSettingsRemoveButtonPreferenceController.Listener mRemovalListener = () -> {
 
@@ -148,17 +165,24 @@ public class FaceSettings extends DashboardFragment {
 
         mUserManager = context.getSystemService(UserManager.class);
         mFaceManager = context.getSystemService(FaceManager.class);
+        mDevicePolicyManager = context.getSystemService(DevicePolicyManager.class);
         mToken = getIntent().getByteArrayExtra(KEY_TOKEN);
         mSensorId = getIntent().getIntExtra(BiometricEnrollBase.EXTRA_KEY_SENSOR_ID, -1);
         mChallenge = getIntent().getLongExtra(BiometricEnrollBase.EXTRA_KEY_CHALLENGE, 0L);
 
         mUserId = getActivity().getIntent().getIntExtra(
                 Intent.EXTRA_USER_ID, UserHandle.myUserId());
-        mFaceFeatureProvider = FeatureFactory.getFactory(getContext()).getFaceFeatureProvider();
+        mFaceFeatureProvider = FeatureFactory.getFeatureFactory().getFaceFeatureProvider();
 
         if (mUserManager.getUserInfo(mUserId).isManagedProfile()) {
-            getActivity().setTitle(getActivity().getResources().getString(
-                    R.string.security_settings_face_profile_preference_title));
+            getActivity().setTitle(
+                    mDevicePolicyManager.getResources().getString(FACE_SETTINGS_FOR_WORK_TITLE,
+                            () -> getActivity().getResources().getString(
+                                    R.string.security_settings_face_profile_preference_title)));
+        } else if (isPrivateProfile(mUserId, getContext())) {
+            getActivity().setTitle(
+                    getActivity().getResources().getString(
+                    R.string.private_space_face_unlock_title));
         }
 
         mLockscreenController = Utils.isMultipleBiometricsSupported(context)
@@ -166,6 +190,8 @@ public class FaceSettings extends DashboardFragment {
                 : use(FaceSettingsLockscreenBypassPreferenceController.class);
         mLockscreenController.setUserId(mUserId);
 
+        final PreferenceCategory managePref =
+                findPreference(SECURITY_SETTINGS_FACE_MANAGE_CATEGORY);
         Preference keyguardPref = findPreference(FaceSettingsKeyguardPreferenceController.KEY);
         Preference appPref = findPreference(FaceSettingsAppPreferenceController.KEY);
         Preference attentionPref = findPreference(FaceSettingsAttentionPreferenceController.KEY);
@@ -175,8 +201,20 @@ public class FaceSettings extends DashboardFragment {
         mTogglePreferences = new ArrayList<>(
                 Arrays.asList(keyguardPref, appPref, attentionPref, confirmPref, bypassPref));
 
+        if (RestrictedLockUtilsInternal.checkIfKeyguardFeaturesDisabled(
+                getContext(), DevicePolicyManager.KEYGUARD_DISABLE_FACE, mUserId) != null) {
+            managePref.setTitle(getString(
+                    com.android.settingslib.widget.restricted.R.string.disabled_by_admin));
+        } else {
+            managePref.setTitle(R.string.security_settings_face_settings_preferences_category);
+        }
+
         mRemoveButton = findPreference(FaceSettingsRemoveButtonPreferenceController.KEY);
         mEnrollButton = findPreference(FaceSettingsEnrollButtonPreferenceController.KEY);
+
+        final boolean hasEnrolled = mFaceManager.hasEnrolledTemplates(mUserId);
+        mEnrollButton.setVisible(!hasEnrolled);
+        mRemoveButton.setVisible(hasEnrolled);
 
         // There is no better way to do this :/
         for (AbstractPreferenceController controller : mControllers) {
@@ -184,18 +222,43 @@ public class FaceSettings extends DashboardFragment {
                 ((FaceSettingsPreferenceController) controller).setUserId(mUserId);
             } else if (controller instanceof FaceSettingsEnrollButtonPreferenceController) {
                 ((FaceSettingsEnrollButtonPreferenceController) controller).setUserId(mUserId);
+            } else if (controller instanceof FaceSettingsFooterPreferenceController) {
+                ((FaceSettingsFooterPreferenceController) controller).setUserId(mUserId);
             }
         }
         mRemoveController.setUserId(mUserId);
 
-        // Don't show keyguard controller for work profile settings.
-        if (mUserManager.isManagedProfile(mUserId)) {
+        // Don't show keyguard controller for work and private profile settings.
+        if (mUserManager.isManagedProfile(mUserId)
+                || mUserManager.getUserInfo(mUserId).isPrivateProfile()) {
             removePreference(FaceSettingsKeyguardPreferenceController.KEY);
             removePreference(mLockscreenController.getPreferenceKey());
         }
 
         if (savedInstanceState != null) {
             mToken = savedInstanceState.getByteArray(KEY_TOKEN);
+        }
+    }
+
+    @Override
+    public void onStart() {
+        super.onStart();
+        final boolean hasEnrolled = mFaceManager.hasEnrolledTemplates(mUserId);
+        mEnrollButton.setVisible(!hasEnrolled);
+        mRemoveButton.setVisible(hasEnrolled);
+
+        // When the user has face id registered but failed enrolling in device lock state,
+        // lead users directly to the confirm deletion dialog in Face Unlock settings.
+        if (hasEnrolled) {
+            final boolean isReEnrollFaceUnlock = getIntent().getBooleanExtra(
+                    FaceSettings.KEY_RE_ENROLL_FACE, false);
+            if (isReEnrollFaceUnlock) {
+                final Button removeBtn = ((LayoutPreference) mRemoveButton).findViewById(
+                        R.id.security_settings_face_settings_remove_button);
+                if (removeBtn != null && removeBtn.isEnabled()) {
+                    mRemoveController.onClick(removeBtn);
+                }
+            }
         }
     }
 
@@ -224,10 +287,6 @@ public class FaceSettings extends DashboardFragment {
             mEnrollController.setToken(mToken);
         }
 
-        final boolean hasEnrolled = mFaceManager.hasEnrolledTemplates(mUserId);
-        mEnrollButton.setVisible(!hasEnrolled);
-        mRemoveButton.setVisible(hasEnrolled);
-
         if (!mFaceFeatureProvider.isAttentionSupported(getContext())) {
             removePreference(FaceSettingsAttentionPreferenceController.KEY);
         }
@@ -255,11 +314,39 @@ public class FaceSettings extends DashboardFragment {
                     mEnrollController.setToken(mToken);
                     mConfirmingPassword = false;
                 });
+
+                final boolean hasEnrolled = mFaceManager.hasEnrolledTemplates(mUserId);
+                mEnrollButton.setVisible(!hasEnrolled);
+                mRemoveButton.setVisible(hasEnrolled);
+                final Utils.BiometricStatus biometricAuthStatus =
+                        Utils.requestBiometricAuthenticationForMandatoryBiometrics(getActivity(),
+                                mBiometricsAuthenticationRequested,
+                                mUserId);
+                if (biometricAuthStatus == Utils.BiometricStatus.OK) {
+                    Utils.launchBiometricPromptForMandatoryBiometrics(this,
+                            BIOMETRIC_AUTH_REQUEST,
+                            mUserId, true /* hideBackground */);
+                } else if (biometricAuthStatus != Utils.BiometricStatus.NOT_ACTIVE) {
+                    IdentityCheckBiometricErrorDialog
+                            .showBiometricErrorDialogAndFinishActivityOnDismiss(getActivity(),
+                                    biometricAuthStatus);
+                }
             }
         } else if (requestCode == ENROLL_REQUEST) {
             if (resultCode == RESULT_TIMEOUT) {
                 setResult(resultCode, data);
                 finish();
+            }
+        } else if (requestCode == BIOMETRIC_AUTH_REQUEST) {
+            mBiometricsAuthenticationRequested = false;
+            if (resultCode != RESULT_OK) {
+                if (resultCode == ConfirmDeviceCredentialActivity.BIOMETRIC_LOCKOUT_ERROR_RESULT) {
+                    IdentityCheckBiometricErrorDialog
+                            .showBiometricErrorDialogAndFinishActivityOnDismiss(getActivity(),
+                                    Utils.BiometricStatus.LOCKOUT);
+                } else {
+                    finish();
+                }
             }
         }
     }
@@ -275,6 +362,8 @@ public class FaceSettings extends DashboardFragment {
                 mFaceManager.revokeChallenge(mSensorId, mUserId, mChallenge);
                 mToken = null;
             }
+            // Let parent "Face & Fingerprint Unlock" can use this error code to close itself.
+            setResult(RESULT_TIMEOUT);
             finish();
         }
     }
@@ -301,7 +390,6 @@ public class FaceSettings extends DashboardFragment {
             } else if (controller instanceof FaceSettingsEnrollButtonPreferenceController) {
                 mEnrollController = (FaceSettingsEnrollButtonPreferenceController) controller;
                 mEnrollController.setListener(mEnrollListener);
-                mEnrollController.setActivity((SettingsActivity) getActivity());
             }
         }
 
@@ -316,6 +404,7 @@ public class FaceSettings extends DashboardFragment {
         controllers.add(new FaceSettingsRemoveButtonPreferenceController(context));
         controllers.add(new FaceSettingsConfirmPreferenceController(context));
         controllers.add(new FaceSettingsEnrollButtonPreferenceController(context));
+        controllers.add(new FaceSettingsFooterPreferenceController(context));
         return controllers;
     }
 
@@ -361,13 +450,9 @@ public class FaceSettings extends DashboardFragment {
                 }
 
                 private boolean isAttentionSupported(Context context) {
-                    FaceFeatureProvider featureProvider = FeatureFactory.getFactory(
-                            context).getFaceFeatureProvider();
-                    boolean isAttentionSupported = false;
-                    if (featureProvider != null) {
-                        isAttentionSupported = featureProvider.isAttentionSupported(context);
-                    }
-                    return isAttentionSupported;
+                    FaceFeatureProvider featureProvider =
+                            FeatureFactory.getFeatureFactory().getFaceFeatureProvider();
+                    return featureProvider.isAttentionSupported(context);
                 }
 
                 private boolean hasEnrolledBiometrics(Context context) {

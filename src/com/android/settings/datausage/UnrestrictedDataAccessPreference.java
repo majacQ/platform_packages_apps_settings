@@ -13,12 +13,16 @@
  */
 package com.android.settings.datausage;
 
-import static com.android.settingslib.RestrictedLockUtilsInternal.checkIfMeteredDataRestricted;
+import static com.android.settingslib.RestrictedLockUtilsInternal.checkIfMeteredDataUsageUserControlDisabled;
 
 import android.content.Context;
+import android.graphics.drawable.Drawable;
 import android.os.UserHandle;
 import android.view.View;
 
+import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
+import androidx.annotation.VisibleForTesting;
 import androidx.preference.PreferenceViewHolder;
 
 import com.android.settings.R;
@@ -26,12 +30,15 @@ import com.android.settings.applications.appinfo.AppInfoDashboardFragment;
 import com.android.settings.dashboard.DashboardFragment;
 import com.android.settingslib.RestrictedLockUtils.EnforcedAdmin;
 import com.android.settingslib.RestrictedPreferenceHelper;
+import com.android.settingslib.applications.AppUtils;
 import com.android.settingslib.applications.ApplicationsState;
 import com.android.settingslib.applications.ApplicationsState.AppEntry;
+import com.android.settingslib.utils.ThreadUtils;
 import com.android.settingslib.widget.AppSwitchPreference;
 
 public class UnrestrictedDataAccessPreference extends AppSwitchPreference implements
         DataSaverBackend.Listener {
+    private static final String ECM_SETTING_IDENTIFIER = "android:unrestricted_data_access";
 
     private final ApplicationsState mApplicationsState;
     private final AppEntry mEntry;
@@ -39,12 +46,12 @@ public class UnrestrictedDataAccessPreference extends AppSwitchPreference implem
     private final DataSaverBackend mDataSaverBackend;
     private final DashboardFragment mParentFragment;
     private final RestrictedPreferenceHelper mHelper;
+    private Drawable mCacheIcon;
 
     public UnrestrictedDataAccessPreference(final Context context, AppEntry entry,
             ApplicationsState applicationsState, DataSaverBackend dataSaverBackend,
             DashboardFragment parentFragment) {
         super(context);
-        setWidgetLayoutResource(R.layout.restricted_switch_widget);
         mHelper = new RestrictedPreferenceHelper(context, this, null);
         mEntry = entry;
         mDataUsageState = (AppStateDataUsageBridge.DataUsageState) mEntry.extraInfo;
@@ -52,12 +59,18 @@ public class UnrestrictedDataAccessPreference extends AppSwitchPreference implem
         mApplicationsState = applicationsState;
         mDataSaverBackend = dataSaverBackend;
         mParentFragment = parentFragment;
-        setDisabledByAdmin(checkIfMeteredDataRestricted(context, entry.info.packageName,
-                UserHandle.getUserId(entry.info.uid)));
+        setDisabledByAdmin(checkIfMeteredDataUsageUserControlDisabled(
+                context, entry.info.packageName, UserHandle.getUserId(entry.info.uid)));
+        mHelper.checkEcmRestrictionAndSetDisabled(ECM_SETTING_IDENTIFIER, entry.info.packageName);
         updateState();
         setKey(generateKey(mEntry));
-        if (mEntry.icon != null) {
-            setIcon(mEntry.icon);
+
+        mCacheIcon = AppUtils.getIconFromCache(mEntry);
+        if (mCacheIcon != null) {
+            setIcon(mCacheIcon);
+        } else {
+            // Set empty icon as default.
+            setIcon(R.drawable.empty_icon);
         }
     }
 
@@ -79,7 +92,7 @@ public class UnrestrictedDataAccessPreference extends AppSwitchPreference implem
 
     @Override
     protected void onClick() {
-        if (mDataUsageState.isDataSaverDenylisted) {
+        if (mDataUsageState != null && mDataUsageState.isDataSaverDenylisted) {
             // app is denylisted, launch App Data Usage screen
             AppInfoDashboardFragment.startAppInfoFragment(AppDataUsage.class,
                     R.string.data_usage_app_summary_title,
@@ -101,16 +114,13 @@ public class UnrestrictedDataAccessPreference extends AppSwitchPreference implem
 
     @Override
     public void onBindViewHolder(PreferenceViewHolder holder) {
-        if (mEntry.icon == null) {
-            holder.itemView.post(new Runnable() {
-                @Override
-                public void run() {
-                    // Ensure we have an icon before binding.
-                    mApplicationsState.ensureIcon(mEntry);
-                    // This might trigger us to bind again, but it gives an easy way to only
-                    // load the icon once its needed, so its probably worth it.
-                    setIcon(mEntry.icon);
-                }
+        if (mCacheIcon == null) {
+            ThreadUtils.postOnBackgroundThread(() -> {
+                final Drawable icon = AppUtils.getIcon(getContext(), mEntry);
+                ThreadUtils.postOnMainThread(() -> {
+                    setIcon(icon);
+                    mCacheIcon = icon;
+                });
             });
         }
         final boolean disabledByAdmin = isDisabledByAdmin();
@@ -125,10 +135,6 @@ public class UnrestrictedDataAccessPreference extends AppSwitchPreference implem
         super.onBindViewHolder(holder);
 
         mHelper.onBindViewHolder(holder);
-        holder.findViewById(R.id.restricted_icon).setVisibility(
-                disabledByAdmin ? View.VISIBLE : View.GONE);
-        holder.findViewById(android.R.id.switch_widget).setVisibility(
-                disabledByAdmin ? View.GONE : View.VISIBLE);
     }
 
     @Override
@@ -151,6 +157,7 @@ public class UnrestrictedDataAccessPreference extends AppSwitchPreference implem
         }
     }
 
+    @Nullable
     public AppStateDataUsageBridge.DataUsageState getDataUsageState() {
         return mDataUsageState;
     }
@@ -163,8 +170,22 @@ public class UnrestrictedDataAccessPreference extends AppSwitchPreference implem
         return mHelper.isDisabledByAdmin();
     }
 
+    @VisibleForTesting
+    boolean isDisabledByEcm() {
+        return mHelper.isDisabledByEcm();
+    }
+
     public void setDisabledByAdmin(EnforcedAdmin admin) {
         mHelper.setDisabledByAdmin(admin);
+    }
+
+    /**
+     * Checks if the given setting is subject to Enhanced Confirmation Mode restrictions for this
+     * package. Marks the preference as disabled if so.
+     * @param packageName the package to check the restriction for
+     */
+    public void checkEcmRestrictionAndSetDisabled(@NonNull String packageName) {
+        mHelper.checkEcmRestrictionAndSetDisabled(ECM_SETTING_IDENTIFIER, packageName);
     }
 
     // Sets UI state based on allowlist/denylist status.
@@ -173,10 +194,11 @@ public class UnrestrictedDataAccessPreference extends AppSwitchPreference implem
         if (mDataUsageState != null) {
             setChecked(mDataUsageState.isDataSaverAllowlisted);
             if (isDisabledByAdmin()) {
-                setSummary(R.string.disabled_by_admin);
+                setSummary(com.android.settingslib.widget.restricted.R.string.disabled_by_admin);
             } else if (mDataUsageState.isDataSaverDenylisted) {
                 setSummary(R.string.restrict_background_blocklisted);
-            } else {
+            // If disabled by ECM, the summary is set directly by the switch.
+            } else if (!isDisabledByEcm()) {
                 setSummary("");
             }
         }

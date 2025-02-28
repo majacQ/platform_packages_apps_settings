@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 The Android Open Source Project
+ * Copyright (C) 2022 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,27 +16,39 @@
 
 package com.android.settings.fuelgauge;
 
+import static com.android.settings.Utils.SYSTEMUI_PACKAGE_NAME;
+
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.os.Process;
+import android.util.ArrayMap;
+import android.util.ArraySet;
 import android.util.SparseIntArray;
 
-import com.android.internal.os.BatterySipper;
+import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
+
 import com.android.internal.util.ArrayUtils;
+import com.android.settings.fuelgauge.batteryusage.BatteryDiffData;
+import com.android.settings.fuelgauge.batteryusage.BatteryEvent;
+import com.android.settings.fuelgauge.batteryusage.DetectRequestSourceType;
+import com.android.settings.fuelgauge.batteryusage.PowerAnomalyEventList;
 import com.android.settingslib.fuelgauge.Estimate;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
+/** Implementation of {@code PowerUsageFeatureProvider} */
 public class PowerUsageFeatureProviderImpl implements PowerUsageFeatureProvider {
 
     private static final String PACKAGE_CALENDAR_PROVIDER = "com.android.providers.calendar";
     private static final String PACKAGE_MEDIA_PROVIDER = "com.android.providers.media";
-    private static final String PACKAGE_SYSTEMUI = "com.android.systemui";
-    private static final String[] PACKAGES_SYSTEM = {PACKAGE_MEDIA_PROVIDER,
-            PACKAGE_CALENDAR_PROVIDER, PACKAGE_SYSTEMUI};
+    private static final String[] PACKAGES_SYSTEM = {
+        PACKAGE_MEDIA_PROVIDER, PACKAGE_CALENDAR_PROVIDER, SYSTEMUI_PACKAGE_NAME
+    };
 
     protected PackageManager mPackageManager;
     protected Context mContext;
@@ -47,25 +59,7 @@ public class PowerUsageFeatureProviderImpl implements PowerUsageFeatureProvider 
     }
 
     @Override
-    public boolean isTypeService(BatterySipper sipper) {
-        return false;
-    }
-
-    @Override
-    public boolean isTypeSystem(BatterySipper sipper) {
-        final int uid = sipper.uidObj == null ? -1 : sipper.getUid();
-        sipper.mPackages = mPackageManager.getPackagesForUid(uid);
-        // Classify all the sippers to type system if the range of uid is 0...FIRST_APPLICATION_UID
-        if (uid >= Process.ROOT_UID && uid < Process.FIRST_APPLICATION_UID) {
-            return true;
-        } else if (sipper.mPackages != null) {
-            for (final String packageName : sipper.mPackages) {
-                if (ArrayUtils.contains(PACKAGES_SYSTEM, packageName)) {
-                    return true;
-                }
-            }
-        }
-
+    public boolean isTypeService(int uid) {
         return false;
     }
 
@@ -85,28 +79,53 @@ public class PowerUsageFeatureProviderImpl implements PowerUsageFeatureProvider 
     }
 
     @Override
-    public boolean isLocationSettingEnabled(String[] packages) {
+    public boolean isBatteryUsageEnabled() {
+        return true;
+    }
+
+    @Override
+    public boolean isBatteryTipsEnabled() {
         return false;
     }
 
     @Override
-    public boolean isAdditionalBatteryInfoEnabled() {
+    public boolean isRestrictedModeOverwriteEnabled() {
+        return false;
+    }
+
+    @Override
+    public boolean isForceExpireAppOptimizationModeEnabled() {
+        return false;
+    }
+
+    @Override
+    public boolean isAppOptimizationModeLogged() {
+        return false;
+    }
+
+    @Override
+    public double getBatteryUsageListScreenOnTimeThresholdInMs() {
+        return 0;
+    }
+
+    @Override
+    public double getBatteryUsageListConsumePowerThreshold() {
+        return 0;
+    }
+
+    @Override
+    public List<String> getSystemAppsAllowlist() {
+        return new ArrayList<>();
+    }
+
+    @Override
+    public boolean isLocationSettingEnabled(String[] packages) {
         return false;
     }
 
     @Override
     public Intent getAdditionalBatteryInfoIntent() {
         return null;
-    }
-
-    @Override
-    public boolean isAdvancedUiEnabled() {
-        return true;
-    }
-
-    @Override
-    public boolean isPowerAccountingToggleEnabled() {
-        return true;
     }
 
     @Override
@@ -140,24 +159,9 @@ public class PowerUsageFeatureProviderImpl implements PowerUsageFeatureProvider 
     }
 
     @Override
-    public String getAdvancedUsageScreenInfoString() {
-        return null;
-    }
-
-    @Override
-    public boolean getEarlyWarningSignal(Context context, String id) {
-        return false;
-    }
-
-    @Override
     public boolean isSmartBatterySupported() {
-        return mContext.getResources().getBoolean(
-                com.android.internal.R.bool.config_smart_battery_available);
-    }
-
-    @Override
-    public boolean isChartGraphEnabled(Context context) {
-        return false;
+        return mContext.getResources()
+                .getBoolean(com.android.internal.R.bool.config_smart_battery_available);
     }
 
     @Override
@@ -166,17 +170,103 @@ public class PowerUsageFeatureProviderImpl implements PowerUsageFeatureProvider 
     }
 
     @Override
-    public Intent getResumeChargeIntent() {
+    public boolean isAdaptiveChargingSupported() {
+        return false;
+    }
+
+    @Override
+    public boolean isBatteryManagerSupported() {
+        return true;
+    }
+
+    @Override
+    public Intent getResumeChargeIntent(boolean isDockDefender) {
         return null;
     }
 
     @Override
-    public Map<Long, Map<String, BatteryHistEntry>> getBatteryHistory(Context context) {
+    public String getFullChargeIntentAction() {
+        return Intent.ACTION_BATTERY_LEVEL_CHANGED;
+    }
+
+    @Override
+    public boolean isExtraDefend() {
+        return false;
+    }
+
+    @Override
+    public boolean delayHourlyJobWhenBooting() {
+        return true;
+    }
+
+    @Override
+    @Nullable
+    public PowerAnomalyEventList detectPowerAnomaly(
+            Context context, double displayDrain, DetectRequestSourceType detectRequestSourceType) {
         return null;
     }
 
     @Override
-    public List<CharSequence> getHideBackgroundUsageTimeList(Context context) {
-        return new ArrayList<>();
+    public Set<Integer> getOthersSystemComponentSet() {
+        return new ArraySet<>();
+    }
+
+    @Override
+    public Set<String> getOthersCustomComponentNameSet() {
+        return new ArraySet<>();
+    }
+
+    @Override
+    public Set<Integer> getHideSystemComponentSet() {
+        return new ArraySet<>();
+    }
+
+    @Override
+    public Set<String> getHideApplicationSet() {
+        return new ArraySet<>();
+    }
+
+    @Override
+    public Set<String> getHideBackgroundUsageTimeSet() {
+        return new ArraySet<>();
+    }
+
+    @Override
+    public Set<String> getIgnoreScreenOnTimeTaskRootSet() {
+        return new ArraySet<>();
+    }
+
+    @Override
+    public String getBuildMetadata1(Context context) {
+        return null;
+    }
+
+    @Override
+    public String getBuildMetadata2(Context context) {
+        return null;
+    }
+
+    @Override
+    public boolean isValidToRestoreOptimizationMode(ArrayMap<String, String> deviceInfoMap) {
+        return false;
+    }
+
+    @Override
+    public boolean isBatteryDefend(BatteryInfo info) {
+        return info.isLongLife && !isExtraDefend();
+    }
+
+    @Override
+    public boolean isBatteryUsageReattributeEnabled() {
+        return false;
+    }
+
+    @Override
+    public boolean processBatteryReattributeData(
+            @NonNull Context context,
+            @NonNull Map<Long, BatteryDiffData> batteryDiffDataMap,
+            @NonNull List<BatteryEvent> batteryEventList,
+            final boolean isFromPeriodJob) {
+        return false;
     }
 }

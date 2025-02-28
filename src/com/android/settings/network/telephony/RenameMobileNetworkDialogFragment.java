@@ -46,8 +46,8 @@ import androidx.appcompat.app.AlertDialog;
 
 import com.android.settings.R;
 import com.android.settings.core.instrumentation.InstrumentedDialogFragment;
+import com.android.settings.flags.Flags;
 import com.android.settings.network.SubscriptionUtil;
-import com.android.settingslib.DeviceInfoUtils;
 
 import com.google.common.collect.ImmutableMap;
 
@@ -132,7 +132,7 @@ public class RenameMobileNetworkDialogFragment extends InstrumentedDialogFragmen
                 LayoutInflater.class);
         final View view = layoutInflater.inflate(R.layout.dialog_mobile_network_rename, null);
         populateView(view);
-        builder.setTitle(R.string.mobile_network_sim_name)
+        builder.setTitle(R.string.mobile_network_sim_label_color_title)
                 .setView(view)
                 .setPositiveButton(R.string.mobile_network_sim_name_rename, (dialog, which) -> {
                     mSubscriptionManager.setDisplayName(mNameView.getText().toString(), mSubId,
@@ -167,7 +167,8 @@ public class RenameMobileNetworkDialogFragment extends InstrumentedDialogFragmen
                 info, getContext());
         mNameView.setText(displayName);
         if (!TextUtils.isEmpty(displayName)) {
-            mNameView.setSelection(displayName.length());
+            mNameView.setSelection(Math.min(displayName.length(),
+                    getResources().getInteger(R.integer.sim_label_max_length)));
         }
 
         mColorSpinner = view.findViewById(R.id.color_spinner);
@@ -176,15 +177,27 @@ public class RenameMobileNetworkDialogFragment extends InstrumentedDialogFragmen
         mColorSpinner.setAdapter(adapter);
         mColorSpinner.setSelection(getSimColorIndex(info.getIconTint()));
 
+        if (Flags.isDualSimOnboardingEnabled()) {
+            return;
+        }
+
+        final TextView operatorTitle = view.findViewById(R.id.operator_name_label);
+        operatorTitle.setVisibility(View.VISIBLE);
+
         final TextView operatorName = view.findViewById(R.id.operator_name_value);
         mTelephonyManager = mTelephonyManager.createForSubscriptionId(mSubId);
+        operatorName.setVisibility(View.VISIBLE);
         operatorName.setText(info.getCarrierName());
 
         final TextView phoneTitle = view.findViewById(R.id.number_label);
         phoneTitle.setVisibility(info.isOpportunistic() ? View.GONE : View.VISIBLE);
 
         final TextView phoneNumber = view.findViewById(R.id.number_value);
-        phoneNumber.setText(DeviceInfoUtils.getBidiFormattedPhoneNumber(getContext(), info));
+        phoneNumber.setVisibility(View.VISIBLE);
+        final String pn = SubscriptionUtil.getBidiFormattedPhoneNumber(getContext(), info);
+        if (!TextUtils.isEmpty(pn)) {
+            phoneNumber.setText(pn);
+        }
     }
 
     @Override
@@ -281,10 +294,10 @@ public class RenameMobileNetworkDialogFragment extends InstrumentedDialogFragmen
     }
 
     /*
-    * Get the color index from previous color that defined in Android OS
-    * (frameworks/base/core/res/res/values/arrays.xml). If can't find the color, continue to look
-    * for it in the new color plattee. If not, give it the first index.
-    */
+     * Get the color index from previous color that defined in Android OS
+     * (frameworks/base/core/res/res/values/arrays.xml). If can't find the color, continue to look
+     * for it in the new color plattee. If not, give it the first index.
+     */
 
     private int getSimColorIndex(int color) {
         int index = -1;

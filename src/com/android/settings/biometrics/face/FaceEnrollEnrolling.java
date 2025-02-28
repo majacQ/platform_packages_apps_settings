@@ -16,9 +16,13 @@
 
 package com.android.settings.biometrics.face;
 
+import static android.hardware.biometrics.BiometricAuthenticator.TYPE_FACE;
+import static android.hardware.biometrics.BiometricFaceConstants.FACE_ERROR_TIMEOUT;
+import static android.hardware.biometrics.BiometricFaceConstants.FEATURE_REQUIRE_ATTENTION;
+import static android.hardware.biometrics.BiometricFaceConstants.FEATURE_REQUIRE_REQUIRE_DIVERSITY;
+
 import android.app.settings.SettingsEnums;
 import android.content.Intent;
-import android.hardware.face.FaceManager;
 import android.os.Bundle;
 import android.text.TextUtils;
 import android.util.Log;
@@ -31,11 +35,14 @@ import com.android.settings.R;
 import com.android.settings.biometrics.BiometricEnrollBase;
 import com.android.settings.biometrics.BiometricEnrollSidecar;
 import com.android.settings.biometrics.BiometricErrorDialog;
+import com.android.settings.biometrics.BiometricUtils;
 import com.android.settings.biometrics.BiometricsEnrollEnrolling;
+import com.android.settings.biometrics.BiometricsSplitScreenDialog;
 import com.android.settings.slices.CustomSliceRegistry;
 
 import com.google.android.setupcompat.template.FooterBarMixin;
 import com.google.android.setupcompat.template.FooterButton;
+import com.google.android.setupcompat.util.WizardManagerHelper;
 
 import java.util.ArrayList;
 
@@ -86,6 +93,10 @@ public class FaceEnrollEnrolling extends BiometricsEnrollEnrolling {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        if (shouldShowSplitScreenDialog()) {
+            BiometricsSplitScreenDialog.newInstance(TYPE_FACE, true /*destroyActivity*/)
+                    .show(getSupportFragmentManager(), BiometricsSplitScreenDialog.class.getName());
+        }
         setContentView(R.layout.face_enroll_enrolling);
         setHeaderText(R.string.security_settings_face_enroll_repeat_title);
         mErrorText = findViewById(R.id.error_text);
@@ -98,23 +109,42 @@ public class FaceEnrollEnrolling extends BiometricsEnrollEnrolling {
                         .setText(R.string.security_settings_face_enroll_enrolling_skip)
                         .setListener(this::onSkipButtonClick)
                         .setButtonType(FooterButton.ButtonType.SKIP)
-                        .setTheme(R.style.SudGlifButton_Secondary)
+                        .setTheme(com.google.android.setupdesign.R.style.SudGlifButton_Secondary)
                         .build()
         );
 
         if (!getIntent().getBooleanExtra(BiometricEnrollBase.EXTRA_KEY_REQUIRE_DIVERSITY, true)) {
-            mDisabledFeatures.add(FaceManager.FEATURE_REQUIRE_REQUIRE_DIVERSITY);
+            mDisabledFeatures.add(FEATURE_REQUIRE_REQUIRE_DIVERSITY);
         }
         if (!getIntent().getBooleanExtra(BiometricEnrollBase.EXTRA_KEY_REQUIRE_VISION, true)) {
-            mDisabledFeatures.add(FaceManager.FEATURE_REQUIRE_ATTENTION);
+            mDisabledFeatures.add(FEATURE_REQUIRE_ATTENTION);
         }
 
         startEnrollment();
     }
 
     @Override
-    public void startEnrollment() {
-        super.startEnrollment();
+    protected void onStop() {
+        if (!isChangingConfigurations()) {
+            if (!WizardManagerHelper.isAnySetupWizard(getIntent())
+                    && !BiometricUtils.isAnyMultiBiometricFlow(this)) {
+                setResult(RESULT_TIMEOUT);
+            }
+            finish();
+        }
+
+        super.onStop();
+    }
+
+    @Override
+    protected boolean shouldFinishWhenBackgrounded() {
+        // Prevent super.onStop() from finishing, since we handle this in our onStop().
+        return false;
+    }
+
+    @Override
+    protected void startEnrollmentInternal() {
+        super.startEnrollmentInternal();
         mPreviewFragment = (FaceEnrollPreviewFragment) getSupportFragmentManager()
                 .findFragmentByTag(TAG_FACE_PREVIEW);
         if (mPreviewFragment == null) {
@@ -137,7 +167,7 @@ public class FaceEnrollEnrolling extends BiometricsEnrollEnrolling {
             disabledFeatures[i] = mDisabledFeatures.get(i);
         }
 
-        return new FaceEnrollSidecar(disabledFeatures);
+        return new FaceEnrollSidecar(disabledFeatures, getIntent());
     }
 
     @Override
@@ -162,7 +192,7 @@ public class FaceEnrollEnrolling extends BiometricsEnrollEnrolling {
     public void onEnrollmentError(int errMsgId, CharSequence errString) {
         int msgId;
         switch (errMsgId) {
-            case FaceManager.FACE_ERROR_TIMEOUT:
+            case FACE_ERROR_TIMEOUT:
                 msgId = R.string.security_settings_face_enroll_error_timeout_dialog_message;
                 break;
             default:

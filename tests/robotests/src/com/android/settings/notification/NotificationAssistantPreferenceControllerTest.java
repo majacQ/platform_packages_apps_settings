@@ -31,11 +31,14 @@ import static org.mockito.Mockito.when;
 
 import android.content.ComponentName;
 import android.content.Context;
-import android.os.UserManager;
 import android.provider.Settings;
 
 import androidx.fragment.app.FragmentManager;
 import androidx.fragment.app.FragmentTransaction;
+import androidx.preference.PreferenceManager;
+import androidx.preference.PreferenceScreen;
+import androidx.preference.SwitchPreferenceCompat;
+import androidx.preference.TwoStatePreference;
 import androidx.test.core.app.ApplicationProvider;
 
 import com.android.settings.testutils.shadow.ShadowSecureSettings;
@@ -48,10 +51,12 @@ import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 import org.robolectric.RobolectricTestRunner;
 import org.robolectric.annotation.Config;
-import org.robolectric.shadows.ShadowApplication;
 
 
 @RunWith(RobolectricTestRunner.class)
+@Config(shadows = {
+        com.android.settings.testutils.shadow.ShadowFragment.class,
+})
 public class NotificationAssistantPreferenceControllerTest {
 
     private static final String KEY = "TEST_KEY";
@@ -65,16 +70,15 @@ public class NotificationAssistantPreferenceControllerTest {
     private FragmentTransaction mFragmentTransaction;
     @Mock
     private NotificationBackend mBackend;
-    @Mock
-    private UserManager mUserManager;
     private NotificationAssistantPreferenceController mPreferenceController;
-    ComponentName mNASComponent = new ComponentName("a", "b");
+    ComponentName mNASComponent = new ComponentName("pkgname", "clsname");
+    private TwoStatePreference mPreference;
 
     @Before
     public void setUp() {
         MockitoAnnotations.initMocks(this);
         mContext = spy(ApplicationProvider.getApplicationContext());
-        ShadowApplication.getInstance().setSystemService(Context.USER_SERVICE, mUserManager);
+        mPreference = spy(new SwitchPreferenceCompat(mContext));
         doReturn(mContext).when(mFragment).getContext();
         when(mFragment.getFragmentManager()).thenReturn(mFragmentManager);
         when(mFragmentManager.beginTransaction()).thenReturn(mFragmentTransaction);
@@ -82,8 +86,13 @@ public class NotificationAssistantPreferenceControllerTest {
         mPreferenceController = new NotificationAssistantPreferenceController(mContext);
         mPreferenceController.setBackend(mBackend);
         mPreferenceController.setFragment(mFragment);
-        when(mUserManager.getProfileIds(eq(0), anyBoolean())).thenReturn(new int[] {0, 10});
-        when(mUserManager.getProfileIds(eq(20), anyBoolean())).thenReturn(new int[] {20});
+        mPreferenceController.getDefaultNASIntent();
+
+        final PreferenceManager preferenceManager = new PreferenceManager(mContext);
+        final PreferenceScreen screen = preferenceManager.createPreferenceScreen(mContext);
+        mPreference.setKey(NotificationAssistantPreferenceController.KEY_NAS);
+        screen.addPreference(mPreference);
+        mPreferenceController.displayPreference(screen);
     }
 
     @Test
@@ -155,5 +164,4 @@ public class NotificationAssistantPreferenceControllerTest {
         verify(mBackend, never())
                 .setNASMigrationDoneAndResetDefault(eq(10), anyBoolean());
     }
-
 }

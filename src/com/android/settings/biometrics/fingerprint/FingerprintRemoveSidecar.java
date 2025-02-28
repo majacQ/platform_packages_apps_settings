@@ -16,13 +16,14 @@
 
 package com.android.settings.biometrics.fingerprint;
 
-import android.annotation.Nullable;
 import android.app.settings.SettingsEnums;
 import android.hardware.fingerprint.Fingerprint;
 import android.hardware.fingerprint.FingerprintManager;
 import android.os.Bundle;
-import android.os.UserHandle;
 import android.util.Log;
+
+import androidx.annotation.Nullable;
+import androidx.annotation.VisibleForTesting;
 
 import com.android.settings.core.InstrumentedFragment;
 
@@ -38,7 +39,7 @@ public class FingerprintRemoveSidecar extends InstrumentedFragment {
     private Listener mListener;
     private Fingerprint mFingerprintRemoving;
     private Queue<Object> mFingerprintsRemoved;
-    FingerprintManager mFingerprintManager;
+    private FingerprintUpdater mFingerprintUpdater;
 
     private class RemovalError {
         Fingerprint fingerprint;
@@ -51,7 +52,8 @@ public class FingerprintRemoveSidecar extends InstrumentedFragment {
         }
     }
 
-    private FingerprintManager.RemovalCallback
+    @VisibleForTesting
+    FingerprintManager.RemovalCallback
             mRemoveCallback = new FingerprintManager.RemovalCallback() {
         @Override
         public void onRemovalSucceeded(Fingerprint fingerprint, int remaining) {
@@ -80,15 +82,15 @@ public class FingerprintRemoveSidecar extends InstrumentedFragment {
             return;
         }
         mFingerprintRemoving = fingerprint;
-        mFingerprintManager.remove(fingerprint, userId, mRemoveCallback);;
+        mFingerprintUpdater.remove(fingerprint, userId, mRemoveCallback);
     }
 
     public FingerprintRemoveSidecar() {
         mFingerprintsRemoved = new LinkedList<>();
     }
 
-    public void setFingerprintManager(FingerprintManager fingerprintManager) {
-        mFingerprintManager = fingerprintManager;
+    public void setFingerprintUpdater(FingerprintUpdater fingerprintUpdater) {
+        mFingerprintUpdater = fingerprintUpdater;
     }
 
     @Override

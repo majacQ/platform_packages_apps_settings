@@ -18,12 +18,10 @@ package com.android.settings.accessibility;
 
 import static com.android.settings.accessibility.AccessibilityDialogUtils.DialogEnums;
 import static com.android.settings.accessibility.AccessibilityStatsLogUtils.logAccessibilityServiceEnabled;
-import static com.android.settings.accessibility.PreferredShortcuts.retrieveUserShortcutType;
 
 import android.accessibilityservice.AccessibilityServiceInfo;
-import android.app.Activity;
+import android.app.AlertDialog;
 import android.app.Dialog;
-import android.app.admin.DevicePolicyManager;
 import android.app.settings.SettingsEnums;
 import android.content.BroadcastReceiver;
 import android.content.ComponentName;
@@ -34,31 +32,27 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.ResolveInfo;
-import android.content.pm.ServiceInfo;
 import android.net.Uri;
 import android.os.Bundle;
-import android.os.Handler;
-import android.os.UserHandle;
-import android.os.storage.StorageManager;
-import android.provider.Settings;
+import android.os.SystemClock;
+import android.text.BidiFormatter;
 import android.text.TextUtils;
 import android.util.Log;
 import android.view.Menu;
 import android.view.MenuInflater;
-import android.view.View;
 import android.view.accessibility.AccessibilityManager;
-import android.widget.Switch;
+import android.widget.CompoundButton;
 
 import androidx.annotation.Nullable;
 
-import com.android.internal.widget.LockPatternUtils;
+import com.android.internal.accessibility.common.ShortcutConstants;
 import com.android.settings.R;
-import com.android.settings.accessibility.AccessibilityUtil.UserShortcutType;
-import com.android.settings.password.ConfirmDeviceCredentialActivity;
-import com.android.settings.widget.SettingsMainSwitchPreference;
+import com.android.settings.accessibility.AccessibilityUtil.QuickSettingsTooltipType;
+import com.android.settings.accessibility.shortcuts.EditShortcutsPreferenceFragment;
 import com.android.settingslib.accessibility.AccessibilityUtils;
 
 import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /** Fragment for providing toggle bar and basic accessibility service setup. */
@@ -66,30 +60,22 @@ public class ToggleAccessibilityServicePreferenceFragment extends
         ToggleFeaturePreferenceFragment {
 
     private static final String TAG = "ToggleAccessibilityServicePreferenceFragment";
-    private static final int ACTIVITY_REQUEST_CONFIRM_CREDENTIAL_FOR_WEAKER_ENCRYPTION = 1;
-    private LockPatternUtils mLockPatternUtils;
-    private AtomicBoolean mIsDialogShown = new AtomicBoolean(/* initialValue= */ false);
+    private static final String KEY_HAS_LOGGED = "has_logged";
+    private final AtomicBoolean mIsDialogShown = new AtomicBoolean(/* initialValue= */ false);
 
-    private static final String EMPTY_STRING = "";
-
-    private final SettingsContentObserver mSettingsContentObserver =
-            new SettingsContentObserver(new Handler()) {
-                @Override
-                public void onChange(boolean selfChange, Uri uri) {
-                    updateSwitchBarToggleSwitch();
-                }
-            };
-
-    private Dialog mDialog;
+    private Dialog mWarningDialog;
+    private ComponentName mTileComponentName;
     private BroadcastReceiver mPackageRemovedReceiver;
+    private boolean mDisabledStateLogged = false;
+    private long mStartTimeMillsForLogging = 0;
 
     @Override
     public int getMetricsCategory() {
-        return SettingsEnums.ACCESSIBILITY_SERVICE;
+        return getArguments().getInt(AccessibilitySettings.EXTRA_METRICS_CATEGORY);
     }
 
     @Override
-    public void onCreateOptionsMenu(Menu menu, MenuInflater infalter) {
+    public void onCreateOptionsMenu(Menu menu, MenuInflater inflater) {
         // Do not call super. We don't want to see the "Help & feedback" option on this page so as
         // not to confuse users who think they might be able to send feedback about a specific
         // accessibility service from this page.
@@ -98,7 +84,18 @@ public class ToggleAccessibilityServicePreferenceFragment extends
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        mLockPatternUtils = new LockPatternUtils(getPrefContext());
+        if (savedInstanceState != null) {
+            if (savedInstanceState.containsKey(KEY_HAS_LOGGED)) {
+                mDisabledStateLogged = savedInstanceState.getBoolean(KEY_HAS_LOGGED);
+            }
+        }
+    }
+
+    @Override
+    protected void registerKeysToObserverCallback(
+            AccessibilitySettingsContentObserver contentObserver) {
+        super.registerKeysToObserverCallback(contentObserver);
+        contentObserver.registerObserverCallback(key -> updateSwitchBarToggleSwitch());
     }
 
     @Override
@@ -116,20 +113,28 @@ public class ToggleAccessibilityServicePreferenceFragment extends
     public void onResume() {
         super.onResume();
         updateSwitchBarToggleSwitch();
-        mSettingsContentObserver.register(getContentResolver());
+    }
+
+    @Override
+    public void onSaveInstanceState(Bundle outState) {
+        if (mStartTimeMillsForLogging > 0) {
+            outState.putBoolean(KEY_HAS_LOGGED, mDisabledStateLogged);
+        }
+        super.onSaveInstanceState(outState);
     }
 
     @Override
     public void onPreferenceToggled(String preferenceKey, boolean enabled) {
         ComponentName toggledService = ComponentName.unflattenFromString(preferenceKey);
         logAccessibilityServiceEnabled(toggledService, enabled);
+        if (!enabled) {
+            logDisabledState(toggledService.getPackageName());
+        }
         AccessibilityUtils.setAccessibilityServiceState(getPrefContext(), toggledService, enabled);
     }
 
-    // IMPORTANT: Refresh the info since there are dynamically changing
-    // capabilities. For
-    // example, before JellyBean MR2 the user was granting the explore by touch
-    // one.
+    // IMPORTANT: Refresh the info since there are dynamically changing capabilities. For
+    // example, before JellyBean MR2 the user was granting the explore by touch one.
     @Nullable
     AccessibilityServiceInfo getAccessibilityServiceInfo() {
         final List<AccessibilityServiceInfo> infos = AccessibilityManager.getInstance(
@@ -148,55 +153,67 @@ public class ToggleAccessibilityServicePreferenceFragment extends
 
     @Override
     public Dialog onCreateDialog(int dialogId) {
+        final AccessibilityServiceInfo info = getAccessibilityServiceInfo();
         switch (dialogId) {
-            case DialogEnums.ENABLE_WARNING_FROM_TOGGLE: {
-                final AccessibilityServiceInfo info = getAccessibilityServiceInfo();
+            case DialogEnums.ENABLE_WARNING_FROM_TOGGLE:
                 if (info == null) {
                     return null;
                 }
-                mDialog = AccessibilityServiceWarning
-                        .createCapabilitiesDialog(getPrefContext(), info,
-                                this::onDialogButtonFromEnableToggleClicked,
-                                this::onDialogButtonFromUninstallClicked);
-                break;
-            }
-            case DialogEnums.ENABLE_WARNING_FROM_SHORTCUT_TOGGLE: {
-                final AccessibilityServiceInfo info = getAccessibilityServiceInfo();
+                mWarningDialog =
+                        com.android.internal.accessibility.dialog.AccessibilityServiceWarning
+                                .createAccessibilityServiceWarningDialog(getPrefContext(), info,
+                                        v -> onAllowButtonFromEnableToggleClicked(),
+                                        v -> onDenyButtonFromEnableToggleClicked(),
+                                        v -> onDialogButtonFromUninstallClicked());
+                return mWarningDialog;
+            case DialogEnums.ENABLE_WARNING_FROM_SHORTCUT_TOGGLE:
                 if (info == null) {
                     return null;
                 }
-                mDialog = AccessibilityServiceWarning
-                        .createCapabilitiesDialog(getPrefContext(), info,
-                                this::onDialogButtonFromShortcutToggleClicked,
-                                this::onDialogButtonFromUninstallClicked);
-                break;
-            }
-            case DialogEnums.ENABLE_WARNING_FROM_SHORTCUT: {
-                final AccessibilityServiceInfo info = getAccessibilityServiceInfo();
+                mWarningDialog =
+                        com.android.internal.accessibility.dialog.AccessibilityServiceWarning
+                                .createAccessibilityServiceWarningDialog(getPrefContext(), info,
+                                        v -> onAllowButtonFromShortcutToggleClicked(),
+                                        v -> onDenyButtonFromShortcutToggleClicked(),
+                                        v -> onDialogButtonFromUninstallClicked());
+                return mWarningDialog;
+            case DialogEnums.ENABLE_WARNING_FROM_SHORTCUT:
                 if (info == null) {
                     return null;
                 }
-                mDialog = AccessibilityServiceWarning
-                        .createCapabilitiesDialog(getPrefContext(), info,
-                                this::onDialogButtonFromShortcutClicked,
-                                this::onDialogButtonFromUninstallClicked);
-                break;
-            }
-            case DialogEnums.DISABLE_WARNING_FROM_TOGGLE: {
-                final AccessibilityServiceInfo info = getAccessibilityServiceInfo();
+                mWarningDialog =
+                        com.android.internal.accessibility.dialog.AccessibilityServiceWarning
+                                .createAccessibilityServiceWarningDialog(getPrefContext(), info,
+                                        v -> onAllowButtonFromShortcutClicked(),
+                                        v -> onDenyButtonFromShortcutClicked(),
+                                        v -> onDialogButtonFromUninstallClicked());
+                return mWarningDialog;
+            case DialogEnums.DISABLE_WARNING_FROM_TOGGLE:
                 if (info == null) {
                     return null;
                 }
-                mDialog = AccessibilityServiceWarning
-                        .createDisableDialog(getPrefContext(), info,
-                                this::onDialogButtonFromDisableToggleClicked);
-                break;
-            }
-            default: {
-                mDialog = super.onCreateDialog(dialogId);
-            }
+                mWarningDialog = createDisableDialog(
+                        getPrefContext(), info, this::onDialogButtonFromDisableToggleClicked);
+                return mWarningDialog;
+            default:
+                return super.onCreateDialog(dialogId);
         }
-        return mDialog;
+    }
+
+    /** Returns a {@link Dialog} to be shown to confirm that they want to disable a service. */
+    private static Dialog createDisableDialog(Context context,
+            AccessibilityServiceInfo info, DialogInterface.OnClickListener listener) {
+        final Locale locale = context.getResources().getConfiguration().getLocales().get(0);
+        final CharSequence label =
+                info.getResolveInfo().loadLabel(context.getPackageManager());
+        CharSequence serviceName = BidiFormatter.getInstance(locale).unicodeWrap(label);
+
+        return new AlertDialog.Builder(context)
+                .setTitle(context.getString(R.string.disable_service_title, serviceName))
+                .setCancelable(true)
+                .setPositiveButton(R.string.accessibility_dialog_button_stop, listener)
+                .setNegativeButton(R.string.accessibility_dialog_button_cancel, listener)
+                .create();
     }
 
     @Override
@@ -222,12 +239,26 @@ public class ToggleAccessibilityServicePreferenceFragment extends
     }
 
     @Override
-    protected void updateToggleServiceTitle(SettingsMainSwitchPreference switchPreference) {
-        final AccessibilityServiceInfo info = getAccessibilityServiceInfo();
-        final String switchBarText = (info == null) ? "" :
-                getString(R.string.accessibility_service_primary_switch_title,
-                        info.getResolveInfo().loadLabel(getPackageManager()));
-        switchPreference.setTitle(switchBarText);
+    ComponentName getTileComponentName() {
+        return mTileComponentName;
+    }
+
+    @Override
+    CharSequence getTileTooltipContent(@QuickSettingsTooltipType int type) {
+        final ComponentName componentName = getTileComponentName();
+        if (componentName == null) {
+            return null;
+        }
+
+        final CharSequence tileName = loadTileLabel(getPrefContext(), componentName);
+        if (tileName == null) {
+            return null;
+        }
+
+        final int titleResId = type == QuickSettingsTooltipType.GUIDE_TO_EDIT
+                ? R.string.accessibility_service_qs_tooltip_content
+                : R.string.accessibility_service_auto_added_qs_tooltip_content;
+        return getString(titleResId, tileName);
     }
 
     @Override
@@ -244,33 +275,8 @@ public class ToggleAccessibilityServicePreferenceFragment extends
                 .contains(mComponentName);
     }
 
-    /**
-     * Return whether the device is encrypted with legacy full disk encryption. Newer devices
-     * should be using File Based Encryption.
-     *
-     * @return true if device is encrypted
-     */
-    private boolean isFullDiskEncrypted() {
-        return StorageManager.isNonDefaultBlockEncrypted();
-    }
-
     @Override
     public void onActivityResult(int requestCode, int resultCode, Intent data) {
-        if (requestCode == ACTIVITY_REQUEST_CONFIRM_CREDENTIAL_FOR_WEAKER_ENCRYPTION) {
-            if (resultCode == Activity.RESULT_OK) {
-                handleConfirmServiceEnabled(/* confirmed= */ true);
-                // The user confirmed that they accept weaker encryption when
-                // enabling the accessibility service, so change encryption.
-                // Since we came here asynchronously, check encryption again.
-                if (isFullDiskEncrypted()) {
-                    mLockPatternUtils.clearEncryptionPassword();
-                    Settings.Global.putInt(getContentResolver(),
-                            Settings.Global.REQUIRE_PASSWORD_TO_DECRYPT, 0);
-                }
-            } else {
-                handleConfirmServiceEnabled(/* confirmed= */ false);
-            }
-        }
     }
 
     private void registerPackageRemoveReceiver() {
@@ -299,22 +305,10 @@ public class ToggleAccessibilityServicePreferenceFragment extends
         mPackageRemovedReceiver = null;
     }
 
-    private boolean isServiceSupportAccessibilityButton() {
-        final AccessibilityManager ams = getPrefContext().getSystemService(
-                AccessibilityManager.class);
-        final List<AccessibilityServiceInfo> services = ams.getInstalledAccessibilityServiceList();
-
-        for (AccessibilityServiceInfo info : services) {
-            if ((info.flags & AccessibilityServiceInfo.FLAG_REQUEST_ACCESSIBILITY_BUTTON) != 0) {
-                ServiceInfo serviceInfo = info.getResolveInfo().serviceInfo;
-                if (serviceInfo != null && TextUtils.equals(serviceInfo.name,
-                        getAccessibilityServiceInfo().getResolveInfo().serviceInfo.name)) {
-                    return true;
-                }
-            }
-        }
-
-        return false;
+    boolean serviceSupportsAccessibilityButton() {
+        final AccessibilityServiceInfo info = getAccessibilityServiceInfo();
+        return info != null
+                && (info.flags & AccessibilityServiceInfo.FLAG_REQUEST_ACCESSIBILITY_BUTTON) != 0;
     }
 
     private void handleConfirmServiceEnabled(boolean confirmed) {
@@ -322,25 +316,8 @@ public class ToggleAccessibilityServicePreferenceFragment extends
         onPreferenceToggled(mPreferenceKey, confirmed);
     }
 
-    private String createConfirmCredentialReasonMessage() {
-        int resId = R.string.enable_service_password_reason;
-        switch (mLockPatternUtils.getKeyguardStoredPasswordQuality(UserHandle.myUserId())) {
-            case DevicePolicyManager.PASSWORD_QUALITY_SOMETHING: {
-                resId = R.string.enable_service_pattern_reason;
-            }
-            break;
-            case DevicePolicyManager.PASSWORD_QUALITY_NUMERIC:
-            case DevicePolicyManager.PASSWORD_QUALITY_NUMERIC_COMPLEX: {
-                resId = R.string.enable_service_pin_reason;
-            }
-            break;
-        }
-        return getString(resId, getAccessibilityServiceInfo().getResolveInfo()
-                .loadLabel(getPackageManager()));
-    }
-
     @Override
-    public void onSwitchChanged(Switch switchView, boolean isChecked) {
+    public void onCheckedChanged(CompoundButton buttonView, boolean isChecked) {
         if (isChecked != isAccessibilityServiceEnabled()) {
             onPreferenceClick(isChecked);
         }
@@ -348,16 +325,16 @@ public class ToggleAccessibilityServicePreferenceFragment extends
 
     @Override
     public void onToggleClicked(ShortcutPreference preference) {
-        final int shortcutTypes = retrieveUserShortcutType(getPrefContext(),
-                mComponentName.flattenToString(), UserShortcutType.SOFTWARE);
+        final int shortcutTypes = getUserPreferredShortcutTypes();
         if (preference.isChecked()) {
-            if (!mToggleServiceSwitchPreference.isChecked()) {
+            final boolean isWarningRequired =
+                    getPrefContext().getSystemService(AccessibilityManager.class)
+                            .isAccessibilityServiceWarningRequired(getAccessibilityServiceInfo());
+            if (isWarningRequired) {
                 preference.setChecked(false);
                 showPopupDialog(DialogEnums.ENABLE_WARNING_FROM_SHORTCUT_TOGGLE);
             } else {
-                AccessibilityUtil.optInAllValuesToSettings(getPrefContext(), shortcutTypes,
-                        mComponentName);
-                showPopupDialog(DialogEnums.LAUNCH_ACCESSIBILITY_TUTORIAL);
+                onAllowButtonFromShortcutToggleClicked();
             }
         } else {
             AccessibilityUtil.optOutAllValuesFromSettings(getPrefContext(), shortcutTypes,
@@ -368,10 +345,14 @@ public class ToggleAccessibilityServicePreferenceFragment extends
 
     @Override
     public void onSettingsClicked(ShortcutPreference preference) {
-        final boolean isServiceOnOrShortcutAdded = mShortcutPreference.isChecked()
-                || mToggleServiceSwitchPreference.isChecked();
-        showPopupDialog(isServiceOnOrShortcutAdded ? DialogEnums.EDIT_SHORTCUT
-                : DialogEnums.ENABLE_WARNING_FROM_SHORTCUT);
+        final boolean isWarningRequired =
+                getPrefContext().getSystemService(AccessibilityManager.class)
+                        .isAccessibilityServiceWarningRequired(getAccessibilityServiceInfo());
+        if (isWarningRequired) {
+            showPopupDialog(DialogEnums.ENABLE_WARNING_FROM_SHORTCUT);
+        } else {
+            onAllowButtonFromShortcutClicked();
+        }
     }
 
     @Override
@@ -406,6 +387,14 @@ public class ToggleAccessibilityServicePreferenceFragment extends
         // Get Accessibility service name.
         mPackageName = getAccessibilityServiceInfo().getResolveInfo().loadLabel(
                 getPackageManager());
+
+        if (arguments.containsKey(AccessibilitySettings.EXTRA_TILE_SERVICE_COMPONENT_NAME)) {
+            final String tileServiceComponentName = arguments.getString(
+                    AccessibilitySettings.EXTRA_TILE_SERVICE_COMPONENT_NAME);
+            mTileComponentName = ComponentName.unflattenFromString(tileServiceComponentName);
+        }
+
+        mStartTimeMillsForLogging = arguments.getLong(AccessibilitySettings.EXTRA_TIME_FOR_LOGGING);
     }
 
     private void onDialogButtonFromDisableToggleClicked(DialogInterface dialog, int which) {
@@ -421,19 +410,8 @@ public class ToggleAccessibilityServicePreferenceFragment extends
         }
     }
 
-    private void onDialogButtonFromEnableToggleClicked(View view) {
-        final int viewId = view.getId();
-        if (viewId == R.id.permission_enable_allow_button) {
-            onAllowButtonFromEnableToggleClicked();
-        } else if (viewId == R.id.permission_enable_deny_button) {
-            onDenyButtonFromEnableToggleClicked();
-        } else {
-            throw new IllegalArgumentException("Unexpected view id");
-        }
-    }
-
     private void onDialogButtonFromUninstallClicked() {
-        mDialog.dismiss();
+        mWarningDialog.dismiss();
         final Intent uninstallIntent = createUninstallPackageActivityIntent();
         if (uninstallIntent == null) {
             return;
@@ -461,51 +439,58 @@ public class ToggleAccessibilityServicePreferenceFragment extends
         unregisterPackageRemoveReceiver();
     }
 
-    private void onAllowButtonFromEnableToggleClicked() {
-        if (isFullDiskEncrypted()) {
-            final String title = createConfirmCredentialReasonMessage();
-            final Intent intent = ConfirmDeviceCredentialActivity.createIntent(title, /* details= */
-                    null);
-            startActivityForResult(intent,
-                    ACTIVITY_REQUEST_CONFIRM_CREDENTIAL_FOR_WEAKER_ENCRYPTION);
-        } else {
-            handleConfirmServiceEnabled(/* confirmed= */ true);
-            if (isServiceSupportAccessibilityButton()) {
-                mIsDialogShown.set(false);
-                showPopupDialog(DialogEnums.LAUNCH_ACCESSIBILITY_TUTORIAL);
-            }
+    @Override
+    protected int getPreferenceScreenResId() {
+        // TODO(b/171272809): Add back when controllers move to static type
+        return 0;
+    }
+
+    @Override
+    protected String getLogTag() {
+        return TAG;
+    }
+
+    @Override
+    protected int getDefaultShortcutTypes() {
+        if (android.view.accessibility.Flags.a11yQsShortcut()) {
+            AccessibilityServiceInfo info = getAccessibilityServiceInfo();
+            boolean isAccessibilityTool = info != null && info.isAccessibilityTool();
+            return !isAccessibilityTool || getTileComponentName() == null
+                    ? super.getDefaultShortcutTypes()
+                    : ShortcutConstants.UserShortcutType.QUICK_SETTINGS;
         }
 
-        mDialog.dismiss();
+        return super.getDefaultShortcutTypes();
+    }
+
+    private void onAllowButtonFromEnableToggleClicked() {
+        handleConfirmServiceEnabled(/* confirmed= */ true);
+        if (serviceSupportsAccessibilityButton()) {
+            mIsDialogShown.set(false);
+            showPopupDialog(DialogEnums.LAUNCH_ACCESSIBILITY_TUTORIAL);
+        }
+        if (mWarningDialog != null) {
+            mWarningDialog.dismiss();
+        }
     }
 
     private void onDenyButtonFromEnableToggleClicked() {
         handleConfirmServiceEnabled(/* confirmed= */ false);
-        mDialog.dismiss();
+        mWarningDialog.dismiss();
     }
 
-    void onDialogButtonFromShortcutToggleClicked(View view) {
-        final int viewId = view.getId();
-        if (viewId == R.id.permission_enable_allow_button) {
-            onAllowButtonFromShortcutToggleClicked();
-        } else if (viewId == R.id.permission_enable_deny_button) {
-            onDenyButtonFromShortcutToggleClicked();
-        } else {
-            throw new IllegalArgumentException("Unexpected view id");
-        }
-    }
-
-    private void onAllowButtonFromShortcutToggleClicked() {
+    void onAllowButtonFromShortcutToggleClicked() {
         mShortcutPreference.setChecked(true);
 
-        final int shortcutTypes = retrieveUserShortcutType(getPrefContext(),
-                mComponentName.flattenToString(), UserShortcutType.SOFTWARE);
+        final int shortcutTypes = getUserPreferredShortcutTypes();
         AccessibilityUtil.optInAllValuesToSettings(getPrefContext(), shortcutTypes, mComponentName);
 
         mIsDialogShown.set(false);
         showPopupDialog(DialogEnums.LAUNCH_ACCESSIBILITY_TUTORIAL);
 
-        mDialog.dismiss();
+        if (mWarningDialog != null) {
+            mWarningDialog.dismiss();
+        }
 
         mShortcutPreference.setSummary(getShortcutTypeSummary(getPrefContext()));
     }
@@ -513,29 +498,26 @@ public class ToggleAccessibilityServicePreferenceFragment extends
     private void onDenyButtonFromShortcutToggleClicked() {
         mShortcutPreference.setChecked(false);
 
-        mDialog.dismiss();
-    }
-
-    void onDialogButtonFromShortcutClicked(View view) {
-        final int viewId = view.getId();
-        if (viewId == R.id.permission_enable_allow_button) {
-            onAllowButtonFromShortcutClicked();
-        } else if (viewId == R.id.permission_enable_deny_button) {
-            onDenyButtonFromShortcutClicked();
-        } else {
-            throw new IllegalArgumentException("Unexpected view id");
-        }
+        mWarningDialog.dismiss();
     }
 
     private void onAllowButtonFromShortcutClicked() {
         mIsDialogShown.set(false);
-        showPopupDialog(DialogEnums.EDIT_SHORTCUT);
+        EditShortcutsPreferenceFragment.showEditShortcutScreen(
+                getContext(),
+                getMetricsCategory(),
+                getShortcutTitle(),
+                mComponentName,
+                getIntent()
+        );
 
-        mDialog.dismiss();
+        if (mWarningDialog != null) {
+            mWarningDialog.dismiss();
+        }
     }
 
     private void onDenyButtonFromShortcutClicked() {
-        mDialog.dismiss();
+        mWarningDialog.dismiss();
     }
 
     private boolean onPreferenceClick(boolean isChecked) {
@@ -543,13 +525,13 @@ public class ToggleAccessibilityServicePreferenceFragment extends
             mToggleServiceSwitchPreference.setChecked(false);
             getArguments().putBoolean(AccessibilitySettings.EXTRA_CHECKED,
                     /* disableService */ false);
-            if (!mShortcutPreference.isChecked()) {
+            final boolean isWarningRequired =
+                    getPrefContext().getSystemService(AccessibilityManager.class)
+                            .isAccessibilityServiceWarningRequired(getAccessibilityServiceInfo());
+            if (isWarningRequired) {
                 showPopupDialog(DialogEnums.ENABLE_WARNING_FROM_TOGGLE);
             } else {
-                handleConfirmServiceEnabled(/* confirmed= */ true);
-                if (isServiceSupportAccessibilityButton()) {
-                    showPopupDialog(DialogEnums.LAUNCH_ACCESSIBILITY_TUTORIAL);
-                }
+                onAllowButtonFromEnableToggleClicked();
             }
         } else {
             mToggleServiceSwitchPreference.setChecked(true);
@@ -566,6 +548,15 @@ public class ToggleAccessibilityServicePreferenceFragment extends
             setOnDismissListener(
                     dialog -> mIsDialogShown.compareAndSet(/* expect= */ true, /* update= */
                             false));
+        }
+    }
+
+    private void logDisabledState(String packageName) {
+        if (mStartTimeMillsForLogging > 0 && !mDisabledStateLogged) {
+            AccessibilityStatsLogUtils.logDisableNonA11yCategoryService(
+                    packageName,
+                    SystemClock.elapsedRealtime() - mStartTimeMillsForLogging);
+            mDisabledStateLogged = true;
         }
     }
 }

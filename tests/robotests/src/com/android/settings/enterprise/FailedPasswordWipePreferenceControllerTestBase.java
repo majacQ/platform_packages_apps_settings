@@ -18,14 +18,18 @@ package com.android.settings.enterprise;
 
 import static com.google.common.truth.Truth.assertThat;
 
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import android.app.admin.DevicePolicyManager;
 import android.content.Context;
 
 import androidx.preference.Preference;
 
 import com.android.settings.R;
 import com.android.settings.testutils.FakeFeatureFactory;
+import com.android.settingslib.utils.StringUtil;
 
 import org.junit.Before;
 import org.junit.Test;
@@ -53,6 +57,8 @@ public abstract class FailedPasswordWipePreferenceControllerTestBase {
     @Before
     public void setUp() {
         MockitoAnnotations.initMocks(this);
+        doReturn(mock(DevicePolicyManager.class)).when(mContext)
+                .getSystemService(Context.DEVICE_POLICY_SERVICE);
         mFeatureFactory = FakeFeatureFactory.setupForTest();
     }
 
@@ -63,8 +69,10 @@ public abstract class FailedPasswordWipePreferenceControllerTestBase {
         final Preference preference = new Preference(mContext, null, 0, 0);
 
         setMaximumFailedPasswordsBeforeWipe(10);
-        when(mContext.getResources().getQuantityString(
-                R.plurals.enterprise_privacy_number_failed_password_wipe, 10, 10))
+        when(mContext.getResources().getString(
+                R.string.enterprise_privacy_number_failed_password_wipe)).thenReturn("# attempts");
+        when(StringUtil.getIcuPluralsString(mContext, 10,
+                R.string.enterprise_privacy_number_failed_password_wipe))
                 .thenReturn("10 attempts");
         mController.updateState(preference);
         assertThat(preference.getSummary()).isEqualTo("10 attempts");

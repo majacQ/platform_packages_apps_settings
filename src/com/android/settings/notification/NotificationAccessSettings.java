@@ -16,7 +16,9 @@
 
 package com.android.settings.notification;
 
-import android.annotation.Nullable;
+import static android.app.admin.DevicePolicyResources.Strings.Settings.WORK_APPS_CANNOT_ACCESS_NOTIFICATION_SETTINGS;
+import static android.app.admin.DevicePolicyResources.Strings.Settings.WORK_PROFILE_NOTIFICATION_LISTENER_BLOCKED;
+
 import android.app.NotificationManager;
 import android.app.admin.DevicePolicyManager;
 import android.app.settings.SettingsEnums;
@@ -37,9 +39,11 @@ import android.util.Log;
 import android.view.View;
 import android.widget.Toast;
 
+import androidx.annotation.Nullable;
 import androidx.preference.PreferenceCategory;
 import androidx.preference.PreferenceScreen;
 
+import com.android.internal.annotations.VisibleForTesting;
 import com.android.settings.R;
 import com.android.settings.Utils;
 import com.android.settings.applications.AppInfoBase;
@@ -60,8 +64,8 @@ import java.util.List;
 @SearchIndexable
 public class NotificationAccessSettings extends EmptyTextSettings {
     private static final String TAG = "NotifAccessSettings";
-    private static final String ALLOWED_KEY = "allowed";
-    private static final String NOT_ALLOWED_KEY = "not_allowed";
+    static final String ALLOWED_KEY = "allowed";
+    static final String NOT_ALLOWED_KEY = "not_allowed";
 
     private static final ManagedServiceSettings.Config CONFIG =
             new ManagedServiceSettings.Config.Builder()
@@ -76,9 +80,9 @@ public class NotificationAccessSettings extends EmptyTextSettings {
                     .setEmptyText(R.string.no_notification_listeners)
                     .build();
 
-    private NotificationManager mNm;
+    @VisibleForTesting NotificationManager mNm;
     protected Context mContext;
-    private PackageManager mPm;
+    @VisibleForTesting PackageManager mPm;
     private DevicePolicyManager mDpm;
     private ServiceListing mServiceListing;
     private IconDrawableFactory mIconDrawableFactory;
@@ -103,7 +107,9 @@ public class NotificationAccessSettings extends EmptyTextSettings {
 
         if (UserManager.get(mContext).isManagedProfile()) {
             // Apps in the work profile do not support notification listeners.
-            Toast.makeText(mContext, R.string.notification_settings_work_profile,
+            Toast.makeText(mContext,
+                    mDpm.getResources().getString(WORK_APPS_CANNOT_ACCESS_NOTIFICATION_SETTINGS,
+                            () -> mContext.getString(R.string.notification_settings_work_profile)),
                     Toast.LENGTH_SHORT).show();
             finish();
         }
@@ -128,7 +134,8 @@ public class NotificationAccessSettings extends EmptyTextSettings {
         mServiceListing.setListening(false);
     }
 
-    private void updateList(List<ServiceInfo> services) {
+    @VisibleForTesting
+    void updateList(List<ServiceInfo> services) {
         final UserManager um = (UserManager) mContext.getSystemService(Context.USER_SERVICE);
         final int managedProfileId = Utils.getManagedProfileId(um, UserHandle.myUserId());
 
@@ -141,6 +148,12 @@ public class NotificationAccessSettings extends EmptyTextSettings {
         services.sort(new PackageItemInfo.DisplayNameComparator(mPm));
         for (ServiceInfo service : services) {
             final ComponentName cn = new ComponentName(service.packageName, service.name);
+            boolean isAllowed = mNm.isNotificationListenerAccessGranted(cn);
+            if (!isAllowed && cn.flattenToString().length()
+                    > NotificationManager.MAX_SERVICE_COMPONENT_NAME_LENGTH) {
+                continue;
+            }
+
             CharSequence title = null;
             try {
                 title = mPm.getApplicationInfoAsUser(
@@ -163,7 +176,10 @@ public class NotificationAccessSettings extends EmptyTextSettings {
             if (managedProfileId != UserHandle.USER_NULL
                     && !mDpm.isNotificationListenerServicePermitted(
                     service.packageName, managedProfileId)) {
-                pref.setSummary(R.string.work_profile_notification_access_blocked_summary);
+                pref.setSummary(mDpm.getResources().getString(
+                        WORK_PROFILE_NOTIFICATION_LISTENER_BLOCKED,
+                        () -> getString(
+                                R.string.work_profile_notification_access_blocked_summary)));
             }
             pref.setOnPreferenceClickListener(preference -> {
                 final Bundle args = new Bundle();
@@ -185,7 +201,7 @@ public class NotificationAccessSettings extends EmptyTextSettings {
                         return true;
                     });
             pref.setKey(cn.flattenToString());
-            if (mNm.isNotificationListenerAccessGranted(cn)) {
+            if (isAllowed) {
                 allowedCategory.addPreference(pref);
             } else {
                 notAllowedCategory.addPreference(pref);

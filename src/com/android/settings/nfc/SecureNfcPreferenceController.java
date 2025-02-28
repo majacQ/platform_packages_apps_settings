@@ -17,10 +17,12 @@ package com.android.settings.nfc;
 
 import android.content.Context;
 import android.nfc.NfcAdapter;
+import android.os.UserManager;
 
 import androidx.preference.PreferenceScreen;
-import androidx.preference.SwitchPreference;
+import androidx.preference.TwoStatePreference;
 
+import com.android.settings.R;
 import com.android.settings.core.TogglePreferenceController;
 import com.android.settingslib.core.lifecycle.LifecycleObserver;
 import com.android.settingslib.core.lifecycle.events.OnPause;
@@ -31,10 +33,12 @@ public class SecureNfcPreferenceController extends TogglePreferenceController
 
     private final NfcAdapter mNfcAdapter;
     private SecureNfcEnabler mSecureNfcEnabler;
+    private final UserManager mUserManager;
 
     public SecureNfcPreferenceController(Context context, String key) {
         super(context, key);
         mNfcAdapter = NfcAdapter.getDefaultAdapter(context);
+        mUserManager = context.getSystemService(UserManager.class);
     }
 
     @Override
@@ -45,7 +49,7 @@ public class SecureNfcPreferenceController extends TogglePreferenceController
             return;
         }
 
-        final SwitchPreference switchPreference = screen.findPreference(getPreferenceKey());
+        final TwoStatePreference switchPreference = screen.findPreference(getPreferenceKey());
 
         mSecureNfcEnabler = new SecureNfcEnabler(mContext, switchPreference);
     }
@@ -57,7 +61,11 @@ public class SecureNfcPreferenceController extends TogglePreferenceController
 
     @Override
     public boolean setChecked(boolean isChecked) {
-        return mNfcAdapter.enableSecureNfc(isChecked);
+        if (isToggleable()) {
+            return mNfcAdapter.enableSecureNfc(isChecked);
+        } else {
+            return false;
+        }
     }
 
     @Override
@@ -82,6 +90,11 @@ public class SecureNfcPreferenceController extends TogglePreferenceController
     }
 
     @Override
+    public int getSliceHighlightMenuRes() {
+        return R.string.menu_key_connected_devices;
+    }
+
+    @Override
     public void onResume() {
         if (mSecureNfcEnabler != null) {
             mSecureNfcEnabler.resume();
@@ -94,4 +107,12 @@ public class SecureNfcPreferenceController extends TogglePreferenceController
             mSecureNfcEnabler.pause();
         }
     }
+
+    private boolean isToggleable() {
+        if (!mUserManager.isPrimaryUser()) {
+            return false;
+        }
+        return true;
+    }
+
 }

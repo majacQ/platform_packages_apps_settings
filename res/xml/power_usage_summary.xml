@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Copyright (C) 2021 The Android Open Source Project
+<!-- Copyright (C) 2024 The Android Open Source Project
 
      Licensed under the Apache License, Version 2.0 (the "License");
      you may not use this file except in compliance with the License.
@@ -33,13 +33,13 @@
         android:selectable="false"
         settings:searchable="false" />
 
-    <com.android.settings.widget.CardPreference
+    <com.android.settings.widget.TipCardPreference
         android:key="battery_tip"
         android:title="@string/summary_placeholder"
         settings:controller="com.android.settings.fuelgauge.batterytip.BatteryTipPreferenceController" />
 
     <Preference
-        android:fragment="com.android.settings.fuelgauge.PowerUsageAdvanced"
+        android:fragment="com.android.settings.fuelgauge.batteryusage.PowerUsageAdvanced"
         android:key="battery_usage_summary"
         android:title="@string/advanced_battery_preference_title"
         settings:keywords="@string/keywords_battery_usage" />
@@ -58,7 +58,7 @@
         settings:controller="com.android.settings.fuelgauge.batterytip.BatteryManagerPreferenceController"
         settings:keywords="@string/keywords_battery_adaptive_preferences" />
 
-    <SwitchPreference
+    <SwitchPreferenceCompat
         android:key="battery_percentage"
         android:title="@string/battery_percentage"
         android:summary="@string/battery_percentage_description"

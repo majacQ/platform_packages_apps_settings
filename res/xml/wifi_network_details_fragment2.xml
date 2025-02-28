@@ -35,10 +35,40 @@
         android:icon="@drawable/ic_info_outline_24dp"
         android:selectable="false"/>
 
+    <com.android.settingslib.widget.BannerMessagePreference
+        android:key="wep_less_secure_warning"
+        android:title="@string/wep_network_less_secure_warning_title"
+        settings:controller="com.android.settings.wifi.WepLessSecureWarningController"/>
+
     <!-- Buttons -->
     <com.android.settingslib.widget.ActionButtonsPreference
         android:key="buttons"
         android:selectable="false"/>
+
+    <!-- Hotspot device details category -->
+    <PreferenceCategory
+        android:key="hotspot_device_details_category"
+        android:title="@string/hotspot_device_details_category"
+        settings:isPreferenceVisible="false">
+        <Preference
+            android:key="hotspot_device_details_internet_source"
+            android:title="@string/hotspot_device_details_internet_source"
+            android:selectable="false"
+            settings:enableCopying="true"/>
+        <Preference
+            android:key="hotspot_device_details_battery"
+            android:icon="@drawable/ic_battery_full"
+            android:title="@string/power_usage_summary_title"
+            android:selectable="false"
+            settings:enableCopying="true"/>
+    </PreferenceCategory>
+
+    <!-- Hotspot connection category -->
+    <PreferenceCategory
+        android:key="hotspot_connection_category"
+        android:title="@string/hotspot_connection_category"
+        settings:isPreferenceVisible="false">
+    </PreferenceCategory>
 
     <!-- General Details Preferences -->
     <Preference
@@ -58,29 +88,38 @@
         android:title="@string/wifi_security"
         android:selectable="false"/>
 
-    <DropDownPreference
+    <ListPreference
         android:key="metered"
         android:icon="@drawable/ic_attach_money_black_24dp"
         android:title="@string/wifi_metered_title"
         android:entries="@array/wifi_metered_entries"
         android:entryValues="@array/wifi_metered_values"/>
 
-    <DropDownPreference
+    <ListPreference
         android:key="privacy"
         android:icon="@drawable/ic_wifi_privacy_24dp"
         android:title="@string/wifi_privacy_settings"
         android:entries="@array/wifi_privacy_entries"
         android:entryValues="@array/wifi_privacy_values"/>
 
+    <com.android.settings.spa.preference.ComposePreference
+        android:key="privacy_settings"
+        android:title="@string/wifi_privacy_settings"
+        settings:controller="com.android.settings.wifi.details2.WifiPrivacyPreferenceController"/>
+
     <Preference
         android:key="subscription_detail"
         android:title="@string/wifi_subscription"
         android:summary="@string/wifi_subscription_summary"/>
 
-    <SwitchPreference
+    <SwitchPreferenceCompat
         android:key="auto_connect"
         android:title="@string/wifi_auto_connect_title"
         android:summary="@string/wifi_auto_connect_summary"/>
+
+    <com.android.settings.spa.preference.ComposePreference
+        android:key="certificate_details"
+        settings:controller="com.android.settings.wifi.details2.CertificateDetailsPreferenceController"/>
 
     <!-- Add device Preference -->
     <Preference
@@ -92,6 +131,9 @@
     <PreferenceCategory
             android:key="ip_details_category"
             android:title="@string/wifi_setup_detail">
+        <com.android.settings.spa.preference.ComposePreference
+            android:key="server_name"
+            settings:controller="com.android.settings.wifi.details2.ServerNamePreferenceController"/>
         <Preference
                 android:key="type"
                 android:title="@string/wifi_type_title"
@@ -144,15 +186,11 @@
                 settings:enableCopying="true"/>
     </PreferenceCategory>
 
-    <!-- IPv6 Details -->
-    <PreferenceCategory
-            android:key="ipv6_category"
-            android:title="@string/wifi_details_ipv6_address_header"
-            android:selectable="false">
-        <Preference
-                android:key="ipv6_addresses"
-                android:selectable="false"
-                settings:enableCopying="true"/>
-    </PreferenceCategory>
+    <!-- IPv6 address -->
+    <Preference
+        android:title="@string/wifi_details_ipv6_address_header"
+        android:key="ipv6_addresses"
+        android:selectable="false"
+        settings:enableCopying="true"/>
 
 </PreferenceScreen>

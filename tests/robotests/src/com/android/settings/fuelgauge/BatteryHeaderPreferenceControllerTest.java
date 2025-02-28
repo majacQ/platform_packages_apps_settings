@@ -11,42 +11,41 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
- *
  */
-
 package com.android.settings.fuelgauge;
 
 import static com.google.common.truth.Truth.assertThat;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.verifyZeroInteractions;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
-import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
-import android.icu.text.NumberFormat;
+import android.hardware.usb.UsbManager;
+import android.hardware.usb.UsbPort;
+import android.hardware.usb.UsbPortStatus;
 import android.os.BatteryManager;
 import android.os.PowerManager;
-import android.text.TextUtils;
+import android.os.SystemProperties;
 
-import androidx.lifecycle.LifecycleOwner;
-import androidx.preference.PreferenceFragmentCompat;
 import androidx.preference.PreferenceScreen;
 
-import com.android.settings.R;
 import com.android.settings.core.BasePreferenceController;
 import com.android.settings.fuelgauge.batterytip.tips.BatteryTip;
 import com.android.settings.fuelgauge.batterytip.tips.LowBatteryTip;
 import com.android.settings.fuelgauge.batterytip.tips.SmartBatteryTip;
+import com.android.settings.testutils.BatteryTestUtils;
+import com.android.settings.testutils.FakeFeatureFactory;
 import com.android.settings.testutils.shadow.ShadowEntityHeaderController;
 import com.android.settings.testutils.shadow.ShadowUtils;
 import com.android.settings.widget.EntityHeaderController;
-import com.android.settingslib.core.lifecycle.Lifecycle;
+import com.android.settingslib.fuelgauge.BatteryUtils;
 import com.android.settingslib.widget.UsageProgressBarPreference;
 
 import org.junit.After;
@@ -71,34 +70,27 @@ public class BatteryHeaderPreferenceControllerTest {
     private static final String TIME_LEFT = "2h30min";
     private static final String BATTERY_STATUS = "Charging";
 
-    @Mock
-    private Activity mActivity;
-    @Mock
-    private PreferenceFragmentCompat mPreferenceFragment;
-    @Mock
-    private PreferenceScreen mPreferenceScreen;
-    @Mock
-    private BatteryInfo mBatteryInfo;
-    @Mock
-    private EntityHeaderController mEntityHeaderController;
-    @Mock
-    private UsageProgressBarPreference mBatteryUsageProgressBarPref;
-    @Mock
-    private BatteryStatusFeatureProvider mBatteryStatusFeatureProvider;
+    @Mock private PreferenceScreen mPreferenceScreen;
+    @Mock private BatteryInfo mBatteryInfo;
+    @Mock private EntityHeaderController mEntityHeaderController;
+    @Mock private UsageProgressBarPreference mBatteryUsageProgressBarPref;
+    @Mock private BatteryStatusFeatureProvider mBatteryStatusFeatureProvider;
+    @Mock private UsbPort mUsbPort;
+    @Mock private UsbManager mUsbManager;
+    @Mock private UsbPortStatus mUsbPortStatus;
+
     private BatteryHeaderPreferenceController mController;
     private Context mContext;
     private ShadowPowerManager mShadowPowerManager;
     private Intent mBatteryIntent;
-    private LifecycleOwner mLifecycleOwner;
-    private Lifecycle mLifecycle;
+    private FakeFeatureFactory mFactory;
 
     @Before
     public void setUp() {
         MockitoAnnotations.initMocks(this);
 
-        mLifecycleOwner = () -> mLifecycle;
-        mLifecycle = new Lifecycle(mLifecycleOwner);
         mContext = spy(RuntimeEnvironment.application);
+        when(mContext.getSystemService(UsbManager.class)).thenReturn(mUsbManager);
         ShadowEntityHeaderController.setUseMock(mEntityHeaderController);
 
         mBatteryIntent = new Intent();
@@ -107,20 +99,20 @@ public class BatteryHeaderPreferenceControllerTest {
         mBatteryIntent.putExtra(BatteryManager.EXTRA_PLUGGED, 1);
         doReturn(mBatteryIntent).when(mContext).registerReceiver(any(), any());
 
-        doReturn(mBatteryUsageProgressBarPref).when(mPreferenceScreen)
-            .findPreference(BatteryHeaderPreferenceController.KEY_BATTERY_HEADER);
+        doReturn(mBatteryUsageProgressBarPref)
+                .when(mPreferenceScreen)
+                .findPreference(BatteryHeaderPreferenceController.KEY_BATTERY_HEADER);
 
         mBatteryInfo.batteryLevel = BATTERY_LEVEL;
 
         mShadowPowerManager = Shadows.shadowOf(mContext.getSystemService(PowerManager.class));
+        mFactory = FakeFeatureFactory.setupForTest();
 
         mController = spy(new BatteryHeaderPreferenceController(mContext, PREF_KEY));
-        mLifecycle.addObserver(mController);
-        mController.setActivity(mActivity);
-        mController.setFragment(mPreferenceFragment);
-        mController.setLifecycle(mLifecycle);
         mController.mBatteryUsageProgressBarPref = mBatteryUsageProgressBarPref;
         mController.mBatteryStatusFeatureProvider = mBatteryStatusFeatureProvider;
+
+        BatteryUtils.setChargingStringV2Enabled(null);
     }
 
     @After
@@ -240,10 +232,205 @@ public class BatteryHeaderPreferenceControllerTest {
     }
 
     @Test
+    public void updateBatteryStatus_chargingString_statusWithRemainingLabel() {
+        var batteryInfo =
+                arrangeUpdateBatteryStatusTestWithRemainingLabel(
+                        /* remainingLabel= */ "1 hr, 40 min left until full",
+                        /* statusLabel= */ "Charging rapidly",
+                        /* isFastCharging= */ true,
+                        /* isChargingStringV2= */ false);
+        var expectedChargingString = batteryInfo.statusLabel + " • " + batteryInfo.remainingLabel;
+
+        mController.updateBatteryStatus(/* label= */ null, batteryInfo);
+
+        verify(mBatteryUsageProgressBarPref).setBottomSummary(expectedChargingString);
+    }
+
+    @Test
+    public void updateBatteryStatus_chargingStringV2FastCharging_statusWithRemainingLabel() {
+        var batteryInfo =
+                arrangeUpdateBatteryStatusTestWithRemainingLabel(
+                        /* remainingLabel= */ "Full by 1:30 PM",
+                        /* statusLabel= */ "Fast Charging",
+                        /* isFastCharging= */ true,
+                        /* isChargingStringV2= */ true);
+        var expectedChargingString = batteryInfo.statusLabel + " • " + batteryInfo.remainingLabel;
+
+        mController.updateBatteryStatus(/* label= */ null, batteryInfo);
+
+        verify(mBatteryUsageProgressBarPref).setBottomSummary(expectedChargingString);
+    }
+
+    @Test
+    public void updateBatteryStatus_chargingStringV2NonFastCharging_remainingLabel() {
+        var batteryInfo =
+                arrangeUpdateBatteryStatusTestWithRemainingLabel(
+                        /* remainingLabel= */ "Fully charged by 11:10 PM",
+                        /* statusLabel= */ "Charging",
+                        /* isFastCharging= */ false,
+                        /* isChargingStringV2= */ true);
+        var expectedChargingString = batteryInfo.remainingLabel;
+
+        mController.updateBatteryStatus(/* label= */ null, batteryInfo);
+
+        verify(mBatteryUsageProgressBarPref).setBottomSummary(expectedChargingString);
+    }
+
+    @Test
+    public void updateBatteryStatus_customizedWirelessChargingLabel_customizedLabel() {
+        var label = "Customized Wireless Charging Label";
+        var contentDescription = "Customized Wireless Charging description";
+        var batteryInfo =
+                arrangeUpdateBatteryStatusTestWithRemainingLabel(
+                        /* remainingLabel= */ "Full by 1:30 PM",
+                        /* statusLabel= */ "Fast Charging",
+                        /* isFastCharging= */ true,
+                        /* isChargingStringV2= */ true);
+        batteryInfo.pluggedStatus = BatteryManager.BATTERY_PLUGGED_WIRELESS;
+        when(mFactory.batterySettingsFeatureProvider.getWirelessChargingLabel(
+                        eq(mContext), any(BatteryInfo.class)))
+                .thenReturn(label);
+        when(mFactory.batterySettingsFeatureProvider.getWirelessChargingContentDescription(
+                        eq(mContext), any(BatteryInfo.class)))
+                .thenReturn(contentDescription);
+
+        mController.updateBatteryStatus(/* label= */ null, batteryInfo);
+
+        verify(mBatteryUsageProgressBarPref).setBottomSummary(label);
+        verify(mBatteryUsageProgressBarPref).setBottomSummaryContentDescription(contentDescription);
+    }
+
+    @Test
+    public void updateBatteryStatus_noCustomizedWirelessChargingLabel_statusWithRemainingLabel() {
+        var contentDescription = "Customized Wireless Charging description";
+        var batteryInfo =
+                arrangeUpdateBatteryStatusTestWithRemainingLabel(
+                        /* remainingLabel= */ "Full by 1:30 PM",
+                        /* statusLabel= */ "Fast Charging",
+                        /* isFastCharging= */ true,
+                        /* isChargingStringV2= */ true);
+        batteryInfo.pluggedStatus = BatteryManager.BATTERY_PLUGGED_WIRELESS;
+        var expectedChargingString = batteryInfo.statusLabel + " • " + batteryInfo.remainingLabel;
+
+        mController.updateBatteryStatus(/* label= */ null, batteryInfo);
+
+        verify(mBatteryUsageProgressBarPref).setBottomSummary(expectedChargingString);
+        verify(mBatteryUsageProgressBarPref, never())
+                .setBottomSummaryContentDescription(contentDescription);
+    }
+
+    @Test
+    public void updateBatteryStatus_noCustomizedWirelessChargingLabel_v1StatusWithRemainingLabel() {
+        var contentDescription = "Customized Wireless Charging description";
+        var batteryInfo =
+                arrangeUpdateBatteryStatusTestWithRemainingLabel(
+                        /* remainingLabel= */ "1 hr, 40 min left until full",
+                        /* statusLabel= */ "Charging wirelessly",
+                        /* isFastCharging= */ false,
+                        /* isChargingStringV2= */ false);
+        batteryInfo.pluggedStatus = BatteryManager.BATTERY_PLUGGED_WIRELESS;
+        var expectedChargingString = batteryInfo.statusLabel + " • " + batteryInfo.remainingLabel;
+
+        mController.updateBatteryStatus(/* label= */ null, batteryInfo);
+
+        verify(mBatteryUsageProgressBarPref).setBottomSummary(expectedChargingString);
+        verify(mBatteryUsageProgressBarPref, never())
+                .setBottomSummaryContentDescription(contentDescription);
+    }
+
+    @Test
+    public void updateBatteryStatus_chargingOptimizationMode_remainingLabel() {
+        var batteryInfo =
+                arrangeUpdateBatteryStatusTestWithRemainingLabel(
+                        /* remainingLabel= */ "Expected remaining label",
+                        /* statusLabel= */ "Fast Charging",
+                        /* isFastCharging= */ true,
+                        /* isChargingStringV2= */ true);
+        var expectedChargingString = batteryInfo.remainingLabel;
+        when(mFactory.batterySettingsFeatureProvider.isChargingOptimizationMode(mContext))
+                .thenReturn(true);
+
+        mController.updateBatteryStatus(/* label= */ null, batteryInfo);
+
+        verify(mBatteryUsageProgressBarPref).setBottomSummary(expectedChargingString);
+    }
+
+    @Test
+    public void updateBatteryStatus_chargingOptimizationModeNoRemainingLabel_statusLabel() {
+        var batteryInfo =
+                arrangeUpdateBatteryStatusTestWithRemainingLabel(
+                        /* remainingLabel= */ null,
+                        /* statusLabel= */ "Fast Charging",
+                        /* isFastCharging= */ true,
+                        /* isChargingStringV2= */ true);
+        var expectedChargingString = batteryInfo.statusLabel;
+        when(mFactory.batterySettingsFeatureProvider.isChargingOptimizationMode(mContext))
+                .thenReturn(true);
+
+        mController.updateBatteryStatus(/* label= */ null, batteryInfo);
+
+        verify(mBatteryUsageProgressBarPref).setBottomSummary(expectedChargingString);
+    }
+
+    @Test
+    public void updateBatteryStatus_notChargingOptimizationMode_statusWithRemainingLabel() {
+        var batteryInfo =
+                arrangeUpdateBatteryStatusTestWithRemainingLabel(
+                        /* remainingLabel= */ "Full by 1:30 PM",
+                        /* statusLabel= */ "Fast Charging",
+                        /* isFastCharging= */ true,
+                        /* isChargingStringV2= */ true);
+        var expectedChargingString = batteryInfo.statusLabel + " • " + batteryInfo.remainingLabel;
+        when(mFactory.batterySettingsFeatureProvider.isChargingOptimizationMode(mContext))
+                .thenReturn(false);
+
+        mController.updateBatteryStatus(/* label= */ null, batteryInfo);
+
+        verify(mBatteryUsageProgressBarPref).setBottomSummary(expectedChargingString);
+    }
+
+    @Test
+    public void updateBatteryStatus_dockDefend_chargingOnHold() {
+        var expected = "Charging on hold";
+        mBatteryInfo.isBatteryDefender = false;
+        when(mFactory.powerUsageFeatureProvider.isExtraDefend()).thenReturn(true);
+
+        mController.updateBatteryStatus(/* label= */ null, mBatteryInfo);
+
+        verify(mBatteryUsageProgressBarPref).setBottomSummary(expected);
+    }
+
+    @Test
+    public void updateBatteryStatus_batteryDefender_chargingOnHold() {
+        var expected = "Charging on hold";
+        mBatteryInfo.isBatteryDefender = true;
+        when(mFactory.powerUsageFeatureProvider.isExtraDefend()).thenReturn(false);
+
+        mController.updateBatteryStatus(/* label= */ null, mBatteryInfo);
+
+        verify(mBatteryUsageProgressBarPref).setBottomSummary(expected);
+    }
+
+    private BatteryInfo arrangeUpdateBatteryStatusTestWithRemainingLabel(
+            String remainingLabel,
+            String statusLabel,
+            boolean isFastCharging,
+            boolean isChargingStringV2) {
+        SystemProperties.set(
+                BatteryUtils.PROPERTY_CHARGING_STRING_V2_KEY, String.valueOf(isChargingStringV2));
+        mBatteryInfo.isBatteryDefender = false;
+        mBatteryInfo.remainingLabel = remainingLabel;
+        mBatteryInfo.statusLabel = statusLabel;
+        mBatteryInfo.discharging = false;
+        mBatteryInfo.isFastCharging = isFastCharging;
+        return mBatteryInfo;
+    }
+
+    @Test
     public void updateHeaderByBatteryTips_lowBatteryTip_showLowBattery() {
         setChargingState(/* isDischarging */ true, /* updatedByStatusFeature */ false);
-        BatteryTip lowBatteryTip = new LowBatteryTip(
-                BatteryTip.StateType.NEW, /* powerSaveModeOn */false);
+        BatteryTip lowBatteryTip =
+                new LowBatteryTip(BatteryTip.StateType.NEW, /* powerSaveModeOn */ false);
 
         mController.updateHeaderByBatteryTips(lowBatteryTip, mBatteryInfo);
 
@@ -267,26 +454,42 @@ public class BatteryHeaderPreferenceControllerTest {
 
         mController.updateHeaderByBatteryTips(null, mBatteryInfo);
 
-        verifyZeroInteractions(mBatteryUsageProgressBarPref);
+        verifyNoInteractions(mBatteryUsageProgressBarPref);
     }
 
     @Test
     public void updateHeaderByBatteryTips_noBatteryInfo_noAction() {
-        BatteryTip lowBatteryTip = new LowBatteryTip(
-                BatteryTip.StateType.NEW, /* powerSaveModeOn */false);
+        BatteryTip lowBatteryTip =
+                new LowBatteryTip(BatteryTip.StateType.NEW, /* powerSaveModeOn */ false);
 
         mController.updateHeaderByBatteryTips(lowBatteryTip, null);
 
-        verifyZeroInteractions(mBatteryUsageProgressBarPref);
+        verifyNoInteractions(mBatteryUsageProgressBarPref);
     }
 
     @Test
-    public void updatePreference_isOverheat_showEmptyText() {
-        mBatteryInfo.isOverheated = true;
+    public void updatePreference_isBatteryDefender_showEmptyText() {
+        mBatteryInfo.isBatteryDefender = true;
 
         mController.updateHeaderPreference(mBatteryInfo);
 
-        verify(mBatteryUsageProgressBarPref).setBottomSummary(null);
+        verify(mBatteryUsageProgressBarPref)
+                .setBottomSummary(
+                        mContext.getString(
+                                com.android.settingslib.R.string
+                                        .battery_info_status_charging_on_hold));
+    }
+
+    @Test
+    public void updatePreference_incompatibleCharger_showNotChargingState() {
+        BatteryTestUtils.setupIncompatibleEvent(mUsbPort, mUsbManager, mUsbPortStatus);
+
+        mController.updateHeaderPreference(mBatteryInfo);
+
+        verify(mBatteryUsageProgressBarPref)
+                .setBottomSummary(
+                        mContext.getString(
+                                com.android.settingslib.R.string.battery_info_status_not_charging));
     }
 
     @Test
@@ -299,8 +502,8 @@ public class BatteryHeaderPreferenceControllerTest {
 
     @Test
     public void getAvailabilityStatus_returnAvailableUnsearchable() {
-        assertThat(mController.getAvailabilityStatus()).isEqualTo(
-                BasePreferenceController.AVAILABLE_UNSEARCHABLE);
+        assertThat(mController.getAvailabilityStatus())
+                .isEqualTo(BasePreferenceController.AVAILABLE_UNSEARCHABLE);
     }
 
     @Test
@@ -313,16 +516,14 @@ public class BatteryHeaderPreferenceControllerTest {
     }
 
     @Test
-    public void displayPreference_init_showLoading() {
+    public void displayPreference_init_showEmptySpace() {
         mController.displayPreference(mPreferenceScreen);
 
-        verify(mBatteryUsageProgressBarPref).setBottomSummary(
-                mContext.getString(R.string.settings_license_activity_loading));
+        verify(mBatteryUsageProgressBarPref).setBottomSummary(" ");
     }
 
     private CharSequence formatBatteryPercentageText() {
-        return TextUtils.expandTemplate(mContext.getText(R.string.battery_header_title_alternate),
-                NumberFormat.getIntegerInstance().format(BATTERY_LEVEL));
+        return com.android.settings.Utils.formatPercentage(BATTERY_LEVEL);
     }
 
     private void setChargingState(boolean isDischarging, boolean updatedByStatusFeature) {
@@ -330,7 +531,7 @@ public class BatteryHeaderPreferenceControllerTest {
         mBatteryInfo.statusLabel = BATTERY_STATUS;
         mBatteryInfo.discharging = isDischarging;
 
-        when(mBatteryStatusFeatureProvider.triggerBatteryStatusUpdate(
-                mController, mBatteryInfo)).thenReturn(updatedByStatusFeature);
+        when(mBatteryStatusFeatureProvider.triggerBatteryStatusUpdate(mController, mBatteryInfo))
+                .thenReturn(updatedByStatusFeature);
     }
 }

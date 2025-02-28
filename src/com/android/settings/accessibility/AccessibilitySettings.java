@@ -16,46 +16,39 @@
 
 package com.android.settings.accessibility;
 
-import static com.android.settingslib.widget.TwoTargetPreference.ICON_SIZE_MEDIUM;
+import static com.android.internal.accessibility.common.ShortcutConstants.UserShortcutType.DEFAULT;
 
 import android.accessibilityservice.AccessibilityServiceInfo;
 import android.accessibilityservice.AccessibilityShortcutInfo;
-import android.app.admin.DevicePolicyManager;
 import android.app.settings.SettingsEnums;
 import android.content.ComponentName;
 import android.content.Context;
-import android.content.pm.ActivityInfo;
-import android.content.pm.PackageManager;
-import android.content.pm.ResolveInfo;
-import android.content.pm.ServiceInfo;
-import android.graphics.Color;
-import android.graphics.drawable.Drawable;
-import android.net.Uri;
+import android.hardware.input.InputManager;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.UserHandle;
 import android.provider.Settings;
 import android.text.TextUtils;
 import android.util.ArrayMap;
+import android.view.InputDevice;
 import android.view.accessibility.AccessibilityManager;
 
+import androidx.annotation.NonNull;
 import androidx.annotation.VisibleForTesting;
-import androidx.core.content.ContextCompat;
 import androidx.preference.Preference;
 import androidx.preference.PreferenceCategory;
 
 import com.android.internal.accessibility.AccessibilityShortcutController;
+import com.android.internal.accessibility.util.AccessibilityUtils;
 import com.android.internal.content.PackageMonitor;
 import com.android.settings.R;
-import com.android.settings.Utils;
 import com.android.settings.accessibility.AccessibilityUtil.AccessibilityServiceFragmentType;
 import com.android.settings.dashboard.DashboardFragment;
+import com.android.settings.inputmethod.PhysicalKeyboardFragment;
 import com.android.settings.overlay.FeatureFactory;
 import com.android.settings.search.BaseSearchIndexProvider;
-import com.android.settingslib.RestrictedLockUtils.EnforcedAdmin;
-import com.android.settingslib.RestrictedLockUtilsInternal;
 import com.android.settingslib.RestrictedPreference;
-import com.android.settingslib.accessibility.AccessibilityUtils;
+import com.android.settingslib.core.AbstractPreferenceController;
 import com.android.settingslib.search.SearchIndexable;
 import com.android.settingslib.search.SearchIndexableRaw;
 
@@ -63,44 +56,48 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 /** Activity with the accessibility settings. */
 @SearchIndexable(forTarget = SearchIndexable.ALL & ~SearchIndexable.ARC)
-public class AccessibilitySettings extends DashboardFragment {
+public class AccessibilitySettings extends DashboardFragment implements
+        InputManager.InputDeviceListener {
 
     private static final String TAG = "AccessibilitySettings";
-
-    // Index of the first preference in a preference category.
-    private static final int FIRST_PREFERENCE_IN_CATEGORY_INDEX = -1;
 
     // Preference categories
     private static final String CATEGORY_SCREEN_READER = "screen_reader_category";
     private static final String CATEGORY_CAPTIONS = "captions_category";
     private static final String CATEGORY_AUDIO = "audio_category";
+    private static final String CATEGORY_SPEECH = "speech_category";
     private static final String CATEGORY_DISPLAY = "display_category";
-    private static final String CATEGORY_INTERACTION_CONTROL = "interaction_control_category";
-    private static final String CATEGORY_DOWNLOADED_SERVICES = "user_installed_services_category";
+    @VisibleForTesting
+    static final String CATEGORY_DOWNLOADED_SERVICES = "user_installed_services_category";
+    private static final String CATEGORY_KEYBOARD_OPTIONS = "physical_keyboard_options_category";
+    @VisibleForTesting
+    static final String CATEGORY_INTERACTION_CONTROL = "interaction_control_category";
 
     private static final String[] CATEGORIES = new String[]{
             CATEGORY_SCREEN_READER, CATEGORY_CAPTIONS, CATEGORY_AUDIO, CATEGORY_DISPLAY,
-            CATEGORY_INTERACTION_CONTROL, CATEGORY_DOWNLOADED_SERVICES
+            CATEGORY_SPEECH, CATEGORY_INTERACTION_CONTROL,
+            CATEGORY_KEYBOARD_OPTIONS, CATEGORY_DOWNLOADED_SERVICES
     };
 
     // Extras passed to sub-fragments.
     static final String EXTRA_PREFERENCE_KEY = "preference_key";
     static final String EXTRA_CHECKED = "checked";
     static final String EXTRA_TITLE = "title";
-    static final String EXTRA_TITLE_RES = "title_res";
     static final String EXTRA_RESOLVE_INFO = "resolve_info";
     static final String EXTRA_SUMMARY = "summary";
+    static final String EXTRA_INTRO = "intro";
     static final String EXTRA_SETTINGS_TITLE = "settings_title";
     static final String EXTRA_COMPONENT_NAME = "component_name";
     static final String EXTRA_SETTINGS_COMPONENT_NAME = "settings_component_name";
-    static final String EXTRA_VIDEO_RAW_RESOURCE_ID = "video_resource";
+    static final String EXTRA_TILE_SERVICE_COMPONENT_NAME = "tile_service_component_name";
     static final String EXTRA_LAUNCHED_FROM_SUW = "from_suw";
     static final String EXTRA_ANIMATED_IMAGE_RES = "animated_image_res";
     static final String EXTRA_HTML_DESCRIPTION = "html_description";
+    static final String EXTRA_TIME_FOR_LOGGING = "start_time_to_log_a11y_tool";
+    static final String EXTRA_METRICS_CATEGORY = "metrics_category";
 
     // Timeout before we update the services if packages are added/removed
     // since the AccessibilityManagerService has to do that processing first
@@ -126,6 +123,11 @@ public class AccessibilitySettings extends DashboardFragment {
         }
 
         @Override
+        public void onPackageModified(@NonNull String packageName) {
+            sendUpdate();
+        }
+
+        @Override
         public void onPackageAppeared(String packageName, int reason) {
             sendUpdate();
         }
@@ -146,11 +148,12 @@ public class AccessibilitySettings extends DashboardFragment {
     };
 
     @VisibleForTesting
-    final SettingsContentObserver mSettingsContentObserver;
+    AccessibilitySettingsContentObserver mSettingsContentObserver;
 
     private final Map<String, PreferenceCategory> mCategoryToPrefCategoryMap =
             new ArrayMap<>();
-    private final Map<Preference, PreferenceCategory> mServicePreferenceToPreferenceCategoryMap =
+    @VisibleForTesting
+    final Map<Preference, PreferenceCategory> mServicePreferenceToPreferenceCategoryMap =
             new ArrayMap<>();
     private final Map<ComponentName, PreferenceCategory> mPreBundledServiceComponentToCategoryMap =
             new ArrayMap<>();
@@ -159,23 +162,33 @@ public class AccessibilitySettings extends DashboardFragment {
     private boolean mIsForeground = true;
 
     public AccessibilitySettings() {
+        mSettingsContentObserver = new AccessibilitySettingsContentObserver(mHandler);
+    }
+
+    private void initializeSettingsContentObserver() {
         // Observe changes to anything that the shortcut can toggle, so we can reflect updates
-        final Collection<AccessibilityShortcutController.ToggleableFrameworkFeatureInfo> features =
-                AccessibilityShortcutController.getFrameworkShortcutFeaturesMap().values();
+        final Collection<AccessibilityShortcutController.FrameworkFeatureInfo> features =
+                AccessibilityShortcutController
+                        .getFrameworkShortcutFeaturesMap().values();
         final List<String> shortcutFeatureKeys = new ArrayList<>(features.size());
-        for (AccessibilityShortcutController.ToggleableFrameworkFeatureInfo feature : features) {
-            shortcutFeatureKeys.add(feature.getSettingKey());
+        for (AccessibilityShortcutController.FrameworkFeatureInfo feature : features) {
+            final String key = feature.getSettingKey();
+            if (key != null) {
+                shortcutFeatureKeys.add(key);
+            }
         }
 
         // Observe changes from accessibility selection menu
         shortcutFeatureKeys.add(Settings.Secure.ACCESSIBILITY_BUTTON_TARGETS);
         shortcutFeatureKeys.add(Settings.Secure.ACCESSIBILITY_SHORTCUT_TARGET_SERVICE);
-        mSettingsContentObserver = new SettingsContentObserver(mHandler, shortcutFeatureKeys) {
-            @Override
-            public void onChange(boolean selfChange, Uri uri) {
-                onContentChanged();
-            }
-        };
+        if (android.view.accessibility.Flags.a11yQsShortcut()) {
+            shortcutFeatureKeys.add(Settings.Secure.ACCESSIBILITY_QS_TARGETS);
+        }
+        shortcutFeatureKeys.add(Settings.Secure.ACCESSIBILITY_STICKY_KEYS);
+        shortcutFeatureKeys.add(Settings.Secure.ACCESSIBILITY_SLOW_KEYS);
+        shortcutFeatureKeys.add(Settings.Secure.ACCESSIBILITY_BOUNCE_KEYS);
+        mSettingsContentObserver.registerKeysToObserverCallback(shortcutFeatureKeys,
+                key -> onContentChanged());
     }
 
     @Override
@@ -198,19 +211,33 @@ public class AccessibilitySettings extends DashboardFragment {
     @Override
     public void onCreate(Bundle icicle) {
         super.onCreate(icicle);
+        initializeSettingsContentObserver();
         initializeAllPreferences();
         updateAllPreferences();
+        mNeedPreferencesUpdate = false;
         registerContentMonitors();
+        registerInputDeviceListener();
     }
 
     @Override
     public void onStart() {
+        super.onStart();
+        mIsForeground = true;
+    }
+
+    @Override
+    public void onResume() {
+        super.onResume();
         if (mNeedPreferencesUpdate) {
             updateAllPreferences();
             mNeedPreferencesUpdate = false;
         }
-        mIsForeground = true;
-        super.onStart();
+    }
+
+    @Override
+    public void onPause() {
+        super.onPause();
+        mNeedPreferencesUpdate = true;
     }
 
     @Override
@@ -222,6 +249,7 @@ public class AccessibilitySettings extends DashboardFragment {
     @Override
     public void onDestroy() {
         unregisterContentMonitors();
+        unRegisterInputDeviceListener();
         super.onDestroy();
     }
 
@@ -243,9 +271,8 @@ public class AccessibilitySettings extends DashboardFragment {
      * @param serviceEnabled Whether the accessibility service is enabled.
      * @return The service summary
      */
-    @VisibleForTesting
-    static CharSequence getServiceSummary(Context context, AccessibilityServiceInfo info,
-            boolean serviceEnabled) {
+    public static CharSequence getServiceSummary(Context context, AccessibilityServiceInfo info,
+                                                 boolean serviceEnabled) {
         if (serviceEnabled && info.crashed) {
             return context.getText(R.string.accessibility_summary_state_stopped);
         }
@@ -257,19 +284,19 @@ public class AccessibilitySettings extends DashboardFragment {
                     info.getResolveInfo().serviceInfo.packageName,
                     info.getResolveInfo().serviceInfo.name);
             final boolean shortcutEnabled = AccessibilityUtil.getUserShortcutTypesFromSettings(
-                    context, componentName) != AccessibilityUtil.UserShortcutType.EMPTY;
+                    context, componentName) != DEFAULT;
             serviceState = shortcutEnabled
                     ? context.getText(R.string.accessibility_summary_shortcut_enabled)
-                    : context.getText(R.string.accessibility_summary_shortcut_disabled);
+                    : context.getText(R.string.generic_accessibility_feature_shortcut_off);
         } else {
             serviceState = serviceEnabled
-                    ? context.getText(R.string.accessibility_summary_state_enabled)
-                    : context.getText(R.string.accessibility_summary_state_disabled);
+                    ? context.getText(R.string.generic_accessibility_service_on)
+                    : context.getText(R.string.generic_accessibility_service_off);
         }
 
         final CharSequence serviceSummary = info.loadSummary(context.getPackageManager());
         final String stateSummaryCombo = context.getString(
-                R.string.preference_summary_default_combination,
+                com.android.settingslib.R.string.preference_summary_default_combination,
                 serviceState, serviceSummary);
 
         return TextUtils.isEmpty(serviceSummary) ? serviceState : stateSummaryCombo;
@@ -283,19 +310,13 @@ public class AccessibilitySettings extends DashboardFragment {
      * @param serviceEnabled Whether the accessibility service is enabled.
      * @return The service description
      */
-    @VisibleForTesting
-    static CharSequence getServiceDescription(Context context, AccessibilityServiceInfo info,
+    public static CharSequence getServiceDescription(Context context, AccessibilityServiceInfo info,
             boolean serviceEnabled) {
         if (serviceEnabled && info.crashed) {
             return context.getText(R.string.accessibility_description_state_stopped);
         }
 
         return info.loadDescription(context.getPackageManager());
-    }
-
-    static boolean isRampingRingerEnabled(final Context context) {
-        return Settings.Global.getInt(
-                context.getContentResolver(), Settings.Global.APPLY_RAMPING_RINGER, 0) == 1;
     }
 
     @VisibleForTesting
@@ -318,8 +339,9 @@ public class AccessibilitySettings extends DashboardFragment {
 
     @VisibleForTesting
     void updateAllPreferences() {
-        updateSystemPreferences();
         updateServicePreferences();
+        updatePreferencesState();
+        updateSystemPreferences();
     }
 
     private void registerContentMonitors() {
@@ -330,12 +352,29 @@ public class AccessibilitySettings extends DashboardFragment {
         mSettingsContentObserver.register(getContentResolver());
     }
 
+    private void registerInputDeviceListener() {
+        InputManager mIm = getSystemService(InputManager.class);
+        if (mIm == null) {
+            return;
+        }
+        mIm.registerInputDeviceListener(this, null);
+    }
+
+    private void unRegisterInputDeviceListener() {
+        InputManager mIm = getSystemService(InputManager.class);
+        if (mIm == null) {
+            return;
+        }
+        mIm.unregisterInputDeviceListener(this);
+    }
+
     private void unregisterContentMonitors() {
         mSettingsPackageMonitor.unregister();
         mSettingsContentObserver.unregister(getContentResolver());
     }
 
     protected void updateServicePreferences() {
+        final AccessibilityManager a11yManager = AccessibilityManager.getInstance(getPrefContext());
         // Since services category is auto generated we have to do a pass
         // to generate it since services can come and go and then based on
         // the global accessibility state to decided whether it is enabled.
@@ -355,11 +394,29 @@ public class AccessibilitySettings extends DashboardFragment {
                 R.array.config_preinstalled_audio_services);
         initializePreBundledServicesMapFromArray(CATEGORY_DISPLAY,
                 R.array.config_preinstalled_display_services);
+        initializePreBundledServicesMapFromArray(CATEGORY_SPEECH,
+                R.array.config_preinstalled_speech_services);
         initializePreBundledServicesMapFromArray(CATEGORY_INTERACTION_CONTROL,
                 R.array.config_preinstalled_interaction_control_services);
 
-        final List<RestrictedPreference> preferenceList = getInstalledAccessibilityList(
-                getPrefContext());
+        // ACCESSIBILITY_MENU_IN_SYSTEM is a default pre-bundled interaction control service.
+        // If the device opts out of including this service then this is a no-op.
+        mPreBundledServiceComponentToCategoryMap.put(
+                AccessibilityUtils.ACCESSIBILITY_MENU_IN_SYSTEM,
+                mCategoryToPrefCategoryMap.get(CATEGORY_INTERACTION_CONTROL));
+
+        final List<AccessibilityShortcutInfo> installedShortcutList =
+                a11yManager.getInstalledAccessibilityShortcutListAsUser(getPrefContext(),
+                        UserHandle.myUserId());
+        final List<AccessibilityServiceInfo> installedServiceList =
+                a11yManager.getInstalledAccessibilityServiceList();
+        final List<RestrictedPreference> preferenceList = getInstalledAccessibilityPreferences(
+                getPrefContext(), installedShortcutList, installedServiceList);
+
+        if (Flags.checkPrebundledIsPreinstalled()) {
+            removeNonPreinstalledComponents(mPreBundledServiceComponentToCategoryMap,
+                    installedShortcutList, installedServiceList);
+        }
 
         final PreferenceCategory downloadedServicesCategory =
                 mCategoryToPrefCategoryMap.get(CATEGORY_DOWNLOADED_SERVICES);
@@ -388,6 +445,8 @@ public class AccessibilitySettings extends DashboardFragment {
                 R.array.config_order_interaction_control_services);
         updateCategoryOrderFromArray(CATEGORY_DISPLAY,
                 R.array.config_order_display_services);
+        updateCategoryOrderFromArray(CATEGORY_SPEECH,
+                R.array.config_order_speech_services);
 
         // Need to check each time when updateServicePreferences() called.
         if (downloadedServicesCategory.getPreferenceCount() == 0) {
@@ -396,28 +455,28 @@ public class AccessibilitySettings extends DashboardFragment {
             getPreferenceScreen().addPreference(downloadedServicesCategory);
         }
 
-        // Hide screen reader category if it is empty.
+        // Hide category if it is empty.
         updatePreferenceCategoryVisibility(CATEGORY_SCREEN_READER);
+        updatePreferenceCategoryVisibility(CATEGORY_SPEECH);
+        updatePreferenceCategoryVisibility(CATEGORY_KEYBOARD_OPTIONS);
     }
 
-    private List<RestrictedPreference> getInstalledAccessibilityList(Context context) {
-        final AccessibilityManager a11yManager = AccessibilityManager.getInstance(context);
+    /**
+     * Gets a list of {@link RestrictedPreference}s for the provided a11y shortcuts and services.
+     *
+     * <p>{@code modifiableInstalledServiceList} may be modified to remove any entries with
+     * matching package name and label as an entry in {@code installedShortcutList}.
+     *
+     * @param installedShortcutList A list of installed {@link AccessibilityShortcutInfo}s.
+     * @param installedServiceList  A list of installed {@link AccessibilityServiceInfo}s.
+     */
+    private static List<RestrictedPreference> getInstalledAccessibilityPreferences(Context context,
+            List<AccessibilityShortcutInfo> installedShortcutList,
+            List<AccessibilityServiceInfo> installedServiceList) {
         final RestrictedPreferenceHelper preferenceHelper = new RestrictedPreferenceHelper(context);
 
-        final List<AccessibilityShortcutInfo> installedShortcutList =
-                a11yManager.getInstalledAccessibilityShortcutListAsUser(context,
-                        UserHandle.myUserId());
-
-        // Remove duplicate item here, new a ArrayList to copy unmodifiable list result
-        // (getInstalledAccessibilityServiceList).
-        final List<AccessibilityServiceInfo> installedServiceList = new ArrayList<>(
-                a11yManager.getInstalledAccessibilityServiceList());
-        installedServiceList.removeIf(
-                target -> containsTargetNameInList(installedShortcutList, target));
-
-        final List<RestrictedPreference> activityList =
+        final List<AccessibilityActivityPreference> activityList =
                 preferenceHelper.createAccessibilityActivityPreferenceList(installedShortcutList);
-
         final List<RestrictedPreference> serviceList =
                 preferenceHelper.createAccessibilityServicePreferenceList(installedServiceList);
 
@@ -428,22 +487,20 @@ public class AccessibilitySettings extends DashboardFragment {
         return preferenceList;
     }
 
-    private boolean containsTargetNameInList(List<AccessibilityShortcutInfo> shortcutInfos,
-            AccessibilityServiceInfo targetServiceInfo) {
-        final ServiceInfo serviceInfo = targetServiceInfo.getResolveInfo().serviceInfo;
-        final String servicePackageName = serviceInfo.packageName;
-        final CharSequence serviceLabel = serviceInfo.loadLabel(getPackageManager());
-
-        for (int i = 0, count = shortcutInfos.size(); i < count; ++i) {
-            final ActivityInfo activityInfo = shortcutInfos.get(i).getActivityInfo();
-            final String activityPackageName = activityInfo.packageName;
-            final CharSequence activityLabel = activityInfo.loadLabel(getPackageManager());
-            if (servicePackageName.equals(activityPackageName)
-                    && serviceLabel.equals(activityLabel)) {
-                return true;
+    private static void removeNonPreinstalledComponents(
+            Map<ComponentName, PreferenceCategory> componentToCategory,
+            List<AccessibilityShortcutInfo> shortcutInfos,
+            List<AccessibilityServiceInfo> serviceInfos) {
+        for (AccessibilityShortcutInfo info : shortcutInfos) {
+            if (!info.getActivityInfo().applicationInfo.isSystemApp()) {
+                componentToCategory.remove(info.getComponentName());
             }
         }
-        return false;
+        for (AccessibilityServiceInfo info : serviceInfos) {
+            if (!info.getResolveInfo().serviceInfo.applicationInfo.isSystemApp()) {
+                componentToCategory.remove(info.getComponentName());
+            }
+        }
     }
 
     private void initializePreBundledServicesMapFromArray(String categoryKey, int key) {
@@ -492,7 +549,61 @@ public class AccessibilitySettings extends DashboardFragment {
      * Updates preferences related to system configurations.
      */
     protected void updateSystemPreferences() {
-        // Do nothing.
+        updateKeyboardPreferencesVisibility();
+    }
+
+    private void updatePreferencesState() {
+        final List<AbstractPreferenceController> controllers = new ArrayList<>();
+        getPreferenceControllers().forEach(controllers::addAll);
+        controllers.forEach(controller -> controller.updateState(
+                findPreference(controller.getPreferenceKey())));
+    }
+
+    private void updateKeyboardPreferencesVisibility() {
+        if (!mCategoryToPrefCategoryMap.containsKey(CATEGORY_KEYBOARD_OPTIONS)) {
+            return;
+        }
+        boolean isVisible = isAnyHardKeyboardsExist()
+                && isAnyKeyboardPreferenceAvailable();
+        mCategoryToPrefCategoryMap.get(CATEGORY_KEYBOARD_OPTIONS).setVisible(
+                isVisible);
+        if (isVisible) {
+            //set summary here.
+            findPreference(KeyboardBounceKeyPreferenceController.PREF_KEY).setSummary(
+                    getContext().getString(R.string.bounce_keys_summary,
+                            PhysicalKeyboardFragment.BOUNCE_KEYS_THRESHOLD));
+            findPreference(KeyboardSlowKeyPreferenceController.PREF_KEY).setSummary(
+                    getContext().getString(R.string.slow_keys_summary,
+                            PhysicalKeyboardFragment.SLOW_KEYS_THRESHOLD));
+        }
+    }
+
+    static boolean isAnyHardKeyboardsExist() {
+        for (int deviceId : InputDevice.getDeviceIds()) {
+            final InputDevice device = InputDevice.getDevice(deviceId);
+            if (device != null && !device.isVirtual() && device.isFullKeyboard()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean isAnyKeyboardPreferenceAvailable() {
+        for (List<AbstractPreferenceController> controllerList : getPreferenceControllers()) {
+            for (AbstractPreferenceController controller : controllerList) {
+                if (controller.getPreferenceKey().equals(
+                        KeyboardBounceKeyPreferenceController.PREF_KEY)
+                        || controller.getPreferenceKey().equals(
+                        KeyboardSlowKeyPreferenceController.PREF_KEY)
+                        || controller.getPreferenceKey().equals(
+                        KeyboardStickyKeyPreferenceController.PREF_KEY)) {
+                    if (controller.isAvailable()) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
     }
 
     public static final BaseSearchIndexProvider SEARCH_INDEX_DATA_PROVIDER =
@@ -500,246 +611,65 @@ public class AccessibilitySettings extends DashboardFragment {
                 @Override
                 public List<SearchIndexableRaw> getRawDataToIndex(Context context,
                         boolean enabled) {
-                    return FeatureFactory.getFactory(context)
+                    return FeatureFactory.getFeatureFactory()
                             .getAccessibilitySearchFeatureProvider().getSearchIndexableRawData(
                                     context);
                 }
+
+                @Override
+                public List<SearchIndexableRaw> getDynamicRawDataToIndex(Context context,
+                        boolean enabled) {
+                    List<SearchIndexableRaw> dynamicRawData = super.getDynamicRawDataToIndex(
+                            context, enabled);
+                    if (dynamicRawData == null) {
+                        dynamicRawData = new ArrayList<>();
+                    }
+                    if (!Flags.fixA11ySettingsSearch()) {
+                        return dynamicRawData;
+                    }
+
+                    AccessibilityManager a11yManager = context.getSystemService(
+                            AccessibilityManager.class);
+                    AccessibilitySearchFeatureProvider a11ySearchFeatureProvider =
+                            FeatureFactory.getFeatureFactory()
+                                    .getAccessibilitySearchFeatureProvider();
+                    List<RestrictedPreference> installedA11yFeaturesPref =
+                            AccessibilitySettings.getInstalledAccessibilityPreferences(
+                                    context,
+                                    a11yManager.getInstalledAccessibilityShortcutListAsUser(
+                                            context, UserHandle.myUserId()),
+                                    a11yManager.getInstalledAccessibilityServiceList()
+                            );
+                    for (RestrictedPreference pref : installedA11yFeaturesPref) {
+                        SearchIndexableRaw indexableRaw = new SearchIndexableRaw(context);
+                        indexableRaw.key = pref.getKey();
+                        indexableRaw.title = pref.getTitle().toString();
+                        @NonNull String synonyms = "";
+                        if (pref instanceof AccessibilityServicePreference) {
+                            synonyms = a11ySearchFeatureProvider.getSynonymsForComponent(
+                                    context,
+                                    ((AccessibilityServicePreference) pref).getComponentName());
+                        } else if (pref instanceof AccessibilityActivityPreference) {
+                            synonyms = a11ySearchFeatureProvider.getSynonymsForComponent(
+                                    context,
+                                    ((AccessibilityActivityPreference) pref).getComponentName());
+                        }
+                        indexableRaw.keywords = synonyms;
+                        dynamicRawData.add(indexableRaw);
+                    }
+
+                    return dynamicRawData;
+                }
             };
 
-    /**
-     * This class helps setup RestrictedPreference.
-     */
-    @VisibleForTesting
-    static class RestrictedPreferenceHelper {
-        private final Context mContext;
-        private final DevicePolicyManager mDpm;
-        private final PackageManager mPm;
+    @Override
+    public void onInputDeviceAdded(int deviceId) {}
 
-        RestrictedPreferenceHelper(Context context) {
-            mContext = context;
-            mDpm = context.getSystemService(DevicePolicyManager.class);
-            mPm = context.getPackageManager();
-        }
+    @Override
+    public void onInputDeviceRemoved(int deviceId) {}
 
-        /**
-         * Creates the list of {@link RestrictedPreference} with the installedServices arguments.
-         *
-         * @param installedServices The list of {@link AccessibilityServiceInfo}s of the
-         *                          installed accessibility services
-         * @return The list of {@link RestrictedPreference}
-         */
-        @VisibleForTesting
-        List<RestrictedPreference> createAccessibilityServicePreferenceList(
-                List<AccessibilityServiceInfo> installedServices) {
-
-            final Set<ComponentName> enabledServices =
-                    AccessibilityUtils.getEnabledServicesFromSettings(mContext);
-            final List<String> permittedServices = mDpm.getPermittedAccessibilityServices(
-                    UserHandle.myUserId());
-            final int installedServicesSize = installedServices.size();
-
-            final List<RestrictedPreference> preferenceList = new ArrayList<>(
-                    installedServicesSize);
-
-            for (int i = 0; i < installedServicesSize; ++i) {
-                final AccessibilityServiceInfo info = installedServices.get(i);
-                final ResolveInfo resolveInfo = info.getResolveInfo();
-                final String packageName = resolveInfo.serviceInfo.packageName;
-                final ComponentName componentName = new ComponentName(packageName,
-                        resolveInfo.serviceInfo.name);
-
-                final String key = componentName.flattenToString();
-                final CharSequence title = resolveInfo.loadLabel(mPm);
-                final boolean serviceEnabled = enabledServices.contains(componentName);
-                final CharSequence summary = getServiceSummary(mContext, info, serviceEnabled);
-                final String fragment = getAccessibilityServiceFragmentTypeName(info);
-
-                Drawable icon = resolveInfo.loadIcon(mPm);
-                if (resolveInfo.getIconResource() == 0) {
-                    icon = ContextCompat.getDrawable(mContext,
-                            R.drawable.ic_accessibility_generic);
-                }
-
-                final RestrictedPreference preference = createRestrictedPreference(key, title,
-                        summary, icon, fragment);
-
-                // permittedServices null means all accessibility services are allowed.
-                final boolean serviceAllowed =
-                        permittedServices == null || permittedServices.contains(packageName);
-
-                setRestrictedPreferenceEnabled(preference, packageName, serviceAllowed,
-                        serviceEnabled);
-                final String prefKey = preference.getKey();
-                final int imageRes = info.getAnimatedImageRes();
-                final CharSequence description = getServiceDescription(mContext, info,
-                        serviceEnabled);
-                final String htmlDescription = info.loadHtmlDescription(mPm);
-                final String settingsClassName = info.getSettingsActivityName();
-
-                putBasicExtras(preference, prefKey, title, description, imageRes, htmlDescription,
-                        componentName);
-                putServiceExtras(preference, resolveInfo, serviceEnabled);
-                putSettingsExtras(preference, packageName, settingsClassName);
-
-                preferenceList.add(preference);
-            }
-            return preferenceList;
-        }
-
-        /**
-         * Create the list of {@link RestrictedPreference} with the installedShortcuts arguments.
-         *
-         * @param installedShortcuts The list of {@link AccessibilityShortcutInfo}s of the
-         *                           installed accessibility shortcuts
-         * @return The list of {@link RestrictedPreference}
-         */
-        @VisibleForTesting
-        List<RestrictedPreference> createAccessibilityActivityPreferenceList(
-                List<AccessibilityShortcutInfo> installedShortcuts) {
-            final Set<ComponentName> enabledServices =
-                    AccessibilityUtils.getEnabledServicesFromSettings(mContext);
-            final List<String> permittedServices = mDpm.getPermittedAccessibilityServices(
-                    UserHandle.myUserId());
-
-            final int installedShortcutsSize = installedShortcuts.size();
-            final List<RestrictedPreference> preferenceList = new ArrayList<>(
-                    installedShortcutsSize);
-
-            for (int i = 0; i < installedShortcutsSize; ++i) {
-                final AccessibilityShortcutInfo info = installedShortcuts.get(i);
-                final ActivityInfo activityInfo = info.getActivityInfo();
-                final ComponentName componentName = info.getComponentName();
-
-                final String key = componentName.flattenToString();
-                final CharSequence title = activityInfo.loadLabel(mPm);
-                final String summary = info.loadSummary(mPm);
-                final String fragment =
-                        LaunchAccessibilityActivityPreferenceFragment.class.getName();
-
-                Drawable icon = activityInfo.loadIcon(mPm);
-                if (activityInfo.getIconResource() == 0) {
-                    icon = ContextCompat.getDrawable(mContext, R.drawable.ic_accessibility_generic);
-                }
-
-                final RestrictedPreference preference = createRestrictedPreference(key, title,
-                        summary, icon, fragment);
-
-                final String packageName = componentName.getPackageName();
-                // permittedServices null means all accessibility services are allowed.
-                final boolean serviceAllowed =
-                        permittedServices == null || permittedServices.contains(packageName);
-                final boolean serviceEnabled = enabledServices.contains(componentName);
-
-                setRestrictedPreferenceEnabled(preference, packageName, serviceAllowed,
-                        serviceEnabled);
-
-                final String prefKey = preference.getKey();
-                final String description = info.loadDescription(mPm);
-                final int imageRes = info.getAnimatedImageRes();
-                final String htmlDescription = info.loadHtmlDescription(mPm);
-                final String settingsClassName = info.getSettingsActivityName();
-
-                putBasicExtras(preference, prefKey, title, description, imageRes, htmlDescription,
-                        componentName);
-                putSettingsExtras(preference, packageName, settingsClassName);
-
-                preferenceList.add(preference);
-            }
-            return preferenceList;
-        }
-
-        private String getAccessibilityServiceFragmentTypeName(AccessibilityServiceInfo info) {
-            // Shorten the name to avoid exceeding 100 characters in one line.
-            final String volumeShortcutToggleAccessibilityServicePreferenceFragment =
-                    VolumeShortcutToggleAccessibilityServicePreferenceFragment.class.getName();
-
-            switch (AccessibilityUtil.getAccessibilityServiceFragmentType(info)) {
-                case AccessibilityServiceFragmentType.VOLUME_SHORTCUT_TOGGLE:
-                    return volumeShortcutToggleAccessibilityServicePreferenceFragment;
-                case AccessibilityServiceFragmentType.INVISIBLE_TOGGLE:
-                    return InvisibleToggleAccessibilityServicePreferenceFragment.class.getName();
-                case AccessibilityServiceFragmentType.TOGGLE:
-                    return ToggleAccessibilityServicePreferenceFragment.class.getName();
-                default:
-                    // impossible status
-                    throw new AssertionError();
-            }
-        }
-
-        private RestrictedPreference createRestrictedPreference(String key, CharSequence title,
-                CharSequence summary, Drawable icon, String fragment) {
-            final RestrictedPreference preference = new RestrictedPreference(mContext);
-
-            preference.setKey(key);
-            preference.setTitle(title);
-            preference.setSummary(summary);
-            preference.setIcon(Utils.getAdaptiveIcon(mContext, icon, Color.WHITE));
-            preference.setFragment(fragment);
-            preference.setIconSize(ICON_SIZE_MEDIUM);
-            preference.setPersistent(false); // Disable SharedPreferences.
-            preference.setOrder(FIRST_PREFERENCE_IN_CATEGORY_INDEX);
-
-            return preference;
-        }
-
-        private void setRestrictedPreferenceEnabled(RestrictedPreference preference,
-                String packageName, boolean serviceAllowed, boolean serviceEnabled) {
-            if (serviceAllowed || serviceEnabled) {
-                preference.setEnabled(true);
-            } else {
-                // Disable accessibility service that are not permitted.
-                final EnforcedAdmin admin =
-                        RestrictedLockUtilsInternal.checkIfAccessibilityServiceDisallowed(
-                                mContext, packageName, UserHandle.myUserId());
-                if (admin != null) {
-                    preference.setDisabledByAdmin(admin);
-                } else {
-                    preference.setEnabled(false);
-                }
-            }
-        }
-
-        /** Puts the basic extras into {@link RestrictedPreference}'s getExtras(). */
-        private void putBasicExtras(RestrictedPreference preference, String prefKey,
-                CharSequence title, CharSequence summary, int imageRes, String htmlDescription,
-                ComponentName componentName) {
-            final Bundle extras = preference.getExtras();
-            extras.putString(EXTRA_PREFERENCE_KEY, prefKey);
-            extras.putCharSequence(EXTRA_TITLE, title);
-            extras.putCharSequence(EXTRA_SUMMARY, summary);
-            extras.putParcelable(EXTRA_COMPONENT_NAME, componentName);
-            extras.putInt(EXTRA_ANIMATED_IMAGE_RES, imageRes);
-            extras.putString(AccessibilitySettings.EXTRA_HTML_DESCRIPTION, htmlDescription);
-        }
-
-        /**
-         * Puts the service extras into {@link RestrictedPreference}'s getExtras().
-         *
-         * Called by {@link AccessibilityServiceInfo} for now.
-         */
-        private void putServiceExtras(RestrictedPreference preference, ResolveInfo resolveInfo,
-                Boolean serviceEnabled) {
-            final Bundle extras = preference.getExtras();
-
-            extras.putParcelable(EXTRA_RESOLVE_INFO, resolveInfo);
-            extras.putBoolean(EXTRA_CHECKED, serviceEnabled);
-        }
-
-        /**
-         * Puts the settings extras into {@link RestrictedPreference}'s getExtras().
-         *
-         * Called when settings UI is needed.
-         */
-        private void putSettingsExtras(RestrictedPreference preference, String packageName,
-                String settingsClassName) {
-            final Bundle extras = preference.getExtras();
-
-            if (!TextUtils.isEmpty(settingsClassName)) {
-                extras.putString(EXTRA_SETTINGS_TITLE,
-                        mContext.getText(R.string.accessibility_menu_item_settings).toString());
-                extras.putString(EXTRA_SETTINGS_COMPONENT_NAME,
-                        new ComponentName(packageName, settingsClassName).flattenToString());
-            }
-        }
+    @Override
+    public void onInputDeviceChanged(int deviceId) {
+        mHandler.postDelayed(mUpdateRunnable, DELAY_UPDATE_SERVICES_MILLIS);
     }
 }

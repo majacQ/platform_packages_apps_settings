@@ -31,7 +31,8 @@ import androidx.preference.PreferenceScreen;
 
 import com.android.settings.R;
 import com.android.settings.Utils;
-import com.android.settingslib.widget.RadioButtonPreference;
+import com.android.settings.flags.Flags;
+import com.android.settingslib.widget.SelectorWithWidgetPreference;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -40,7 +41,7 @@ import java.util.Map;
  * This class controls the radio buttons for choosing between different USB functions.
  */
 public class UsbDetailsFunctionsController extends UsbDetailsController
-        implements RadioButtonPreference.OnClickListener {
+        implements SelectorWithWidgetPreference.OnClickListener {
 
     private static final String TAG = "UsbFunctionsCtrl";
     private static final boolean DEBUG = Log.isLoggable(TAG, Log.DEBUG);
@@ -52,6 +53,7 @@ public class UsbDetailsFunctionsController extends UsbDetailsController
         FUNCTIONS_MAP.put(UsbManager.FUNCTION_RNDIS, R.string.usb_use_tethering);
         FUNCTIONS_MAP.put(UsbManager.FUNCTION_MIDI, R.string.usb_use_MIDI);
         FUNCTIONS_MAP.put(UsbManager.FUNCTION_PTP, R.string.usb_use_photo_transfers);
+        FUNCTIONS_MAP.put(UsbManager.FUNCTION_UVC, R.string.usb_use_uvc_webcam);
         FUNCTIONS_MAP.put(UsbManager.FUNCTION_NONE, R.string.usb_use_charging_only);
     }
 
@@ -83,10 +85,10 @@ public class UsbDetailsFunctionsController extends UsbDetailsController
     /**
      * Gets a switch preference for the particular option, creating it if needed.
      */
-    private RadioButtonPreference getProfilePreference(String key, int titleId) {
-        RadioButtonPreference pref = mProfilesContainer.findPreference(key);
+    private SelectorWithWidgetPreference getProfilePreference(String key, int titleId) {
+        SelectorWithWidgetPreference pref = mProfilesContainer.findPreference(key);
         if (pref == null) {
-            pref = new RadioButtonPreference(mProfilesContainer.getContext());
+            pref = new SelectorWithWidgetPreference(mProfilesContainer.getContext());
             pref.setKey(key);
             pref.setTitle(titleId);
             pref.setSingleLineTitle(false);
@@ -108,7 +110,7 @@ public class UsbDetailsFunctionsController extends UsbDetailsController
             // Functions are only available in device mode
             mProfilesContainer.setEnabled(true);
         }
-        RadioButtonPreference pref;
+        SelectorWithWidgetPreference pref;
         for (long option : FUNCTIONS_MAP.keySet()) {
             int title = FUNCTIONS_MAP.get(option);
             pref = getProfilePreference(UsbBackend.usbFunctionsToString(option), title);
@@ -128,8 +130,16 @@ public class UsbDetailsFunctionsController extends UsbDetailsController
     }
 
     @Override
-    public void onRadioButtonClicked(RadioButtonPreference preference) {
+    public void onRadioButtonClicked(SelectorWithWidgetPreference preference) {
         final long function = UsbBackend.usbFunctionsFromString(preference.getKey());
+        if (isAuthRequired(function)) {
+            requireAuthAndExecute(()->handleRadioButtonClicked(preference, function));
+        } else {
+            handleRadioButtonClicked(preference, function);
+        }
+    }
+
+    private void handleRadioButtonClicked(SelectorWithWidgetPreference preference, long function) {
         final long previousFunction = mUsbBackend.getCurrentFunctions();
         if (DEBUG) {
             Log.d(TAG, "onRadioButtonClicked() function : " + function + ", toString() : "
@@ -142,8 +152,8 @@ public class UsbDetailsFunctionsController extends UsbDetailsController
             mPreviousFunction = previousFunction;
 
             //Update the UI in advance to make it looks smooth
-            final RadioButtonPreference prevPref =
-                    (RadioButtonPreference) mProfilesContainer.findPreference(
+            final SelectorWithWidgetPreference prevPref =
+                    (SelectorWithWidgetPreference) mProfilesContainer.findPreference(
                             UsbBackend.usbFunctionsToString(mPreviousFunction));
             if (prevPref != null) {
                 prevPref.setChecked(false);
@@ -160,6 +170,15 @@ public class UsbDetailsFunctionsController extends UsbDetailsController
                 mUsbBackend.setCurrentFunctions(function);
             }
         }
+    }
+
+    private boolean isAuthRequired(long function) {
+        if (!Flags.excludeWebcamAuthChallenge()) {
+            return true;
+        }
+        // Since webcam and MIDI don't transfer any persistent data over USB
+        // don't require authentication.
+        return !(function == UsbManager.FUNCTION_UVC || function == UsbManager.FUNCTION_MIDI);
     }
 
     private boolean isClickEventIgnored(long function, long previousFunction) {

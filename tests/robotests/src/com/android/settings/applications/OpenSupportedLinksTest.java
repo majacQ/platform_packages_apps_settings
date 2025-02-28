@@ -35,23 +35,33 @@ import android.util.ArraySet;
 
 import androidx.preference.Preference;
 import androidx.preference.PreferenceCategory;
+import androidx.test.core.app.ApplicationProvider;
 
+import com.android.settings.R;
 import com.android.settings.testutils.shadow.ShadowUtils;
 import com.android.settingslib.widget.FooterPreference;
 
 import org.junit.After;
 import org.junit.Before;
+import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.mockito.Mock;
-import org.mockito.MockitoAnnotations;
+import org.mockito.junit.MockitoJUnit;
+import org.mockito.junit.MockitoRule;
 import org.robolectric.RobolectricTestRunner;
-import org.robolectric.RuntimeEnvironment;
 import org.robolectric.annotation.Config;
 
 @RunWith(RobolectricTestRunner.class)
-@Config(shadows = ShadowUtils.class)
+@Config(shadows = {
+        ShadowUtils.class,
+        com.android.settings.testutils.shadow.ShadowFragment.class,
+})
 public class OpenSupportedLinksTest {
+
+    @Rule
+    public final MockitoRule mMockitoRule = MockitoJUnit.rule();
+
     private static final String TEST_FOOTER_TITLE = "FooterTitle";
     private static final String TEST_DOMAIN_LINK = "aaa.bbb.ccc";
     private static final String TEST_SUMMARY = "TestSummary";
@@ -69,8 +79,7 @@ public class OpenSupportedLinksTest {
 
     @Before
     public void setUp() {
-        MockitoAnnotations.initMocks(this);
-        mContext = spy(RuntimeEnvironment.application);
+        mContext = spy(ApplicationProvider.getApplicationContext());
         mSettings = spy(new TestFragment(mContext, mPackageManager));
         mCategory = spy(new PreferenceCategory(mContext));
         mFooter = new FooterPreference.Builder(mContext).setTitle(TEST_FOOTER_TITLE).build();
@@ -144,8 +153,9 @@ public class OpenSupportedLinksTest {
                 anyInt());
         doReturn(mCategory).when(mSettings).findPreference(any(CharSequence.class));
         doReturn(mResources).when(mSettings).getResources();
-        when(mResources.getQuantityString(anyInt(), anyInt(), anyInt())).thenReturn(TEST_SUMMARY);
         doReturn(true).when(mCategory).addPreference(any(Preference.class));
+        when(mResources.getString(R.string.app_link_open_always_summary))
+                .thenReturn("App claims to handle # links");
     }
 
     public static class TestFragment extends OpenSupportedLinks {

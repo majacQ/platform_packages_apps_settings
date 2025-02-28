@@ -26,6 +26,7 @@ import android.graphics.Matrix;
 import android.graphics.Rect;
 import android.graphics.SurfaceTexture;
 import android.net.wifi.EasyConnectStatusCallback;
+import android.net.wifi.UriParserResults;
 import android.net.wifi.WifiConfiguration;
 import android.net.wifi.WifiManager;
 import android.os.Bundle;
@@ -37,6 +38,7 @@ import android.os.Process;
 import android.os.SimpleClock;
 import android.os.SystemClock;
 import android.text.TextUtils;
+import android.util.EventLog;
 import android.util.Log;
 import android.util.Size;
 import android.view.LayoutInflater;
@@ -52,12 +54,13 @@ import android.widget.TextView;
 import androidx.annotation.StringRes;
 import androidx.annotation.UiThread;
 import androidx.annotation.VisibleForTesting;
-import androidx.lifecycle.ViewModelProviders;
+import androidx.lifecycle.ViewModelProvider;
 
 import com.android.settings.R;
 import com.android.settings.overlay.FeatureFactory;
-import com.android.settings.wifi.qrcode.QrCamera;
-import com.android.settings.wifi.qrcode.QrDecorateView;
+import com.android.settingslib.qrcode.QrCamera;
+import com.android.settingslib.qrcode.QrDecorateView;
+import com.android.settingslib.wifi.WifiPermissionChecker;
 import com.android.wifitrackerlib.WifiEntry;
 import com.android.wifitrackerlib.WifiPickerTracker;
 
@@ -119,6 +122,7 @@ public class WifiDppQrCodeScannerFragment extends WifiDppQrCodeBaseFragment impl
 
     private WifiPickerTracker mWifiPickerTracker;
     private HandlerThread mWorkerThread;
+    private WifiPermissionChecker mWifiPermissionChecker;
 
     private final Handler mHandler = new Handler() {
         @Override
@@ -168,33 +172,41 @@ public class WifiDppQrCodeScannerFragment extends WifiDppQrCodeBaseFragment impl
                     break;
 
                 case MESSAGE_SCAN_ZXING_WIFI_FORMAT_SUCCESS:
+                    final Context context = getContext();
+                    if (context == null) {
+                        // Context may be null if the message is received after the Activity has
+                        // been destroyed
+                        Log.d(TAG, "Scan success but context is null");
+                        return;
+                    }
+
                     // We may get 2 WifiConfiguration if the QR code has no password in it,
                     // one for open network and one for enhanced open network.
                     final WifiManager wifiManager =
-                            getContext().getSystemService(WifiManager.class);
-                    final WifiNetworkConfig qrCodeWifiNetworkConfig =
-                            (WifiNetworkConfig)msg.obj;
-                    final List<WifiConfiguration> qrCodeWifiConfigurations =
-                            qrCodeWifiNetworkConfig.getWifiConfigurations();
+                            context.getSystemService(WifiManager.class);
+                    final WifiConfiguration qrCodeWifiConfiguration = (WifiConfiguration) msg.obj;
 
                     // Adds all Wi-Fi networks in QR code to the set of configured networks and
                     // connects to it if it's reachable.
                     boolean hasHiddenOrReachableWifiNetwork = false;
-                    for (WifiConfiguration qrCodeWifiConfiguration : qrCodeWifiConfigurations) {
-                        final int id = wifiManager.addNetwork(qrCodeWifiConfiguration);
-                        if (id == -1) {
-                            continue;
-                        }
-                        wifiManager.enableNetwork(id, /* attemptConnect */ false);
-                        // WifiTracker only contains a hidden SSID Wi-Fi network if it's saved.
-                        // We can't check if a hidden SSID Wi-Fi network is reachable in advance.
-                        if (qrCodeWifiConfiguration.hiddenSSID ||
-                                isReachableWifiNetwork(qrCodeWifiConfiguration)) {
-                            hasHiddenOrReachableWifiNetwork = true;
-                            mEnrolleeWifiConfiguration = qrCodeWifiConfiguration;
-                            wifiManager.connect(id,
-                                    /* listener */ WifiDppQrCodeScannerFragment.this);
-                        }
+                    final int id = wifiManager.addNetwork(qrCodeWifiConfiguration);
+                    if (id == -1) {
+                        return;
+                    }
+
+                    if (!canConnectWifi(qrCodeWifiConfiguration.SSID)) {
+                        return;
+                    }
+
+                    wifiManager.enableNetwork(id, /* attemptConnect */ false);
+                    // WifiTracker only contains a hidden SSID Wi-Fi network if it's saved.
+                    // We can't check if a hidden SSID Wi-Fi network is reachable in advance.
+                    if (qrCodeWifiConfiguration.hiddenSSID
+                            || isReachableWifiNetwork(qrCodeWifiConfiguration)) {
+                        hasHiddenOrReachableWifiNetwork = true;
+                        mEnrolleeWifiConfiguration = qrCodeWifiConfiguration;
+                        wifiManager.connect(id,
+                                /* listener */ WifiDppQrCodeScannerFragment.this);
                     }
 
                     if (!hasHiddenOrReachableWifiNetwork) {
@@ -258,6 +270,21 @@ public class WifiDppQrCodeScannerFragment extends WifiDppQrCodeBaseFragment impl
         return false;
     }
 
+    @VisibleForTesting
+    boolean canConnectWifi(String ssid) {
+        final List<WifiEntry> wifiEntries = mWifiPickerTracker.getWifiEntries();
+        for (WifiEntry wifiEntry : wifiEntries) {
+            if (!TextUtils.equals(wifiEntry.getSsid(), sanitizeSsid(ssid))) continue;
+
+            if (!wifiEntry.canConnect()) {
+                Log.w(TAG, "Wi-Fi is not allowed to connect by your organization. SSID:" + ssid);
+                showErrorMessageAndRestartCamera(R.string.not_allowed_by_ent);
+                return false;
+            }
+        }
+        return true;
+    }
+
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -269,7 +296,7 @@ public class WifiDppQrCodeScannerFragment extends WifiDppQrCodeBaseFragment impl
         }
 
         final WifiDppInitiatorViewModel model =
-                ViewModelProviders.of(this).get(WifiDppInitiatorViewModel.class);
+                new ViewModelProvider(this).get(WifiDppInitiatorViewModel.class);
 
         model.getEnrolleeSuccessNetworkId().observe(this, networkId -> {
             // After configuration change, observe callback will be triggered,
@@ -336,6 +363,15 @@ public class WifiDppQrCodeScannerFragment extends WifiDppQrCodeBaseFragment impl
         mIsConfiguratorMode = true;
     }
 
+    public WifiDppQrCodeScannerFragment(WifiPickerTracker wifiPickerTracker,
+            WifiPermissionChecker wifiPermissionChecker) {
+        super();
+
+        mIsConfiguratorMode = true;
+        mWifiPickerTracker = wifiPickerTracker;
+        mWifiPermissionChecker = wifiPermissionChecker;
+    }
+
     /**
      * Enrollee container activity of the fragment should create instance with this constructor and
      * specify the SSID string of the WI-Fi network to be provisioned.
@@ -362,7 +398,7 @@ public class WifiDppQrCodeScannerFragment extends WifiDppQrCodeBaseFragment impl
             }
         };
         final Context context = getContext();
-        mWifiPickerTracker = FeatureFactory.getFactory(context)
+        mWifiPickerTracker = FeatureFactory.getFeatureFactory()
                 .getWifiTrackerLibProvider()
                 .createWifiPickerTracker(getSettingsLifecycle(), context,
                         new Handler(Looper.getMainLooper()),
@@ -492,8 +528,9 @@ public class WifiDppQrCodeScannerFragment extends WifiDppQrCodeBaseFragment impl
         }
 
         // It's impossible to provision other device with ZXing Wi-Fi Network config format
-        final String scheme = mWifiQrCode.getScheme();
-        if (mIsConfiguratorMode && WifiQrCode.SCHEME_ZXING_WIFI_NETWORK_CONFIG.equals(scheme)) {
+        if (mIsConfiguratorMode
+                && mWifiQrCode.getScheme()
+                        == UriParserResults.URI_SCHEME_ZXING_WIFI_NETWORK_CONFIG) {
             showErrorMessage(R.string.wifi_dpp_qr_code_is_not_valid_format);
             return false;
         }
@@ -507,11 +544,11 @@ public class WifiDppQrCodeScannerFragment extends WifiDppQrCodeBaseFragment impl
     @Override
     public void handleSuccessfulResult(String qrCode) {
         switch (mWifiQrCode.getScheme()) {
-            case WifiQrCode.SCHEME_DPP:
+            case UriParserResults.URI_SCHEME_DPP:
                 handleWifiDpp();
                 break;
 
-            case WifiQrCode.SCHEME_ZXING_WIFI_NETWORK_CONFIG:
+            case UriParserResults.URI_SCHEME_ZXING_WIFI_NETWORK_CONFIG:
                 handleZxingWifiFormat();
                 break;
 
@@ -529,7 +566,7 @@ public class WifiDppQrCodeScannerFragment extends WifiDppQrCodeBaseFragment impl
 
     private void handleZxingWifiFormat() {
         Message message = mHandler.obtainMessage(MESSAGE_SCAN_ZXING_WIFI_FORMAT_SUCCESS);
-        message.obj = new WifiQrCode(mWifiQrCode.getQrCode()).getWifiNetworkConfig();
+        message.obj = new WifiQrCode(mWifiQrCode.getQrCode()).getWifiConfiguration();
 
         mHandler.sendMessageDelayed(message, SHOW_SUCCESS_SQUARE_INTERVAL);
     }
@@ -567,7 +604,8 @@ public class WifiDppQrCodeScannerFragment extends WifiDppQrCodeBaseFragment impl
         message.sendToTarget();
     }
 
-    private void showErrorMessageAndRestartCamera(@StringRes int messageResId) {
+    @VisibleForTesting
+    void showErrorMessageAndRestartCamera(@StringRes int messageResId) {
         final Message message = mHandler.obtainMessage(MESSAGE_SHOW_ERROR_MESSAGE,
                 getString(messageResId));
         message.arg1 = ARG_RESTART_CAMERA;
@@ -595,6 +633,7 @@ public class WifiDppQrCodeScannerFragment extends WifiDppQrCodeBaseFragment impl
                 if (wifiConfig.networkId == newNetworkId) {
                     mLatestStatusCode = WifiDppUtils.EASY_CONNECT_EVENT_SUCCESS;
                     mEnrolleeWifiConfiguration = wifiConfig;
+                    if (!canConnectWifi(wifiConfig.SSID)) return;
                     wifiManager.connect(wifiConfig, WifiDppQrCodeScannerFragment.this);
                     return;
                 }
@@ -679,7 +718,7 @@ public class WifiDppQrCodeScannerFragment extends WifiDppQrCodeBaseFragment impl
 
     private void startWifiDppEnrolleeInitiator(WifiQrCode wifiQrCode) {
         final WifiDppInitiatorViewModel model =
-                ViewModelProviders.of(this).get(WifiDppInitiatorViewModel.class);
+                new ViewModelProvider(this).get(WifiDppInitiatorViewModel.class);
 
         model.startEasyConnectAsEnrolleeInitiator(wifiQrCode.getQrCode());
     }
@@ -690,6 +729,28 @@ public class WifiDppQrCodeScannerFragment extends WifiDppQrCodeBaseFragment impl
         resultIntent.putExtra(KEY_WIFI_CONFIGURATION, mEnrolleeWifiConfiguration);
 
         final Activity hostActivity = getActivity();
+        if (hostActivity == null) return;
+        if (mWifiPermissionChecker == null) {
+            mWifiPermissionChecker = new WifiPermissionChecker(hostActivity);
+        }
+
+        if (!mWifiPermissionChecker.canAccessWifiState()) {
+            Log.w(TAG, "Calling package does not have ACCESS_WIFI_STATE permission for result.");
+            EventLog.writeEvent(0x534e4554, "187176859",
+                    mWifiPermissionChecker.getLaunchedPackage(), "no ACCESS_WIFI_STATE permission");
+            hostActivity.finish();
+            return;
+        }
+
+        if (!mWifiPermissionChecker.canAccessFineLocation()) {
+            Log.w(TAG, "Calling package does not have ACCESS_FINE_LOCATION permission for result.");
+            EventLog.writeEvent(0x534e4554, "187176859",
+                    mWifiPermissionChecker.getLaunchedPackage(),
+                    "no ACCESS_FINE_LOCATION permission");
+            hostActivity.finish();
+            return;
+        }
+
         hostActivity.setResult(Activity.RESULT_OK, resultIntent);
         hostActivity.finish();
     }
@@ -703,7 +764,7 @@ public class WifiDppQrCodeScannerFragment extends WifiDppQrCodeBaseFragment impl
     // Check is Easy Connect handshaking or not
     private boolean isWifiDppHandshaking() {
         final WifiDppInitiatorViewModel model =
-                ViewModelProviders.of(this).get(WifiDppInitiatorViewModel.class);
+                new ViewModelProvider(this).get(WifiDppInitiatorViewModel.class);
 
         return model.isWifiDppHandshaking();
     }

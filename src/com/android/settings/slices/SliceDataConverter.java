@@ -19,9 +19,12 @@ package com.android.settings.slices;
 import static com.android.settings.core.PreferenceXmlParserUtils.METADATA_CONTROLLER;
 import static com.android.settings.core.PreferenceXmlParserUtils.METADATA_ICON;
 import static com.android.settings.core.PreferenceXmlParserUtils.METADATA_KEY;
+import static com.android.settings.core.PreferenceXmlParserUtils.METADATA_PREF_TYPE;
 import static com.android.settings.core.PreferenceXmlParserUtils.METADATA_SUMMARY;
 import static com.android.settings.core.PreferenceXmlParserUtils.METADATA_TITLE;
 import static com.android.settings.core.PreferenceXmlParserUtils.METADATA_UNAVAILABLE_SLICE_SUBTITLE;
+import static com.android.settings.core.PreferenceXmlParserUtils.METADATA_USER_RESTRICTION;
+import static com.android.settings.core.PreferenceXmlParserUtils.PREF_SCREEN_TAG;
 
 import android.accessibilityservice.AccessibilityServiceInfo;
 import android.app.settings.SettingsEnums;
@@ -32,17 +35,15 @@ import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.content.pm.ServiceInfo;
 import android.content.res.Resources;
-import android.content.res.XmlResourceParser;
 import android.net.Uri;
 import android.os.Bundle;
 import android.provider.SearchIndexableResource;
 import android.provider.SettingsSlicesContract;
 import android.text.TextUtils;
-import android.util.AttributeSet;
 import android.util.Log;
-import android.util.Xml;
 import android.view.accessibility.AccessibilityManager;
 
+import androidx.annotation.NonNull;
 import androidx.annotation.VisibleForTesting;
 
 import com.android.settings.R;
@@ -52,12 +53,12 @@ import com.android.settings.core.BasePreferenceController;
 import com.android.settings.core.PreferenceXmlParserUtils;
 import com.android.settings.core.PreferenceXmlParserUtils.MetadataFlag;
 import com.android.settings.dashboard.DashboardFragment;
+import com.android.settings.notification.RingerModeAffectedVolumePreferenceController;
 import com.android.settings.overlay.FeatureFactory;
 import com.android.settingslib.core.instrumentation.MetricsFeatureProvider;
 import com.android.settingslib.search.Indexable.SearchIndexProvider;
 import com.android.settingslib.search.SearchIndexableData;
 
-import org.xmlpull.v1.XmlPullParser;
 import org.xmlpull.v1.XmlPullParserException;
 
 import java.io.IOException;
@@ -78,14 +79,12 @@ class SliceDataConverter {
 
     private static final String TAG = "SliceDataConverter";
 
-    private static final String NODE_NAME_PREFERENCE_SCREEN = "PreferenceScreen";
-
     private final MetricsFeatureProvider mMetricsFeatureProvider;
     private Context mContext;
 
     public SliceDataConverter(Context context) {
         mContext = context;
-        mMetricsFeatureProvider = FeatureFactory.getFactory(context).getMetricsFeatureProvider();
+        mMetricsFeatureProvider = FeatureFactory.getFeatureFactory().getMetricsFeatureProvider();
     }
 
     /**
@@ -101,7 +100,7 @@ class SliceDataConverter {
     public List<SliceData> getSliceData() {
         List<SliceData> sliceData = new ArrayList<>();
 
-        final Collection<SearchIndexableData> bundles = FeatureFactory.getFactory(mContext)
+        final Collection<SearchIndexableData> bundles = FeatureFactory.getFeatureFactory()
                 .getSearchFeatureProvider().getSearchIndexableResources().getProviderValues();
 
         for (SearchIndexableData bundle : bundles) {
@@ -153,44 +152,34 @@ class SliceDataConverter {
     }
 
     private List<SliceData> getSliceDataFromXML(int xmlResId, String fragmentName) {
-        XmlResourceParser parser = null;
-
         final List<SliceData> xmlSliceData = new ArrayList<>();
         String controllerClassName = "";
+        @NonNull String screenTitle = "";
 
         try {
-            parser = mContext.getResources().getXml(xmlResId);
-
-            int type;
-            while ((type = parser.next()) != XmlPullParser.END_DOCUMENT
-                    && type != XmlPullParser.START_TAG) {
-                // Parse next until start tag is found
-            }
-
-            String nodeName = parser.getName();
-            if (!NODE_NAME_PREFERENCE_SCREEN.equals(nodeName)) {
-                throw new RuntimeException(
-                        "XML document must start with <PreferenceScreen> tag; found"
-                                + nodeName + " at " + parser.getPositionDescription());
-            }
-
-            final AttributeSet attrs = Xml.asAttributeSet(parser);
-            final String screenTitle = PreferenceXmlParserUtils.getDataTitle(mContext, attrs);
-
             // TODO (b/67996923) Investigate if we need headers for Slices, since they never
             // correspond to an actual setting.
 
             final List<Bundle> metadata = PreferenceXmlParserUtils.extractMetadata(mContext,
                     xmlResId,
-                    MetadataFlag.FLAG_NEED_KEY
+                    MetadataFlag.FLAG_INCLUDE_PREF_SCREEN
+                            | MetadataFlag.FLAG_NEED_KEY
                             | MetadataFlag.FLAG_NEED_PREF_CONTROLLER
                             | MetadataFlag.FLAG_NEED_PREF_TYPE
                             | MetadataFlag.FLAG_NEED_PREF_TITLE
                             | MetadataFlag.FLAG_NEED_PREF_ICON
                             | MetadataFlag.FLAG_NEED_PREF_SUMMARY
-                            | MetadataFlag.FLAG_UNAVAILABLE_SLICE_SUBTITLE);
+                            | MetadataFlag.FLAG_UNAVAILABLE_SLICE_SUBTITLE
+                            | MetadataFlag.FLAG_NEED_USER_RESTRICTION);
 
             for (Bundle bundle : metadata) {
+                final String title = bundle.getString(METADATA_TITLE);
+                if (PREF_SCREEN_TAG.equals(bundle.getString(METADATA_PREF_TYPE))) {
+                    if (title != null) {
+                        screenTitle = title;
+                    }
+                    continue;
+                }
                 // TODO (b/67996923) Non-controller Slices should become intent-only slices.
                 // Note that without a controller, dynamic summaries are impossible.
                 controllerClassName = bundle.getString(METADATA_CONTROLLER);
@@ -202,10 +191,12 @@ class SliceDataConverter {
                 final BasePreferenceController controller = SliceBuilderUtils
                         .getPreferenceController(mContext, controllerClassName, key);
                 // Only add pre-approved Slices available on the device.
-                if (!controller.isSliceable() || !controller.isAvailable()) {
+                // Always index RingerModeAffected slices so they are available for panel
+                if (!controller.isSliceable()
+                        || !(controller.isAvailable()
+                        || controller instanceof RingerModeAffectedVolumePreferenceController)) {
                     continue;
                 }
-                final String title = bundle.getString(METADATA_TITLE);
                 final String summary = bundle.getString(METADATA_SUMMARY);
                 final int iconResId = bundle.getInt(METADATA_ICON);
 
@@ -213,6 +204,8 @@ class SliceDataConverter {
                 final String unavailableSliceSubtitle = bundle.getString(
                         METADATA_UNAVAILABLE_SLICE_SUBTITLE);
                 final boolean isPublicSlice = controller.isPublicSlice();
+                final int highlightMenuRes = controller.getSliceHighlightMenuRes();
+                final String userRestriction = bundle.getString(METADATA_USER_RESTRICTION);
 
                 final SliceData xmlSlice = new SliceData.Builder()
                         .setKey(key)
@@ -226,6 +219,8 @@ class SliceDataConverter {
                         .setSliceType(sliceType)
                         .setUnavailableSliceSubtitle(unavailableSliceSubtitle)
                         .setIsPublicSlice(isPublicSlice)
+                        .setHighlightMenuRes(highlightMenuRes)
+                        .setUserRestriction(userRestriction)
                         .build();
 
                 xmlSliceData.add(xmlSlice);
@@ -251,8 +246,6 @@ class SliceDataConverter {
                     SettingsEnums.PAGE_UNKNOWN,
                     fragmentName + "_" + controllerClassName,
                     1);
-        } finally {
-            if (parser != null) parser.close();
         }
         return xmlSliceData;
     }
@@ -281,6 +274,12 @@ class SliceDataConverter {
             final ServiceInfo serviceInfo = resolveInfo.serviceInfo;
             final String packageName = serviceInfo.packageName;
             final ComponentName componentName = new ComponentName(packageName, serviceInfo.name);
+
+            // If we change the flattenedName that is used to be set as a key of the Slice, we
+            // need to make corresponding change in SliceBuilderUtils, since we rely on the
+            // the A11y Service Slice's key to be a ComponentName to get the correct package name
+            // to grab the icon belongs to that package.
+            // LINT.IfChange
             final String flattenedName = componentName.flattenToString();
 
             if (!a11yServiceNames.contains(flattenedName)) {
@@ -294,6 +293,7 @@ class SliceDataConverter {
             }
 
             sliceDataBuilder.setKey(flattenedName)
+                    // LINT.ThenChange(SliceBuilderUtils.java:createA11yIcon)
                     .setTitle(title)
                     .setUri(new Uri.Builder()
                             .scheme(ContentResolver.SCHEME_CONTENT)

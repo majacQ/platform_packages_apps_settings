@@ -16,6 +16,7 @@
 
 package com.android.settings.display;
 
+import static android.app.admin.DevicePolicyResources.Strings.Settings.OTHER_OPTIONS_DISABLED_BY_ADMIN;
 import static android.hardware.SensorPrivacyManager.Sensors.CAMERA;
 import static android.provider.Settings.System.SCREEN_OFF_TIMEOUT;
 
@@ -31,21 +32,19 @@ import android.hardware.SensorPrivacyManager;
 import android.os.PowerManager;
 import android.os.UserHandle;
 import android.provider.Settings;
-import android.text.SpannableString;
-import android.text.Spanned;
-import android.text.style.ClickableSpan;
 import android.util.Log;
-import android.view.View;
 
-import androidx.annotation.NonNull;
-import androidx.preference.Preference;
+import androidx.annotation.Nullable;
 import androidx.preference.PreferenceScreen;
 
 import com.android.settings.R;
+import com.android.settings.core.TogglePreferenceController;
+import com.android.settings.flags.Flags;
 import com.android.settings.overlay.FeatureFactory;
 import com.android.settings.search.BaseSearchIndexProvider;
 import com.android.settings.support.actionbar.HelpResourceProvider;
 import com.android.settings.widget.RadioButtonPickerFragment;
+import com.android.settings.wifi.dpp.WifiDppUtils;
 import com.android.settingslib.RestrictedLockUtils;
 import com.android.settingslib.RestrictedLockUtilsInternal;
 import com.android.settingslib.core.instrumentation.MetricsFeatureProvider;
@@ -53,20 +52,19 @@ import com.android.settingslib.search.SearchIndexable;
 import com.android.settingslib.search.SearchIndexableRaw;
 import com.android.settingslib.widget.CandidateInfo;
 import com.android.settingslib.widget.FooterPreference;
-import com.android.settingslib.widget.RadioButtonPreference;
+import com.android.settingslib.widget.SelectorWithWidgetPreference;
 
 import com.google.common.annotations.VisibleForTesting;
 
 import java.util.ArrayList;
 import java.util.List;
 
-/**
- * Fragment that is used to control screen timeout.
- */
+/** Fragment that is used to control screen timeout. */
 @SearchIndexable(forTarget = SearchIndexable.ALL & ~SearchIndexable.ARC)
-public class ScreenTimeoutSettings extends RadioButtonPickerFragment implements
-        HelpResourceProvider {
+public class ScreenTimeoutSettings extends RadioButtonPickerFragment
+        implements HelpResourceProvider {
     private static final String TAG = "ScreenTimeout";
+
     /** If there is no setting in the provider, use this. */
     public static final int FALLBACK_SCREEN_TIMEOUT_VALUE = 30000;
 
@@ -77,22 +75,27 @@ public class ScreenTimeoutSettings extends RadioButtonPickerFragment implements
     private FooterPreference mPrivacyPreference;
     private final MetricsFeatureProvider mMetricsFeatureProvider;
     private SensorPrivacyManager mPrivacyManager;
-    private final BroadcastReceiver mReceiver = new BroadcastReceiver() {
-        @Override
-        public void onReceive(Context context, Intent intent) {
-            mAdaptiveSleepBatterySaverPreferenceController.updateVisibility();
-            mAdaptiveSleepController.updatePreference();
-        }
-    };
+    private final BroadcastReceiver mReceiver =
+            new BroadcastReceiver() {
+                @Override
+                public void onReceive(Context context, Intent intent) {
+                    mAdaptiveSleepBatterySaverPreferenceController.updateVisibility();
+                    mAdaptiveSleepController.updatePreference();
+                }
+            };
+
+    private DevicePolicyManager mDevicePolicyManager;
+    private SensorPrivacyManager.OnSensorPrivacyChangedListener mPrivacyChangedListener;
+    private boolean mIsUserAuthenticated = false;
+
+    @VisibleForTesting Context mContext;
+
+    @VisibleForTesting RestrictedLockUtils.EnforcedAdmin mAdmin;
+
+    @VisibleForTesting FooterPreference mDisableOptionsPreference;
 
     @VisibleForTesting
-    Context mContext;
-
-    @VisibleForTesting
-    RestrictedLockUtils.EnforcedAdmin mAdmin;
-
-    @VisibleForTesting
-    Preference mDisableOptionsPreference;
+    FooterPreference mPowerConsumptionPreference;
 
     @VisibleForTesting
     AdaptiveSleepPermissionPreferenceController mAdaptiveSleepPermissionController;
@@ -100,39 +103,43 @@ public class ScreenTimeoutSettings extends RadioButtonPickerFragment implements
     @VisibleForTesting
     AdaptiveSleepCameraStatePreferenceController mAdaptiveSleepCameraStatePreferenceController;
 
-    @VisibleForTesting
-    AdaptiveSleepPreferenceController mAdaptiveSleepController;
+    @VisibleForTesting AdaptiveSleepPreferenceController mAdaptiveSleepController;
 
     @VisibleForTesting
     AdaptiveSleepBatterySaverPreferenceController mAdaptiveSleepBatterySaverPreferenceController;
 
+    @Nullable
+    TogglePreferenceController mAdditionalTogglePreferenceController;
+
     public ScreenTimeoutSettings() {
         super();
-        mMetricsFeatureProvider = FeatureFactory.getFactory(getContext())
-                .getMetricsFeatureProvider();
+        mMetricsFeatureProvider = FeatureFactory.getFeatureFactory().getMetricsFeatureProvider();
     }
 
     @Override
     public void onAttach(Context context) {
         super.onAttach(context);
         mContext = context;
+        mDevicePolicyManager = mContext.getSystemService(DevicePolicyManager.class);
         mInitialEntries = getResources().getStringArray(R.array.screen_timeout_entries);
         mInitialValues = getResources().getStringArray(R.array.screen_timeout_values);
         mAdaptiveSleepController = new AdaptiveSleepPreferenceController(context);
-        mAdaptiveSleepPermissionController = new AdaptiveSleepPermissionPreferenceController(
-                context);
+        mAdaptiveSleepPermissionController =
+                new AdaptiveSleepPermissionPreferenceController(context);
         mAdaptiveSleepCameraStatePreferenceController =
-                new AdaptiveSleepCameraStatePreferenceController(context);
+                new AdaptiveSleepCameraStatePreferenceController(context, getLifecycle());
         mAdaptiveSleepBatterySaverPreferenceController =
                 new AdaptiveSleepBatterySaverPreferenceController(context);
         mPrivacyPreference = new FooterPreference(context);
         mPrivacyPreference.setIcon(R.drawable.ic_privacy_shield_24dp);
         mPrivacyPreference.setTitle(R.string.adaptive_sleep_privacy);
         mPrivacyPreference.setSelectable(false);
-        mPrivacyPreference.setLayoutResource(R.layout.preference_footer);
+        mPrivacyPreference.setLayoutResource(
+                com.android.settingslib.widget.preference.footer.R.layout.preference_footer);
         mPrivacyManager = SensorPrivacyManager.getInstance(context);
-        mPrivacyManager.addSensorPrivacyListener(CAMERA,
-                (sensor, enabled) -> mAdaptiveSleepController.updatePreference());
+        mPrivacyChangedListener = (sensor, enabled) -> mAdaptiveSleepController.updatePreference();
+        mAdditionalTogglePreferenceController = FeatureFactory.getFeatureFactory()
+                .getDisplayFeatureProvider().createAdditionalPreference(context);
     }
 
     @Override
@@ -142,8 +149,9 @@ public class ScreenTimeoutSettings extends RadioButtonPickerFragment implements
         if (mInitialValues != null) {
             for (int i = 0; i < mInitialValues.length; ++i) {
                 if (Long.parseLong(mInitialValues[i].toString()) <= maxTimeout) {
-                    candidates.add(new TimeoutCandidateInfo(mInitialEntries[i],
-                            mInitialValues[i].toString(), true));
+                    candidates.add(
+                            new TimeoutCandidateInfo(
+                                    mInitialEntries[i], mInitialValues[i].toString(), true));
                 }
             }
         } else {
@@ -159,14 +167,19 @@ public class ScreenTimeoutSettings extends RadioButtonPickerFragment implements
         mAdaptiveSleepCameraStatePreferenceController.updateVisibility();
         mAdaptiveSleepBatterySaverPreferenceController.updateVisibility();
         mAdaptiveSleepController.updatePreference();
-        mContext.registerReceiver(mReceiver,
-                new IntentFilter(PowerManager.ACTION_POWER_SAVE_MODE_CHANGED));
+        mContext.registerReceiver(
+                mReceiver, new IntentFilter(PowerManager.ACTION_POWER_SAVE_MODE_CHANGED));
+        mPrivacyManager.addSensorPrivacyListener(CAMERA, mPrivacyChangedListener);
+        mIsUserAuthenticated = false;
+        FeatureFactory.getFeatureFactory().getDisplayFeatureProvider().updatePreference(
+                mAdditionalTogglePreferenceController);
     }
 
     @Override
     public void onStop() {
         super.onStop();
         mContext.unregisterReceiver(mReceiver);
+        mPrivacyManager.removeSensorPrivacyListener(CAMERA, mPrivacyChangedListener);
     }
 
     @Override
@@ -181,19 +194,21 @@ public class ScreenTimeoutSettings extends RadioButtonPickerFragment implements
         }
 
         for (CandidateInfo info : candidateList) {
-            RadioButtonPreference pref =
-                    new RadioButtonPreference(getPrefContext());
+            ProtectedSelectorWithWidgetPreference pref =
+                    new ProtectedSelectorWithWidgetPreference(
+                            getPrefContext(), info.getKey(), this);
             bindPreference(pref, info.getKey(), info, defaultKey);
             screen.addPreference(pref);
         }
 
-        final long selectedTimeout = Long.parseLong(defaultKey);
+        final long selectedTimeout = getTimeoutFromKey(defaultKey);
         final long maxTimeout = getMaxScreenTimeout(getContext());
         if (!candidateList.isEmpty() && (selectedTimeout > maxTimeout)) {
             // The selected time out value is longer than the max timeout allowed by the admin.
             // Select the largest value from the list by default.
-            final RadioButtonPreference preferenceWithLargestTimeout =
-                    (RadioButtonPreference) screen.getPreference(candidateList.size() - 1);
+            final ProtectedSelectorWithWidgetPreference preferenceWithLargestTimeout =
+                    (ProtectedSelectorWithWidgetPreference)
+                            screen.getPreference(candidateList.size() - 1);
             preferenceWithLargestTimeout.setChecked(true);
         }
 
@@ -201,53 +216,74 @@ public class ScreenTimeoutSettings extends RadioButtonPickerFragment implements
         mPrivacyPreference.setIcon(R.drawable.ic_privacy_shield_24dp);
         mPrivacyPreference.setTitle(R.string.adaptive_sleep_privacy);
         mPrivacyPreference.setSelectable(false);
-        mPrivacyPreference.setLayoutResource(R.layout.preference_footer);
+        mPrivacyPreference.setLayoutResource(
+                com.android.settingslib.widget.preference.footer.R.layout.preference_footer);
+
+        FeatureFactory.getFeatureFactory().getDisplayFeatureProvider()
+                .addToScreen(mAdditionalTogglePreferenceController, screen);
 
         if (isScreenAttentionAvailable(getContext())) {
             mAdaptiveSleepPermissionController.addToScreen(screen);
             mAdaptiveSleepCameraStatePreferenceController.addToScreen(screen);
-            mAdaptiveSleepBatterySaverPreferenceController.addToScreen(screen);
             mAdaptiveSleepController.addToScreen(screen);
+            mAdaptiveSleepBatterySaverPreferenceController.addToScreen(screen);
             screen.addPreference(mPrivacyPreference);
         }
 
         if (mAdmin != null) {
             setupDisabledFooterPreference();
             screen.addPreference(mDisableOptionsPreference);
+        } else {
+            setupPowerConsumptionFooterPreference();
+            screen.addPreference(mPowerConsumptionPreference);
         }
+    }
+
+    boolean isUserAuthenticated() {
+        return mIsUserAuthenticated;
+    }
+
+    void setUserAuthenticated(boolean isUserAuthenticated) {
+        mIsUserAuthenticated = isUserAuthenticated;
     }
 
     @VisibleForTesting
     void setupDisabledFooterPreference() {
-        final String textDisabledByAdmin = getResources().getString(
-                R.string.admin_disabled_other_options);
+        final String textDisabledByAdmin =
+                mDevicePolicyManager
+                        .getResources()
+                        .getString(
+                                OTHER_OPTIONS_DISABLED_BY_ADMIN,
+                                () ->
+                                        getResources()
+                                                .getString(R.string.admin_disabled_other_options));
         final String textMoreDetails = getResources().getString(R.string.admin_more_details);
 
-        final SpannableString spannableString = new SpannableString(
-                textDisabledByAdmin + System.lineSeparator()
-                        + System.lineSeparator() + textMoreDetails);
-        final ClickableSpan clickableSpan = new ClickableSpan() {
-            @Override
-            public void onClick(@NonNull View widget) {
-                RestrictedLockUtils.sendShowAdminSupportDetailsIntent(getContext(), mAdmin);
-            }
-        };
-
-        if (textDisabledByAdmin != null && textMoreDetails != null) {
-            spannableString.setSpan(clickableSpan, textDisabledByAdmin.length() + 1,
-                    textDisabledByAdmin.length() + textMoreDetails.length() + 2,
-                    Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-        }
-
         mDisableOptionsPreference = new FooterPreference(getContext());
-        mDisableOptionsPreference.setLayoutResource(R.layout.preference_footer);
-        mDisableOptionsPreference.setTitle(spannableString);
+        mDisableOptionsPreference.setTitle(textDisabledByAdmin);
         mDisableOptionsPreference.setSelectable(false);
+        mDisableOptionsPreference.setLearnMoreText(textMoreDetails);
+        mDisableOptionsPreference.setLearnMoreAction(
+                v -> {
+                    RestrictedLockUtils.sendShowAdminSupportDetailsIntent(getContext(), mAdmin);
+                });
         mDisableOptionsPreference.setIcon(R.drawable.ic_info_outline_24dp);
 
         // The 'disabled by admin' preference should always be at the end of the setting page.
-        mDisableOptionsPreference.setOrder(DEFAULT_ORDER_OF_LOWEST_PREFERENCE);
         mPrivacyPreference.setOrder(DEFAULT_ORDER_OF_LOWEST_PREFERENCE - 1);
+        mDisableOptionsPreference.setOrder(DEFAULT_ORDER_OF_LOWEST_PREFERENCE);
+    }
+
+    @VisibleForTesting
+    void setupPowerConsumptionFooterPreference() {
+        mPowerConsumptionPreference = new FooterPreference(getContext());
+        mPowerConsumptionPreference.setTitle(R.string.power_consumption_footer_summary);
+        mPowerConsumptionPreference.setSelectable(false);
+        mPowerConsumptionPreference.setIcon(R.drawable.ic_info_outline_24dp);
+
+        // The 'Longer screen timeout' preference should always be at the end of the setting page.
+        mPrivacyPreference.setOrder(DEFAULT_ORDER_OF_LOWEST_PREFERENCE - 1);
+        mPowerConsumptionPreference.setOrder(DEFAULT_ORDER_OF_LOWEST_PREFERENCE);
     }
 
     @Override
@@ -295,17 +331,20 @@ public class ScreenTimeoutSettings extends RadioButtonPickerFragment implements
         if (context == null) {
             return Long.toString(FALLBACK_SCREEN_TIMEOUT_VALUE);
         } else {
-            return Long.toString(Settings.System.getLong(context.getContentResolver(),
-                    SCREEN_OFF_TIMEOUT, FALLBACK_SCREEN_TIMEOUT_VALUE));
+            return Long.toString(
+                    Settings.System.getLong(
+                            context.getContentResolver(),
+                            SCREEN_OFF_TIMEOUT,
+                            FALLBACK_SCREEN_TIMEOUT_VALUE));
         }
     }
 
     private void setCurrentSystemScreenTimeout(Context context, String key) {
         try {
             if (context != null) {
-                final long value = Long.parseLong(key);
-                mMetricsFeatureProvider.action(context, SettingsEnums.ACTION_SCREEN_TIMEOUT_CHANGED,
-                        (int) value);
+                final long value = getTimeoutFromKey(key);
+                mMetricsFeatureProvider.action(
+                        context, SettingsEnums.ACTION_SCREEN_TIMEOUT_CHANGED, (int) value);
                 Settings.System.putLong(context.getContentResolver(), SCREEN_OFF_TIMEOUT, value);
             }
         } catch (NumberFormatException e) {
@@ -317,7 +356,12 @@ public class ScreenTimeoutSettings extends RadioButtonPickerFragment implements
         return AdaptiveSleepPreferenceController.isAdaptiveSleepSupported(context);
     }
 
-    private static class TimeoutCandidateInfo extends CandidateInfo {
+    private static long getTimeoutFromKey(String key) {
+        return Long.parseLong(key);
+    }
+
+    @VisibleForTesting
+    static class TimeoutCandidateInfo extends CandidateInfo {
         private final CharSequence mLabel;
         private final String mKey;
 
@@ -343,10 +387,42 @@ public class ScreenTimeoutSettings extends RadioButtonPickerFragment implements
         }
     }
 
+    @VisibleForTesting
+    static class ProtectedSelectorWithWidgetPreference
+            extends SelectorWithWidgetPreference {
+
+        private final long mTimeoutMs;
+        private final ScreenTimeoutSettings mScreenTimeoutSettings;
+
+        ProtectedSelectorWithWidgetPreference(
+                Context context, String key, ScreenTimeoutSettings screenTimeoutSettings) {
+            super(context);
+            mTimeoutMs = getTimeoutFromKey(key);
+            mScreenTimeoutSettings = screenTimeoutSettings;
+        }
+
+        @Override
+        public void onClick() {
+            if (Flags.protectScreenTimeoutWithAuth()
+                    && !mScreenTimeoutSettings.isUserAuthenticated()
+                    && !isChecked()
+                    && mTimeoutMs > getTimeoutFromKey(mScreenTimeoutSettings.getDefaultKey())) {
+                WifiDppUtils.showLockScreen(
+                        getContext(),
+                        () -> {
+                            mScreenTimeoutSettings.setUserAuthenticated(true);
+                            super.onClick();
+                        });
+            } else {
+                super.onClick();
+            }
+        }
+    }
+
     public static final BaseSearchIndexProvider SEARCH_INDEX_DATA_PROVIDER =
             new BaseSearchIndexProvider(R.xml.screen_timeout_settings) {
-                public List<SearchIndexableRaw> getRawDataToIndex(Context context,
-                        boolean enabled) {
+                public List<SearchIndexableRaw> getRawDataToIndex(
+                        Context context, boolean enabled) {
                     if (!isScreenAttentionAvailable(context)) {
                         return null;
                     }

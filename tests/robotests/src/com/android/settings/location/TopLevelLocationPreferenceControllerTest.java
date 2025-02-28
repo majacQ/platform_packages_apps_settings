@@ -22,6 +22,7 @@ import android.content.Context;
 import android.location.LocationManager;
 
 import com.android.settings.R;
+import com.android.settingslib.utils.StringUtil;
 
 import org.junit.Before;
 import org.junit.Test;
@@ -56,31 +57,38 @@ public class TopLevelLocationPreferenceControllerTest {
     }
 
     @Test
-    public void getSummary_whenLocationIsOn_shouldShowLoadingString() {
+    public void getSummary_whenLocationIsOn_shouldPreservePreviousText() {
+        final int locationAppCount = 5;
+        // Retrieve summary text once.
+        mLocationManager.setLocationEnabledForUser(true, android.os.Process.myUserHandle());
+        mController.setLocationAppCount(locationAppCount);
+        mController.getSummary();
+        // Turn off location.
+        mLocationManager.setLocationEnabledForUser(false, android.os.Process.myUserHandle());
+        // Turn on location again and check if the previous summary text is still cached.
         mLocationManager.setLocationEnabledForUser(true, android.os.Process.myUserHandle());
         assertThat(mController.getSummary()).isEqualTo(
-                mContext.getString(R.string.location_settings_loading_app_permission_stats));
+                StringUtil.getIcuPluralsString(mContext, locationAppCount,
+                        R.string.location_settings_summary_location_on));
     }
 
     @Test
     public void getSummary_whenLocationAppCountIsOne_shouldShowSingularString() {
-        final int LOCATION_APP_COUNT = 1;
+        final int locationAppCount = 1;
         mLocationManager.setLocationEnabledForUser(true, android.os.Process.myUserHandle());
-        mController.setLocationAppCount(LOCATION_APP_COUNT);
+        mController.setLocationAppCount(locationAppCount);
         assertThat(mController.getSummary()).isEqualTo(
-                mContext.getResources().getQuantityString(
-                        R.plurals.location_settings_summary_location_on,
-                        LOCATION_APP_COUNT, LOCATION_APP_COUNT));
+                StringUtil.getIcuPluralsString(mContext, locationAppCount,
+                        R.string.location_settings_summary_location_on));
     }
 
     @Test
     public void getSummary_whenLocationAppCountIsGreaterThanOne_shouldShowPluralString() {
-        final int LOCATION_APP_COUNT = 5;
+        final int locationAppCount = 5;
         mLocationManager.setLocationEnabledForUser(true, android.os.Process.myUserHandle());
-        mController.setLocationAppCount(LOCATION_APP_COUNT);
+        mController.setLocationAppCount(locationAppCount);
         assertThat(mController.getSummary()).isEqualTo(
-                mContext.getResources().getQuantityString(
-                        R.plurals.location_settings_summary_location_on,
-                        LOCATION_APP_COUNT, LOCATION_APP_COUNT));
+                StringUtil.getIcuPluralsString(mContext, locationAppCount,
+                        R.string.location_settings_summary_location_on));
     }
 }

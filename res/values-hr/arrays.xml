@@ -20,15 +20,6 @@
 
 <resources xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2">
-  <string-array name="timezone_filters">
-    <item msgid="6657355508154731088">"Amerika"</item>
-    <item msgid="728005479339643412">"Europa"</item>
-    <item msgid="4086411516715683715">"Afrika"</item>
-    <item msgid="2044919239591619902">"Azija"</item>
-    <item msgid="4758559452497348479">"Australija"</item>
-    <item msgid="2254507767835075885">"Pacifički"</item>
-    <item msgid="6471579645890342891">"Sve"</item>
-  </string-array>
   <string-array name="screen_timeout_entries">
     <item msgid="8386012403457852396">"15 sekundi"</item>
     <item msgid="4572123773028439079">"30 sekundi"</item>
@@ -38,35 +29,23 @@
     <item msgid="1955784331962974678">"10 minuta"</item>
     <item msgid="5578717731965793584">"30 minuta"</item>
   </string-array>
-  <string-array name="dream_timeout_entries">
-    <item msgid="1999412608953538363">"Nikada"</item>
-    <item msgid="5533979945668138276">"15 s"</item>
-    <item msgid="418444643954320796">"30 sekundi"</item>
-    <item msgid="3604213008710109260">"1 minuta"</item>
-    <item msgid="5684250925112815553">"2 minute"</item>
-    <item msgid="4003134469028178277">"5 minuta"</item>
-    <item msgid="6258291104689105723">"10 minuta"</item>
-    <item msgid="6231662826434607130">"30 minuta"</item>
-  </string-array>
     <!-- no translation found for dark_ui_scheduler_preference_titles:0 (7465697698048662118) -->
     <!-- no translation found for dark_ui_scheduler_preference_titles:1 (4057198235664064478) -->
     <!-- no translation found for dark_ui_scheduler_preference_titles:2 (8842756744447000897) -->
+    <!-- no translation found for dark_ui_scheduler_with_bedtime_preference_titles:0 (8160793372964333729) -->
+    <!-- no translation found for dark_ui_scheduler_with_bedtime_preference_titles:1 (1570862084158925417) -->
+    <!-- no translation found for dark_ui_scheduler_with_bedtime_preference_titles:2 (1527300254382984555) -->
+    <!-- no translation found for dark_ui_scheduler_with_bedtime_preference_titles:3 (5231566512901956369) -->
   <string-array name="lock_after_timeout_entries">
     <item msgid="2223808927866488981">"Odmah"</item>
     <item msgid="463591454172790676">"5 sekundi"</item>
     <item msgid="6981910499530067289">"15 sekundi"</item>
     <item msgid="841968393904987343">"30 sekundi"</item>
-    <item msgid="8209996803755081758">"1 min"</item>
+    <item msgid="8209996803755081758">"1 minuta"</item>
     <item msgid="8532038695054819775">"2 minute"</item>
     <item msgid="230858078069711241">"5 minuta"</item>
     <item msgid="7289395602286160723">"10 minuta"</item>
     <item msgid="3142577549730704595">"30 minuta"</item>
-  </string-array>
-  <string-array name="entries_font_size">
-    <item msgid="4649244712522775149">"Malen"</item>
-    <item msgid="4350318459725129464">"Zadano"</item>
-    <item msgid="722959474722634030">"Velik"</item>
-    <item msgid="5468692832610514379">"Najveće"</item>
   </string-array>
   <string-array name="wifi_status">
     <item msgid="1201478116293383426"></item>
@@ -82,20 +61,6 @@
     <item msgid="5473541238056528086">"Blokirano"</item>
     <item msgid="1114588261171522603">"Privremeno izbjegavanje loše veze"</item>
   </string-array>
-  <string-array name="wifi_status_with_ssid">
-    <item msgid="1528087426723432177"></item>
-    <item msgid="155483314608049961">"Skeniranje..."</item>
-    <item msgid="3409219643606946053">"Povezivanje na mrežu <xliff:g id="NETWORK_NAME">%1$s</xliff:g>…"</item>
-    <item msgid="7891463004457278422">"Autentikacija s mrežom <xliff:g id="NETWORK_NAME">%1$s</xliff:g>…"</item>
-    <item msgid="3193388999810487137">"Dohvaćanje IP adrese s mreže <xliff:g id="NETWORK_NAME">%1$s</xliff:g>…"</item>
-    <item msgid="2227930004124157952">"Povezano s mrežom <xliff:g id="NETWORK_NAME">%1$s</xliff:g>"</item>
-    <item msgid="7104168043537022445">"Obustavljeno"</item>
-    <item msgid="2595938203187002544">"Isključivanje iz mreže <xliff:g id="NETWORK_NAME">%1$s</xliff:g>…"</item>
-    <item msgid="2435175968703898648">"Niste povezani"</item>
-    <item msgid="4804573668906374228">"Neuspješno"</item>
-    <item msgid="4036325515437530221">"Blokirano"</item>
-    <item msgid="8883455894013518008">"Privremeno izbjegavanje loše veze"</item>
-  </string-array>
     <!-- no translation found for wifi_tether_security:0 (6312112980634811065) -->
     <!-- no translation found for wifi_tether_security:1 (1428294025896439258) -->
     <!-- no translation found for wifi_tether_security:2 (6851763638266088835) -->
@@ -105,11 +70,6 @@
     <item msgid="5703177653586269306">"Zatraži status certifikata"</item>
     <item msgid="326388247868439528">"Zahtijevaj status certifikata"</item>
   </string-array>
-  <string-array name="wifi_p2p_wps_setup">
-    <item msgid="1446717102923442720">"Gumb"</item>
-    <item msgid="2630618799033509548">"PIN s paralelnog uređaja"</item>
-    <item msgid="6088264311596031080">"PIN s ovog uređaja"</item>
-  </string-array>
   <string-array name="wifi_p2p_status">
     <item msgid="8357401480964012245">"Povezano"</item>
     <item msgid="66312817817365647">"Pozvan"</item>
@@ -117,11 +77,17 @@
     <item msgid="6556827947082659801">"Dostupan"</item>
     <item msgid="6096962300722555553">"Izvan dometa"</item>
   </string-array>
-  <string-array name="bluetooth_visibility_timeout_entries">
-    <item msgid="6697785880436838464">"2 minute"</item>
-    <item msgid="3886297451944778457">"5 minuta"</item>
-    <item msgid="5972466727114812286">"1 sat"</item>
-    <item msgid="4241913314075719627">"Nikada ne istječe"</item>
+  <string-array name="bt_stack_log_level_entries">
+    <item msgid="7872226620825638673">"Opširno"</item>
+    <item msgid="4414817955073540319">"Otklanjanje pogrešaka"</item>
+    <item msgid="9152250562693119681">"Informacije"</item>
+    <item msgid="8884807223431437262">"Upozorenje"</item>
+    <item msgid="1154843682335941096">"Pogreška"</item>
+  </string-array>
+  <string-array name="bluetooth_leaudio_mode">
+    <item msgid="5307106570247137458">"Disabled"</item>
+    <item msgid="7781484297606806796">"Unicast"</item>
+    <item msgid="6667451574264144311">"Unicast and Broadcast"</item>
   </string-array>
   <string-array name="bluetooth_max_connected_audio_devices">
     <item msgid="4792793579224104167">"Koristi zadane postavke sustava: <xliff:g id="DEFAULT_BLUETOOTH_MAX_CONNECTED_AUDIO_DEVICES">%1$d</xliff:g>"</item>
@@ -131,27 +97,17 @@
     <item msgid="9100937224980838123">"4"</item>
     <item msgid="6702740528496186521">"5"</item>
   </string-array>
+  <string-array name="bluetooth_audio_routing_titles">
+    <item msgid="3488687531285795335">"Koristi zadanu vrijednost aplikacije"</item>
+    <item msgid="5112879855377353813">"Pusti na slušnom uređaju"</item>
+    <item msgid="4853360663119482646">"Pusti na telefonskom zvučniku"</item>
+  </string-array>
   <string-array name="wifi_signal">
     <item msgid="199360311367724149">"Loše"</item>
     <item msgid="2470925506985305429">"Loša"</item>
     <item msgid="8545211062334016668">"Solidna"</item>
     <item msgid="7468449584777730187">"Dobra"</item>
     <item msgid="202124107702016530">"Izvrsna"</item>
-  </string-array>
-  <string-array name="data_usage_data_range">
-    <item msgid="3528385925116637939">"Posljednjih 30 dana"</item>
-    <item msgid="3356834403629955571">"Postavi ciklus uporabe..."</item>
-  </string-array>
-  <string-array name="usage_stats_display_order_types">
-    <item msgid="7527014644010884448">"Vrijeme upotrebe"</item>
-    <item msgid="4631872897572423215">"Posljednja upotreba"</item>
-    <item msgid="2647568941623179473">"Naziv aplikacije"</item>
-  </string-array>
-  <string-array name="wifi_eap_entries">
-    <item msgid="6337816338410321026">"PEAP"</item>
-    <item msgid="1540215992819772636">"TLS"</item>
-    <item msgid="9105006864434061405">"TTLS"</item>
-    <item msgid="3199281439582632425">"PWD"</item>
   </string-array>
   <string-array name="wifi_peap_phase2_entries">
     <item msgid="8082624033981656770">"MSCHAPV2"</item>
@@ -214,18 +170,6 @@
     <item msgid="8568003268185342352">"SPN"</item>
     <item msgid="1804537219968457989">"IMSI"</item>
     <item msgid="3441876902463317017">"GID"</item>
-  </string-array>
-  <string-array name="app_install_location_entries">
-    <item msgid="3771157789865587832">"Interno pohranjivanje na uređaj"</item>
-    <item msgid="5501345333507193420">"Prijenosna SD kartica"</item>
-    <item msgid="2362840341195111674">"Neka sustav odluči"</item>
-  </string-array>
-  <string-array name="app_ops_categories">
-    <item msgid="528483497841471005">"Lokacija"</item>
-    <item msgid="7786376598377098070">"Osobno"</item>
-    <item msgid="7707692387382449990">"Slanje poruka"</item>
-    <item msgid="2235402926760712958">"Mediji"</item>
-    <item msgid="1822578131647724167">"Uređaj"</item>
   </string-array>
   <string-array name="app_ops_summaries">
     <item msgid="8837238583601420163">"približna lokacija"</item>
@@ -383,18 +327,11 @@
     <item msgid="5012882784126308133">"Mala slova"</item>
   </string-array>
   <string-array name="captioning_font_size_selector_titles">
-    <item msgid="923916134548435468">"Vrlo mali"</item>
-    <item msgid="5738147437573674872">"Mali"</item>
-    <item msgid="3942006483573485941">"Zadano"</item>
-    <item msgid="824386705928670045">"Veliki"</item>
-    <item msgid="2790561781512874585">"Vrlo veliki"</item>
-  </string-array>
-  <string-array name="captioning_font_size_selector_summaries">
-    <item msgid="5700290209695344464">"Vrlo mala veličina teksta"</item>
-    <item msgid="4400431625665186389">"Mala veličina teksta"</item>
-    <item msgid="2340994108094808362">"Zadana veličina teksta"</item>
-    <item msgid="6446684863055375405">"Velika veličina teksta"</item>
-    <item msgid="6838252010935384975">"Vrlo velika veličina teksta"</item>
+    <item msgid="923916134548435468">"Vrlo mala"</item>
+    <item msgid="5738147437573674872">"Mala"</item>
+    <item msgid="4691660235626027304">"Srednja"</item>
+    <item msgid="824386705928670045">"Velika"</item>
+    <item msgid="2790561781512874585">"Vrlo velika"</item>
   </string-array>
   <string-array name="captioning_edge_type_selector_titles">
     <item msgid="70686029249840227">"Zadano"</item>
@@ -427,19 +364,8 @@
     <item msgid="6922258575853746220">"Pokret"</item>
   </string-array>
   <string-array name="accessibility_button_size_selector_titles">
-    <item msgid="7482952318152486459">"Malen"</item>
-    <item msgid="1666628329913333563">"Velik"</item>
-  </string-array>
-  <string-array name="vpn_types_long">
-    <item msgid="6621806338070912611">"PPTP VPN"</item>
-    <item msgid="2552427673212085780">"L2TP/IPSec VPN s unaprijed dijeljenim ključevima"</item>
-    <item msgid="7378096704485168082">"L2TP/IPSec VPN s certifikatima"</item>
-    <item msgid="3792393562235791509">"IPSec VPN s unaprijed dijeljenim ključevima i Xauth autentifikacijom"</item>
-    <item msgid="2484564813864139237">"IPSec VPN s certifikatima i Xauth autentifikacijom"</item>
-    <item msgid="68918911194507915">"IPSec VPN s certifikatima i hibridnom autentifikacijom"</item>
-    <item msgid="4631647675167100375">"IKEv2/IPSec VPN s certifikatima i autentifikacijom korisničkim imenom/zaporkom"</item>
-    <item msgid="8812228622975052811">"IKEv2/IPSec VPN s unaprijed podijeljenim ključevima"</item>
-    <item msgid="6630554779981113046">"IKEv2/IPSec VPN s certifikatima"</item>
+    <item msgid="7482952318152486459">"Maleno"</item>
+    <item msgid="1666628329913333563">"Veliko"</item>
   </string-array>
   <string-array name="vpn_proxy_settings">
     <item msgid="7165538292837266997">"Nijedan"</item>
@@ -465,36 +391,6 @@
     <item msgid="4434319706635379779">"Kritično"</item>
     <item msgid="7582717864806562725">"?"</item>
   </string-array>
-  <string-array name="proc_stats_memory_states">
-    <item msgid="9158074556874274573">"Uobičajena"</item>
-    <item msgid="800025072447180345">"Umjerena"</item>
-    <item msgid="6553000762562707158">"Niska"</item>
-    <item msgid="1800371389071355640">"Kritična"</item>
-  </string-array>
-  <string-array name="proc_stats_process_states">
-    <item msgid="7389344075996860704">"Postojana"</item>
-    <item msgid="5777152116210127847">"Glavna aktivnost"</item>
-    <item msgid="1834030155560727324">"Važna (u prvom planu)"</item>
-    <item msgid="8494424742994426350">"Važna (u pozadini)"</item>
-    <item msgid="5099332663422156149">"Pričuvna"</item>
-    <item msgid="7701089238529887617">"Teška"</item>
-    <item msgid="3006466648960525485">"Usluga (izvodi se)"</item>
-    <item msgid="2253476667031759713">"Usluga (ponovno pokretanje)"</item>
-    <item msgid="5209576689975321486">"Prijamnik"</item>
-    <item msgid="7243761414719310364">"Kuća"</item>
-    <item msgid="3674963093565630781">"Posljednja aktivnost"</item>
-    <item msgid="5545221272903898598">"Predmemorija (aktivnost)"</item>
-    <item msgid="3164591924266309710">"Predmemorija (klijent aktivnosti)"</item>
-    <item msgid="8186970968968646288">"Predmemorija (prazna)"</item>
-  </string-array>
-  <string-array name="sim_color_light">
-    <item msgid="7007548668267207615">"@boja/SIM_boja_cijan"</item>
-    <item msgid="177868870612833388">"@boja/SIM_boja_plava800"</item>
-    <item msgid="1129898906008357171">"@boja/SIM_boja_zelena800"</item>
-    <item msgid="4206364087389793587">"@boja/SIM_boja_ljubičasta800"</item>
-    <item msgid="6728943460061940130">"@boja/SIM_boja_ružičasta800"</item>
-    <item msgid="968332068361935002">"@boja/SIM_boja_narančasta"</item>
-  </string-array>
   <string-array name="color_picker">
     <item msgid="7216413848731287689">"Cijan"</item>
     <item msgid="5661027589207588703">"Plava"</item>
@@ -517,19 +413,19 @@
   <string-array name="wifi_metered_entries">
     <item msgid="3237321077949659241">"Automatsko otkrivanje"</item>
     <item msgid="3779092145391320375">"Mreža s ograničenim prometom"</item>
-    <item msgid="2047166446768045816">"Mreža bez ograničenja prometa"</item>
+    <item msgid="2047166446768045816">"Mreža bez ograničenog prometa"</item>
   </string-array>
   <string-array name="wifi_privacy_entries">
-    <item msgid="3485945604919292489">"Koristi nasumičnu MAC adresu (zadano)"</item>
+    <item msgid="91222619458919148">"Koristi nasumičnu MAC adresu"</item>
     <item msgid="741680937828608749">"Koristi MAC adresu uređaja"</item>
+  </string-array>
+  <string-array name="wifi_dhcp_entries">
+    <item msgid="2532836996945493932">"Pošalji naziv uređaja mreži"</item>
+    <item msgid="7928900271137707489">"Nemoj slati naziv uređaja mreži"</item>
   </string-array>
   <string-array name="wifi_hidden_entries">
     <item msgid="342232116597649254">"Ne"</item>
     <item msgid="2163015208097377388">"Da"</item>
-  </string-array>
-  <string-array name="dark_ui_mode_entries">
-    <item msgid="6438197382930472090">"Tamno"</item>
-    <item msgid="3761390980253394079">"Svijetlo"</item>
   </string-array>
   <string-array name="autofill_logging_level_entries">
     <item msgid="2263571982739726576">"Isključeno"</item>
@@ -583,10 +479,67 @@
     <!-- no translation found for enhanced_4g_lte_mode_title_variant:0 (1841976293698111057) -->
     <!-- no translation found for enhanced_4g_lte_mode_title_variant:1 (6822859933189908133) -->
     <!-- no translation found for enhanced_4g_lte_mode_title_variant:2 (4543171628914168621) -->
-    <!-- no translation found for enhanced_4g_lte_mode_sumary_variant:0 (6624400115590055120) -->
-    <!-- no translation found for enhanced_4g_lte_mode_sumary_variant:1 (5783108243674842461) -->
-    <!-- no translation found for enhanced_4g_lte_mode_sumary_variant:2 (2605068646093321511) -->
     <!-- no translation found for rtt_setting_mode:1 (7903019313228349427) -->
     <!-- no translation found for rtt_setting_mode:2 (8525285145696236811) -->
     <!-- no translation found for rtt_setting_mode:3 (7725394146877517088) -->
+  <string-array name="nfc_payment_favor">
+    <item msgid="9104058551372383947">"Uvijek"</item>
+    <item msgid="5283665583617307336">"Osim kada je otvorena druga aplikacija za plaćanje"</item>
+  </string-array>
+  <string-array name="nfc_payment_favor_values">
+    <item msgid="2373999996715432397">"0"</item>
+    <item msgid="5305176997036663262">"1"</item>
+  </string-array>
+  <string-array name="switch_to_dock_user_when_docked_timeout_entries">
+    <item msgid="3211660022507486536">"Nikad"</item>
+    <item msgid="7025253383416830453">"Nakon 1 minute"</item>
+    <item msgid="1574040255478150028">"Nakon 5 minuta"</item>
+  </string-array>
+    <!-- no translation found for private_space_auto_lock_options:0 (551584871228110817) -->
+    <!-- no translation found for private_space_auto_lock_options:1 (3263162333754809690) -->
+    <!-- no translation found for private_space_auto_lock_options:2 (1575103586471380629) -->
+  <string-array name="zen_mode_icon_options_descriptions">
+    <item msgid="1216815120972438676">"Aktovka"</item>
+    <item msgid="184985872234062767">"Klasična zgrada"</item>
+    <item msgid="9189550412466785530">"Stambena zgrada"</item>
+    <item msgid="2142527562511049422">"Govorni oblačić"</item>
+    <item msgid="2548100558260478605">"Grupa ljudi"</item>
+    <item msgid="2270003903304578284">"Žarulja"</item>
+    <item msgid="4793496619091161864">"Kalendar"</item>
+    <item msgid="5673625795644364100">"Ne uznemiravaj"</item>
+    <item msgid="1423820834865831361">"Osoba trči"</item>
+    <item msgid="2037298830718732608">"Golf"</item>
+    <item msgid="2197835014443491074">"Bučica za teretanu"</item>
+    <item msgid="2730180105015616518">"Plivanje"</item>
+    <item msgid="2666922823253345958">"Osoba pješači"</item>
+    <item msgid="8234880356472211396">"Osoba baca loptu"</item>
+    <item msgid="4642980625253001443">"Osoba udara"</item>
+    <item msgid="4324795269518833500">"Kontroler za videoigre"</item>
+    <item msgid="7789966425125441125">"Umjetnička paleta boja"</item>
+    <item msgid="663512680597461570">"Snježna pahuljica"</item>
+    <item msgid="7952183800501346803">"Suncobran za plažu"</item>
+    <item msgid="799139025758265891">"Radionički alati"</item>
+    <item msgid="1330084588359129896">"Šator"</item>
+    <item msgid="3861584909935022342">"Filmska vrpca"</item>
+    <item msgid="5827426100157335512">"Knjiga"</item>
+    <item msgid="8585828346253128384">"Lotosov cvijet"</item>
+    <item msgid="8788370542815300188">"Um osobe"</item>
+    <item msgid="7287354964767553293">"Slušalice"</item>
+    <item msgid="2530059623783800987">"TV"</item>
+    <item msgid="5307182323469376758">"Vlak"</item>
+    <item msgid="4903790544026923026">"Automobil"</item>
+    <item msgid="5010405583912314582">"Vilica i nož"</item>
+    <item msgid="8939998598599064900">"Košarica"</item>
+    <item msgid="3379605903308731893">"Dijete"</item>
+    <item msgid="7808668968550293112">"Životinjska šapa"</item>
+    <item msgid="1000692647524056504">"Značka sa zvjezdicom"</item>
+    <item msgid="8270261073421676502">"Dvije osobe"</item>
+    <item msgid="5767782819651505460">"Zvijezda"</item>
+    <item msgid="4368451291862729334">"Srce"</item>
+    <item msgid="2613199102208419986">"Kuća"</item>
+    <item msgid="3022279986430275040">"Polumjesec"</item>
+    <item msgid="5421089790869483206">"Sat"</item>
+  </string-array>
+  <string-array name="display_over_apps_permission_change_exempt">
+  </string-array>
 </resources>

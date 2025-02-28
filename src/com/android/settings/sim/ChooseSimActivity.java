@@ -159,11 +159,12 @@ public class ChooseSimActivity extends Activity
         mSelectedItemIndex = subItem.getId();
         if (mSelectedItemIndex == INDEX_PSIM) {
             Log.i(TAG, "Ready to switch to pSIM slot.");
-            mSwitchToRemovableSlotSidecar.run(UiccSlotUtil.INVALID_PHYSICAL_SLOT_ID);
+            mSwitchToRemovableSlotSidecar.run(UiccSlotUtil.INVALID_PHYSICAL_SLOT_ID, null);
         } else {
             Log.i(TAG, "Ready to switch to eSIM subscription with index: " + mSelectedItemIndex);
             mSwitchToEuiccSubscriptionSidecar.run(
-                    mEmbeddedSubscriptions.get(mSelectedItemIndex).getSubscriptionId());
+                    mEmbeddedSubscriptions.get(mSelectedItemIndex).getSubscriptionId(),
+                    UiccSlotUtil.INVALID_PORT_ID, null);
         }
     }
 
@@ -315,8 +316,9 @@ public class ChooseSimActivity extends Activity
         @Override
         public void onBindView(View view) {
             super.onBindView(view);
-            TextView title = view.findViewById(R.id.sud_items_title);
-            TextView summary = view.findViewById(R.id.sud_items_summary);
+            TextView title = view.findViewById(com.google.android.setupdesign.R.id.sud_items_title);
+            TextView summary =
+                    view.findViewById(com.google.android.setupdesign.R.id.sud_items_summary);
             title.setEnabled(isEnabled());
             summary.setEnabled(isEnabled());
         }

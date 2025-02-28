@@ -41,13 +41,14 @@ public class ConversationNotificationSettings extends NotificationSettings {
     @Override
     public void onResume() {
         super.onResume();
-        if (mUid < 0 || TextUtils.isEmpty(mPkg) || mPkgInfo == null || mChannel == null
-                || mConversationInfo == null) {
+        if (mUid < 0 || TextUtils.isEmpty(mPkg) || mPkgInfo == null || mChannel == null) {
             Log.w(TAG, "Missing package or uid or packageinfo or channel");
             finish();
             return;
         }
-        getActivity().setTitle(mConversationInfo.getLabel());
+        getActivity().setTitle(mConversationInfo == null
+                ? mChannel.getName()
+                : mConversationInfo.getLabel());
 
         for (NotificationPreferenceController controller : mControllers) {
             controller.onResume(mAppRow, mChannel, mChannelGroup, mConversationDrawable,
@@ -82,6 +83,7 @@ public class ConversationNotificationSettings extends NotificationSettings {
     protected List<AbstractPreferenceController> createPreferenceControllers(Context context) {
         mControllers = new ArrayList<>();
         mControllers.add(new ConversationHeaderPreferenceController(context, this));
+        mControllers.add(new BlockPreferenceController(context, mDependentFieldListener, mBackend));
         mControllers.add(new ConversationPriorityPreferenceController(
                 context, mBackend, mDependentFieldListener));
         mControllers.add(new HighImportancePreferenceController(
@@ -97,6 +99,7 @@ public class ConversationNotificationSettings extends NotificationSettings {
         mControllers.add(new BubblePreferenceController(context, getChildFragmentManager(),
                 mBackend, false /* isAppPage */, null /* dependentFieldListener */));
         mControllers.add(new ConversationDemotePreferenceController(context, this, mBackend));
+        mControllers.add(new ConversationPromotePreferenceController(context, this, mBackend));
         mControllers.add(new BubbleCategoryPreferenceController(context));
         mControllers.add(new BubbleLinkPreferenceController(context));
         return new ArrayList<>(mControllers);

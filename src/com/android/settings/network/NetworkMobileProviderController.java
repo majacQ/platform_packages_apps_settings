@@ -24,7 +24,6 @@ import androidx.preference.PreferenceCategory;
 import androidx.preference.PreferenceScreen;
 
 import com.android.settings.core.BasePreferenceController;
-import com.android.settings.wifi.WifiPickerTrackerHelper;
 import com.android.settingslib.core.lifecycle.Lifecycle;
 
 /**
@@ -32,10 +31,9 @@ import com.android.settingslib.core.lifecycle.Lifecycle;
  * are active mobile subscriptions. It shows an overview of available mobile network
  * connections with an entry for each subscription.
  *
- *  {@link NetworkMobileProviderController} is used to show subscription status on internet
- *  page for provider model. This original class can refer to {@link MultiNetworkHeaderController},
- *
-  */
+ * {@link NetworkMobileProviderController} is used to show subscription status on internet
+ * page for provider model.
+ */
 public class NetworkMobileProviderController extends BasePreferenceController implements
         SubscriptionsPreferenceController.UpdateListener {
 
@@ -116,12 +114,6 @@ public class NetworkMobileProviderController extends BasePreferenceController im
             }
         }
         mPreferenceCategory.setVisible(available);
-    }
-
-    public void setWifiPickerTrackerHelper(WifiPickerTrackerHelper helper) {
-        if (mSubscriptionsController != null) {
-            mSubscriptionsController.setWifiPickerTrackerHelper(helper);
-        }
     }
 
     /**

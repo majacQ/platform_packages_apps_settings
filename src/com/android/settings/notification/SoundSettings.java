@@ -16,6 +16,8 @@
 
 package com.android.settings.notification;
 
+import static android.app.admin.DevicePolicyResources.Strings.Settings.WORK_PROFILE_SOUND_SETTINGS_SECTION_HEADER;
+
 import android.app.settings.SettingsEnums;
 import android.content.Context;
 import android.content.Intent;
@@ -38,11 +40,11 @@ import com.android.settings.dashboard.DashboardFragment;
 import com.android.settings.search.BaseSearchIndexProvider;
 import com.android.settings.sound.HandsFreeProfileOutputPreferenceController;
 import com.android.settings.widget.PreferenceCategoryController;
+import com.android.settings.widget.UpdatableListPreferenceDialogFragment;
 import com.android.settingslib.core.AbstractPreferenceController;
 import com.android.settingslib.core.instrumentation.Instrumentable;
 import com.android.settingslib.core.lifecycle.Lifecycle;
 import com.android.settingslib.search.SearchIndexable;
-import com.android.settingslib.widget.UpdatableListPreferenceDialogFragment;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -55,6 +57,9 @@ public class SoundSettings extends DashboardFragment implements OnActivityResult
     private static final String SELECTED_PREFERENCE_KEY = "selected_preference";
     private static final int REQUEST_CODE = 200;
     private static final int SAMPLE_CUTOFF = 2000;  // manually cap sample playback at 2 seconds
+
+    private static final String EXTRA_OPEN_PHONE_RINGTONE_PICKER =
+            "EXTRA_OPEN_PHONE_RINGTONE_PICKER";
 
     @VisibleForTesting
     static final int STOP_SAMPLE = 1;
@@ -96,6 +101,15 @@ public class SoundSettings extends DashboardFragment implements OnActivityResult
                     (UpdatableListPreferenceDialogFragment) getFragmentManager()
                             .findFragmentByTag(TAG);
             mDialogFragment = dialogFragment;
+        }
+        replaceEnterpriseStringTitle("sound_work_settings",
+                WORK_PROFILE_SOUND_SETTINGS_SECTION_HEADER,
+                R.string.sound_work_settings);
+        boolean openPhoneRingtonePicker = getIntent().getBooleanExtra(
+                EXTRA_OPEN_PHONE_RINGTONE_PICKER, false);
+        Preference phoneRingTonePreference = findPreference("phone_ringtone");
+        if (phoneRingTonePreference != null && openPhoneRingtonePicker) {
+            onPreferenceTreeClick(phoneRingTonePreference);
         }
     }
 
@@ -182,7 +196,7 @@ public class SoundSettings extends DashboardFragment implements OnActivityResult
         ArrayList<VolumeSeekBarPreferenceController> volumeControllers = new ArrayList<>();
         volumeControllers.add(use(AlarmVolumePreferenceController.class));
         volumeControllers.add(use(MediaVolumePreferenceController.class));
-        volumeControllers.add(use(RingVolumePreferenceController.class));
+        volumeControllers.add(use(SeparateRingVolumePreferenceController.class));
         volumeControllers.add(use(NotificationVolumePreferenceController.class));
         volumeControllers.add(use(CallVolumePreferenceController.class));
 
@@ -256,21 +270,21 @@ public class SoundSettings extends DashboardFragment implements OnActivityResult
                 new DockingSoundPreferenceController(context, fragment, lifecycle);
         final TouchSoundPreferenceController touchSoundPreferenceController =
                 new TouchSoundPreferenceController(context, fragment, lifecycle);
-        final VibrateOnTouchPreferenceController vibrateOnTouchPreferenceController =
-                new VibrateOnTouchPreferenceController(context, fragment, lifecycle);
         final DockAudioMediaPreferenceController dockAudioMediaPreferenceController =
                 new DockAudioMediaPreferenceController(context, fragment, lifecycle);
         final BootSoundPreferenceController bootSoundPreferenceController =
                 new BootSoundPreferenceController(context);
         final EmergencyTonePreferenceController emergencyTonePreferenceController =
                 new EmergencyTonePreferenceController(context, fragment, lifecycle);
+        final VibrateIconPreferenceController vibrateIconPreferenceController =
+                new VibrateIconPreferenceController(context, fragment, lifecycle);
 
         controllers.add(dialPadTonePreferenceController);
         controllers.add(screenLockSoundPreferenceController);
         controllers.add(chargingSoundPreferenceController);
         controllers.add(dockingSoundPreferenceController);
         controllers.add(touchSoundPreferenceController);
-        controllers.add(vibrateOnTouchPreferenceController);
+        controllers.add(vibrateIconPreferenceController);
         controllers.add(dockAudioMediaPreferenceController);
         controllers.add(bootSoundPreferenceController);
         controllers.add(emergencyTonePreferenceController);
@@ -281,7 +295,7 @@ public class SoundSettings extends DashboardFragment implements OnActivityResult
                         chargingSoundPreferenceController,
                         dockingSoundPreferenceController,
                         touchSoundPreferenceController,
-                        vibrateOnTouchPreferenceController,
+                        vibrateIconPreferenceController,
                         dockAudioMediaPreferenceController,
                         bootSoundPreferenceController,
                         emergencyTonePreferenceController)));

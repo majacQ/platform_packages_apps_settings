@@ -70,7 +70,6 @@ public class CarrierWifiTogglePreferenceControllerTest {
         mController = new CarrierWifiTogglePreferenceController(mContext,
                 CarrierWifiTogglePreferenceController.CARRIER_WIFI_TOGGLE_PREF_KEY);
         mController.init(mock(Lifecycle.class), SUB_ID);
-        mController.mIsProviderModelEnabled = true;
         mController.mIsCarrierProvisionWifiEnabled = true;
         doReturn(true).when(mWifiPickerTrackerHelper).isCarrierNetworkActive();
         doReturn(SSID).when(mWifiPickerTrackerHelper).getCarrierNetworkSsid();
@@ -93,13 +92,6 @@ public class CarrierWifiTogglePreferenceControllerTest {
     }
 
     @Test
-    public void getAvailabilityStatus_providerModelDisable_returnUnavailable() {
-        mController.mIsProviderModelEnabled = false;
-
-        assertThat(mController.getAvailabilityStatus()).isEqualTo(CONDITIONALLY_UNAVAILABLE);
-    }
-
-    @Test
     public void getAvailabilityStatus_carrierProvisionWifiEnabled_returnAvailable() {
         mController.mIsCarrierProvisionWifiEnabled = true;
 
@@ -115,14 +107,14 @@ public class CarrierWifiTogglePreferenceControllerTest {
 
     @Test
     public void isChecked_carrierNetworkEnabled_returnTrue() {
-        doReturn(true).when(mWifiPickerTrackerHelper).isCarrierNetworkEnabled(SUB_ID);
+        doReturn(true).when(mWifiPickerTrackerHelper).isCarrierNetworkEnabled();
 
         assertThat(mController.isChecked()).isEqualTo(true);
     }
 
     @Test
     public void isChecked_carrierNetworkDisabled_returnFalse() {
-        doReturn(false).when(mWifiPickerTrackerHelper).isCarrierNetworkEnabled(SUB_ID);
+        doReturn(false).when(mWifiPickerTrackerHelper).isCarrierNetworkEnabled();
 
         assertThat(mController.isChecked()).isEqualTo(false);
     }

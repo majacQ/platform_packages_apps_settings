@@ -34,6 +34,7 @@ import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
 import android.net.Uri;
 import android.telephony.SubscriptionManager;
+import android.util.EventLog;
 import android.util.Log;
 import android.view.WindowManager.LayoutParams;
 
@@ -103,6 +104,12 @@ public class ProviderModelSlice extends WifiSlice {
         //  Fifth section: Add the Wi-Fi items which are not connected.
         //  Sixth section: Add the See All item.
         final ListBuilder listBuilder = mHelper.createListBuilder(getUri());
+        if (isGuestUser(mContext)) {
+            Log.e(TAG, "Guest user is not allowed to configure Internet!");
+            EventLog.writeEvent(0x534e4554, "227470877", -1 /* UID */, "User is a guest");
+            return listBuilder.build();
+        }
+
         int maxListSize = 0;
         final NetworkProviderWorker worker = getWorker();
         if (worker != null) {
@@ -215,6 +222,7 @@ public class ProviderModelSlice extends WifiSlice {
                 // If we need to display a reminder dialog box, do nothing here.
                 return;
             } else {
+                log("setMobileDataEnabled: " + newState);
                 MobileNetworkUtils.setMobileDataEnabled(mContext, defaultSubId, newState,
                         false /* disableOtherSubscriptions */);
             }
@@ -244,6 +252,7 @@ public class ProviderModelSlice extends WifiSlice {
                 .setPositiveButton(
                         com.android.internal.R.string.alert_windows_notification_turn_off_action,
                         (dialog, which) -> {
+                            log("setMobileDataEnabled: false");
                             MobileNetworkUtils.setMobileDataEnabled(mContext, defaultSubId,
                                     false /* enabled */,
                                     false /* disableOtherSubscriptions */);
@@ -290,13 +299,15 @@ public class ProviderModelSlice extends WifiSlice {
         final String screenTitle = mContext.getText(R.string.provider_internet_settings).toString();
         return SliceBuilderUtils.buildSearchResultPageIntent(mContext,
                 NetworkProviderSettings.class.getName(), "" /* key */, screenTitle,
-                SettingsEnums.SLICE)
+                SettingsEnums.SLICE, this)
                 .setClassName(mContext.getPackageName(), SubSettings.class.getName())
                 .setData(getUri());
     }
 
     @Override
     public Class getBackgroundWorkerClass() {
+        if (isGuestUser(mContext)) return null;
+
         return NetworkProviderWorker.class;
     }
 

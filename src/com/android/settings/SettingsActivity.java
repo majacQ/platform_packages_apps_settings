@@ -16,10 +16,12 @@
 
 package com.android.settings;
 
+import static com.android.settings.activityembedding.EmbeddedDeepLinkUtils.tryStartMultiPaneDeepLink;
 import static com.android.settings.applications.appinfo.AppButtonsPreferenceController.KEY_REMOVE_TASK_WHEN_FINISHING;
 
 import android.app.ActionBar;
 import android.app.ActivityManager;
+import android.app.settings.SettingsEnums;
 import android.content.BroadcastReceiver;
 import android.content.ComponentName;
 import android.content.Context;
@@ -29,12 +31,14 @@ import android.content.SharedPreferences;
 import android.content.pm.ActivityInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.PackageManager.NameNotFoundException;
+import android.content.res.Resources;
 import android.content.res.Resources.Theme;
 import android.graphics.drawable.Icon;
 import android.os.AsyncTask;
 import android.os.Bundle;
 import android.os.UserHandle;
 import android.os.UserManager;
+import android.permission.flags.Flags;
 import android.text.TextUtils;
 import android.util.Log;
 import android.view.View;
@@ -45,26 +49,29 @@ import androidx.annotation.VisibleForTesting;
 import androidx.fragment.app.Fragment;
 import androidx.fragment.app.FragmentManager;
 import androidx.fragment.app.FragmentTransaction;
-import androidx.localbroadcastmanager.content.LocalBroadcastManager;
 import androidx.preference.Preference;
 import androidx.preference.PreferenceFragmentCompat;
 import androidx.preference.PreferenceManager;
 
 import com.android.internal.util.ArrayUtils;
 import com.android.settings.Settings.WifiSettingsActivity;
+import com.android.settings.activityembedding.ActivityEmbeddingUtils;
 import com.android.settings.applications.manageapplications.ManageApplications;
+import com.android.settings.connecteddevice.NfcAndPaymentFragment;
 import com.android.settings.core.OnActivityResultListener;
 import com.android.settings.core.SettingsBaseActivity;
 import com.android.settings.core.SubSettingLauncher;
 import com.android.settings.core.gateway.SettingsGateway;
 import com.android.settings.dashboard.DashboardFeatureProvider;
+import com.android.settings.homepage.SettingsHomepageActivity;
 import com.android.settings.homepage.TopLevelSettings;
+import com.android.settings.nfc.PaymentSettings;
 import com.android.settings.overlay.FeatureFactory;
+import com.android.settings.password.PasswordUtils;
 import com.android.settings.wfd.WifiDisplaySettings;
 import com.android.settings.widget.SettingsMainSwitchBar;
 import com.android.settingslib.core.instrumentation.Instrumentable;
 import com.android.settingslib.core.instrumentation.SharedPreferencesLogger;
-import com.android.settingslib.development.DevelopmentSettingsEnabler;
 import com.android.settingslib.drawer.DashboardCategory;
 
 import com.google.android.setupcompat.util.WizardManagerHelper;
@@ -135,6 +142,16 @@ public class SettingsActivity extends SettingsBaseActivity
 
     public static final String EXTRA_SHOW_FRAGMENT_AS_SUBSETTING =
             ":settings:show_fragment_as_subsetting";
+    public static final String EXTRA_IS_SECOND_LAYER_PAGE = ":settings:is_second_layer_page";
+
+    /**
+     * Additional extra of Settings#ACTION_SETTINGS_LARGE_SCREEN_DEEP_LINK.
+     * Set true when the deep link intent is from a slice
+     */
+    public static final String EXTRA_IS_FROM_SLICE = "is_from_slice";
+
+    public static final String EXTRA_USER_HANDLE = "user_handle";
+    public static final String EXTRA_INITIAL_CALLING_PACKAGE = "initial_calling_package";
 
     /**
      * Personal or Work profile tab of {@link ProfileSelectFragment}
@@ -147,14 +164,16 @@ public class SettingsActivity extends SettingsBaseActivity
     public static final String META_DATA_KEY_FRAGMENT_CLASS =
             "com.android.settings.FRAGMENT_CLASS";
 
+    public static final String META_DATA_KEY_HIGHLIGHT_MENU_KEY =
+            "com.android.settings.HIGHLIGHT_MENU_KEY";
+
     private static final String EXTRA_UI_OPTIONS = "settings:ui_options";
 
     private String mFragmentClass;
+    private String mHighlightMenuKey;
 
     private CharSequence mInitialTitle;
     private int mInitialTitleResId;
-
-    private BroadcastReceiver mDevelopmentSettingsListener;
 
     private boolean mBatteryPresent = true;
     private BroadcastReceiver mBatteryInfoReceiver = new BroadcastReceiver() {
@@ -205,11 +224,32 @@ public class SettingsActivity extends SettingsBaseActivity
 
     @Override
     public SharedPreferences getSharedPreferences(String name, int mode) {
-        if (name.equals(getPackageName() + "_preferences")) {
-            return new SharedPreferencesLogger(this, getMetricsTag(),
-                    FeatureFactory.getFactory(this).getMetricsFeatureProvider());
+        if (!TextUtils.equals(name, getPackageName() + "_preferences")) {
+            return super.getSharedPreferences(name, mode);
         }
-        return super.getSharedPreferences(name, mode);
+
+        String tag = getMetricsTag();
+
+        return new SharedPreferencesLogger(this, tag,
+                FeatureFactory.getFeatureFactory().getMetricsFeatureProvider(),
+                lookupMetricsCategory());
+    }
+
+    private int lookupMetricsCategory() {
+        int category = SettingsEnums.PAGE_UNKNOWN;
+        Bundle args = null;
+        if (getIntent() != null) {
+            args = getIntent().getBundleExtra(EXTRA_SHOW_FRAGMENT_ARGUMENTS);
+        }
+
+        Fragment fragment = Utils.getTargetFragment(this, getMetricsTag(), args);
+
+        if (fragment instanceof Instrumentable) {
+            category = ((Instrumentable) fragment).getMetricsCategory();
+        }
+        Log.d(LOG_TAG, "MetricsCategory is " + category);
+
+        return category;
     }
 
     private String getMetricsTag() {
@@ -217,30 +257,38 @@ public class SettingsActivity extends SettingsBaseActivity
         if (getIntent() != null && getIntent().hasExtra(EXTRA_SHOW_FRAGMENT)) {
             tag = getInitialFragmentName(getIntent());
         }
+
         if (TextUtils.isEmpty(tag)) {
             Log.w(LOG_TAG, "MetricsTag is invalid " + tag);
             tag = getClass().getName();
-        }
-        if (tag.startsWith("com.android.settings.")) {
-            tag = tag.replace("com.android.settings.", "");
         }
         return tag;
     }
 
     @Override
     protected void onCreate(Bundle savedState) {
-        super.onCreate(savedState);
-        Log.d(LOG_TAG, "Starting onCreate");
-        long startTime = System.currentTimeMillis();
-
-        final FeatureFactory factory = FeatureFactory.getFactory(this);
-
-        mDashboardFeatureProvider = factory.getDashboardFeatureProvider(this);
-
         // Should happen before any call to getIntent()
         getMetaData();
-
         final Intent intent = getIntent();
+
+        if (shouldShowMultiPaneDeepLink(intent)
+                && tryStartMultiPaneDeepLink(this, intent, mHighlightMenuKey)) {
+            finish();
+            super.onCreate(savedState);
+            return;
+        }
+
+        super.onCreate(savedState);
+        Log.d(LOG_TAG, "Starting onCreate");
+        createUiFromIntent(savedState, intent);
+    }
+
+    protected void createUiFromIntent(@Nullable Bundle savedState, Intent intent) {
+        long startTime = System.currentTimeMillis();
+
+        final FeatureFactory factory = FeatureFactory.getFeatureFactory();
+        mDashboardFeatureProvider = factory.getDashboardFeatureProvider();
+
         if (intent.hasExtra(EXTRA_UI_OPTIONS)) {
             getWindow().setUiOptions(intent.getIntExtra(EXTRA_UI_OPTIONS, 0));
         }
@@ -248,17 +296,11 @@ public class SettingsActivity extends SettingsBaseActivity
         // Getting Intent properties can only be done after the super.onCreate(...)
         final String initialFragmentName = getInitialFragmentName(intent);
 
-        // This is a "Sub Settings" when:
-        // - this is a real SubSettings
-        // - or :settings:show_fragment_as_subsetting is passed to the Intent
-        final boolean isSubSettings = this instanceof SubSettings ||
-                intent.getBooleanExtra(EXTRA_SHOW_FRAGMENT_AS_SUBSETTING, false);
-
         // If this is a sub settings, then apply the SubSettings Theme for the ActionBar content
         // insets.
         // If this is in setup flow, don't apply theme. Because light theme needs to be applied
         // in SettingsBaseActivity#onCreate().
-        if (isSubSettings && !WizardManagerHelper.isAnySetupWizard(getIntent())) {
+        if (isSubSettings(intent) && !WizardManagerHelper.isAnySetupWizard(getIntent())) {
             setTheme(R.style.Theme_SubSettings);
         }
 
@@ -282,17 +324,9 @@ public class SettingsActivity extends SettingsBaseActivity
             launchSettingFragment(initialFragmentName, intent);
         }
 
-        final boolean isInSetupWizard = WizardManagerHelper.isAnySetupWizard(getIntent());
-
-        final ActionBar actionBar = getActionBar();
-        if (actionBar != null) {
-            actionBar.setDisplayHomeAsUpEnabled(!isInSetupWizard);
-            actionBar.setHomeButtonEnabled(!isInSetupWizard);
-            actionBar.setDisplayShowTitleEnabled(true);
-        }
         mMainSwitch = findViewById(R.id.switch_bar);
         if (mMainSwitch != null) {
-            mMainSwitch.setMetricsTag(getMetricsTag());
+            mMainSwitch.setMetricsCategory(lookupMetricsCategory());
             mMainSwitch.setTranslationZ(findViewById(R.id.main_content).getTranslationZ() + 1);
         }
 
@@ -347,6 +381,101 @@ public class SettingsActivity extends SettingsBaseActivity
         }
     }
 
+    private void setActionBarStatus() {
+        final boolean isActionBarButtonEnabled = isActionBarButtonEnabled(getIntent());
+
+        final ActionBar actionBar = getActionBar();
+        if (actionBar != null) {
+            actionBar.setDisplayHomeAsUpEnabled(isActionBarButtonEnabled);
+            actionBar.setHomeButtonEnabled(isActionBarButtonEnabled);
+            actionBar.setDisplayShowTitleEnabled(true);
+        }
+    }
+
+    private boolean isActionBarButtonEnabled(Intent intent) {
+        if (WizardManagerHelper.isAnySetupWizard(intent)) {
+            return false;
+        }
+        final boolean isSecondLayerPage =
+                intent.getBooleanExtra(EXTRA_IS_SECOND_LAYER_PAGE, false);
+
+        // TODO: move Settings's ActivityEmbeddingUtils to SettingsLib.
+        return !com.android.settingslib.activityembedding.ActivityEmbeddingUtils
+                        .shouldHideNavigateUpButton(this, isSecondLayerPage);
+    }
+
+    private boolean isSubSettings(Intent intent) {
+        return this instanceof SubSettings ||
+            intent.getBooleanExtra(EXTRA_SHOW_FRAGMENT_AS_SUBSETTING, false);
+    }
+
+    private boolean shouldShowMultiPaneDeepLink(Intent intent) {
+        if (!ActivityEmbeddingUtils.isEmbeddingActivityEnabled(this)) {
+            return false;
+        }
+
+        // If the activity is task root, starting trampoline is needed in order to show two-pane UI.
+        // If FLAG_ACTIVITY_NEW_TASK is set, the activity will become the start of a new task on
+        // this history stack, so starting trampoline is needed in order to notify the homepage that
+        // the highlight key is changed.
+        if (!isTaskRoot() && (intent.getFlags() & Intent.FLAG_ACTIVITY_NEW_TASK) == 0) {
+            return false;
+        }
+
+        // Only starts trampoline for deep links. Should return false for all the cases that
+        // Settings app starts SettingsActivity or SubSetting by itself.
+        if (intent.getAction() == null) {
+            // Other apps should send deep link intent which matches intent filter of the Activity.
+            return false;
+        }
+
+        // If the activity's launch mode is "singleInstance", it can't be embedded in Settings since
+        // it will be created in a new task.
+        ActivityInfo info = intent.resolveActivityInfo(getPackageManager(),
+                PackageManager.MATCH_DEFAULT_ONLY);
+        if (info.launchMode == ActivityInfo.LAUNCH_SINGLE_INSTANCE) {
+            Log.w(LOG_TAG, "launchMode: singleInstance");
+            return false;
+        }
+
+        if (intent.getBooleanExtra(EXTRA_IS_FROM_SLICE, false)) {
+            // Slice deep link starts the Intent using SubSettingLauncher. Returns true to show
+            // 2-pane deep link.
+            return true;
+        }
+
+        if (isSubSettings(intent)) {
+            return false;
+        }
+
+        if (intent.getBooleanExtra(SettingsHomepageActivity.EXTRA_IS_FROM_SETTINGS_HOMEPAGE,
+                /* defaultValue */ false)) {
+            return false;
+        }
+
+        if (TextUtils.equals(intent.getAction(), Intent.ACTION_CREATE_SHORTCUT)) {
+            // Returns false to show full screen for Intent.ACTION_CREATE_SHORTCUT because
+            // - Launcher startActivityForResult for Intent.ACTION_CREATE_SHORTCUT and activity
+            //   stack starts from launcher, CreateShortcutActivity will not follows SplitPaitRule
+            //   registered by Settings.
+            // - There is no CreateShortcutActivity entry point from Settings app UI.
+            return false;
+        }
+
+        return true;
+    }
+
+    /** Returns the initial calling package name that launches the activity. */
+    public String getInitialCallingPackage() {
+        String callingPackage = PasswordUtils.getCallingAppPackageName(getActivityToken());
+        if (!TextUtils.equals(callingPackage, getPackageName())) {
+            return callingPackage;
+        }
+
+        String initialCallingPackage = getIntent().getStringExtra(EXTRA_INITIAL_CALLING_PACKAGE);
+        return TextUtils.isEmpty(initialCallingPackage) ? callingPackage : initialCallingPackage;
+    }
+
     /** Returns the initial fragment name that the activity will launch. */
     @VisibleForTesting
     public String getInitialFragmentName(Intent intent) {
@@ -375,6 +504,11 @@ public class SettingsActivity extends SettingsBaseActivity
     @VisibleForTesting
     void launchSettingFragment(String initialFragmentName, Intent intent) {
         if (initialFragmentName != null) {
+            if (SettingsActivityUtil.launchSpaActivity(this, initialFragmentName, intent)) {
+                finish();
+                return;
+            }
+
             setTitleFromIntent(intent);
 
             Bundle initialArguments = intent.getBundleExtra(EXTRA_SHOW_FRAGMENT_ARGUMENTS);
@@ -407,6 +541,9 @@ public class SettingsActivity extends SettingsBaseActivity
                     return;
                 } catch (NameNotFoundException e) {
                     Log.w(LOG_TAG, "Could not find package" + initialTitleResPackageName);
+                } catch (Resources.NotFoundException resourceNotFound) {
+                    Log.w(LOG_TAG,
+                            "Could not find title resource in " + initialTitleResPackageName);
                 }
             } else {
                 setTitle(mInitialTitleResId);
@@ -474,15 +611,7 @@ public class SettingsActivity extends SettingsBaseActivity
     @Override
     protected void onResume() {
         super.onResume();
-
-        mDevelopmentSettingsListener = new BroadcastReceiver() {
-            @Override
-            public void onReceive(Context context, Intent intent) {
-                updateTilesList();
-            }
-        };
-        LocalBroadcastManager.getInstance(this).registerReceiver(mDevelopmentSettingsListener,
-                new IntentFilter(DevelopmentSettingsEnabler.DEVELOPMENT_SETTINGS_CHANGED_ACTION));
+        setActionBarStatus();
 
         registerReceiver(mBatteryInfoReceiver, new IntentFilter(Intent.ACTION_BATTERY_CHANGED));
 
@@ -492,8 +621,6 @@ public class SettingsActivity extends SettingsBaseActivity
     @Override
     protected void onPause() {
         super.onPause();
-        LocalBroadcastManager.getInstance(this).unregisterReceiver(mDevelopmentSettingsListener);
-        mDevelopmentSettingsListener = null;
         unregisterReceiver(mBatteryInfoReceiver);
     }
 
@@ -643,19 +770,6 @@ public class SettingsActivity extends SettingsBaseActivity
                 || somethingChanged;
 
         somethingChanged = setTileEnabled(changedList, new ComponentName(packageName,
-                        Settings.UserSettingsActivity.class.getName()),
-                UserHandle.MU_ENABLED && UserManager.supportsMultipleUsers()
-                        && !Utils.isMonkeyRunning(), isAdmin)
-                || somethingChanged;
-
-        final boolean showDev = DevelopmentSettingsEnabler.isDevelopmentSettingsEnabled(this)
-                && !Utils.isMonkeyRunning();
-        somethingChanged = setTileEnabled(changedList, new ComponentName(packageName,
-                        Settings.DevelopmentSettingsDashboardActivity.class.getName()),
-                showDev, isAdmin)
-                || somethingChanged;
-
-        somethingChanged = setTileEnabled(changedList, new ComponentName(packageName,
                         Settings.WifiDisplaySettingsActivity.class.getName()),
                 WifiDisplaySettings.isAvailable(this), isAdmin)
                 || somethingChanged;
@@ -716,10 +830,28 @@ public class SettingsActivity extends SettingsBaseActivity
                     PackageManager.GET_META_DATA);
             if (ai == null || ai.metaData == null) return;
             mFragmentClass = ai.metaData.getString(META_DATA_KEY_FRAGMENT_CLASS);
+            mHighlightMenuKey = ai.metaData.getString(META_DATA_KEY_HIGHLIGHT_MENU_KEY);
+            /* TODO(b/327036144) Once the Flags.walletRoleEnabled() is rolled out, we will replace
+            value for the fragment class within the com.android.settings.nfc.PaymentSettings
+            activity with com.android.settings.connecteddevice.NfcAndPaymentFragment so that this
+            code can be removed.
+            */
+            if (shouldOverrideContactlessPaymentRouting()) {
+                overrideContactlessPaymentRouting();
+            }
         } catch (NameNotFoundException nnfe) {
             // No recovery
             Log.d(LOG_TAG, "Cannot get Metadata for: " + getComponentName().toString());
         }
+    }
+
+    private boolean shouldOverrideContactlessPaymentRouting() {
+        return Flags.walletRoleEnabled()
+                && TextUtils.equals(PaymentSettings.class.getName(), mFragmentClass);
+    }
+
+    private void overrideContactlessPaymentRouting() {
+        mFragmentClass = NfcAndPaymentFragment.class.getName();
     }
 
     // give subclasses access to the Next button

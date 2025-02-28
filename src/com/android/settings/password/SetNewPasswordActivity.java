@@ -24,11 +24,15 @@ import static android.app.admin.DevicePolicyManager.EXTRA_PASSWORD_COMPLEXITY;
 import static android.app.admin.DevicePolicyManager.PASSWORD_COMPLEXITY_NONE;
 
 import static com.android.settings.password.ChooseLockSettingsHelper.EXTRA_KEY_CALLER_APP_NAME;
+import static com.android.settings.password.ChooseLockSettingsHelper.EXTRA_KEY_CHOOSE_LOCK_SCREEN_DESCRIPTION;
+import static com.android.settings.password.ChooseLockSettingsHelper.EXTRA_KEY_CHOOSE_LOCK_SCREEN_TITLE;
 import static com.android.settings.password.ChooseLockSettingsHelper.EXTRA_KEY_DEVICE_PASSWORD_REQUIREMENT_ONLY;
+import static com.android.settings.password.ChooseLockSettingsHelper.EXTRA_KEY_FINGERPRINT_ENROLLMENT_ONLY;
 import static com.android.settings.password.ChooseLockSettingsHelper.EXTRA_KEY_IS_CALLING_APP_ADMIN;
 import static com.android.settings.password.ChooseLockSettingsHelper.EXTRA_KEY_REQUESTED_MIN_COMPLEXITY;
 
 import android.app.Activity;
+import android.app.RemoteServiceException.MissingRequestPasswordComplexityPermissionException;
 import android.app.admin.DevicePolicyManager;
 import android.app.admin.DevicePolicyManager.PasswordComplexity;
 import android.app.admin.PasswordMetrics;
@@ -101,7 +105,8 @@ public class SetNewPasswordActivity extends Activity implements SetNewPasswordCo
                 PasswordUtils.crashCallingApplication(activityToken,
                         "Must have permission "
                                 + REQUEST_PASSWORD_COMPLEXITY + " to use extra "
-                                + EXTRA_PASSWORD_COMPLEXITY);
+                                + EXTRA_PASSWORD_COMPLEXITY,
+                        MissingRequestPasswordComplexityPermissionException.TYPE_ID);
                 finish();
                 return;
             }
@@ -119,11 +124,15 @@ public class SetNewPasswordActivity extends Activity implements SetNewPasswordCo
 
     @Override
     public void launchChooseLock(Bundle chooseLockFingerprintExtras) {
-        final boolean isInSetupWizard = WizardManagerHelper.isAnySetupWizard(getIntent());
-        Intent intent = isInSetupWizard ? new Intent(this, SetupChooseLockGeneric.class)
-                : new Intent(this, ChooseLockGeneric.class);
+        final Intent intent = new Intent(this, SetupChooseLockGeneric.class);
         intent.setAction(mNewPasswordAction);
         intent.putExtras(chooseLockFingerprintExtras);
+        intent.putExtra(EXTRA_KEY_CHOOSE_LOCK_SCREEN_TITLE,
+                getIntent().getIntExtra(EXTRA_KEY_CHOOSE_LOCK_SCREEN_TITLE, -1));
+        intent.putExtra(EXTRA_KEY_CHOOSE_LOCK_SCREEN_DESCRIPTION,
+                getIntent().getIntExtra(EXTRA_KEY_CHOOSE_LOCK_SCREEN_DESCRIPTION, -1));
+        intent.putExtra(EXTRA_KEY_FINGERPRINT_ENROLLMENT_ONLY,
+                getIntent().getBooleanExtra(EXTRA_KEY_FINGERPRINT_ENROLLMENT_ONLY, false));
         if (mCallerAppName != null) {
             intent.putExtra(EXTRA_KEY_CALLER_APP_NAME, mCallerAppName);
         }
@@ -178,7 +187,7 @@ public class SetNewPasswordActivity extends Activity implements SetNewPasswordCo
                 : SettingsEnums.ACTION_SET_NEW_PARENT_PROFILE_PASSWORD;
 
         final MetricsFeatureProvider metricsProvider =
-                FeatureFactory.getFactory(this).getMetricsFeatureProvider();
+                FeatureFactory.getFeatureFactory().getMetricsFeatureProvider();
         metricsProvider.action(
                 metricsProvider.getAttribution(this),
                 action,

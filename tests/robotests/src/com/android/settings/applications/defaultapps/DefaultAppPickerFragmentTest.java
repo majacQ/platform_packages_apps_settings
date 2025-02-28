@@ -32,7 +32,7 @@ import androidx.preference.PreferenceScreen;
 import com.android.internal.logging.nano.MetricsProto;
 import com.android.settings.testutils.FakeFeatureFactory;
 import com.android.settingslib.applications.DefaultAppInfo;
-import com.android.settingslib.widget.RadioButtonPreference;
+import com.android.settingslib.widget.SelectorWithWidgetPreference;
 
 import org.junit.Before;
 import org.junit.Test;
@@ -42,11 +42,15 @@ import org.mockito.MockitoAnnotations;
 import org.robolectric.Robolectric;
 import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;
+import org.robolectric.annotation.Config;
 
 import java.util.ArrayList;
 import java.util.List;
 
 @RunWith(RobolectricTestRunner.class)
+@Config(shadows = {
+        com.android.settings.testutils.shadow.ShadowFragment.class,
+})
 public class DefaultAppPickerFragmentTest {
 
     @Mock
@@ -73,8 +77,8 @@ public class DefaultAppPickerFragmentTest {
     @Test
     public void clickPreference_hasConfirmation_shouldShowConfirmation() {
         mFragment.onAttach((Context) mActivity);
-        final RadioButtonPreference pref =
-                new RadioButtonPreference(RuntimeEnvironment.application);
+        final SelectorWithWidgetPreference pref =
+                new SelectorWithWidgetPreference(RuntimeEnvironment.application);
         pref.setKey("TEST");
         doReturn("confirmation_text").when(mFragment)
                 .getConfirmationMessage(any(DefaultAppInfo.class));

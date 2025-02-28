@@ -16,33 +16,32 @@
 
 package com.android.settings.accounts;
 
-import android.app.admin.DevicePolicyManager;
+import static android.app.admin.DevicePolicyResources.Strings.Settings.CROSS_PROFILE_CALENDAR_SUMMARY;
+import static android.app.admin.DevicePolicyResources.Strings.Settings.CROSS_PROFILE_CALENDAR_TITLE;
+import static android.app.admin.DevicePolicyResources.Strings.Settings.MANAGED_PROFILE_SETTINGS_TITLE;
+import static android.app.admin.DevicePolicyResources.Strings.Settings.WORK_PROFILE_CONTACT_SEARCH_SUMMARY;
+import static android.app.admin.DevicePolicyResources.Strings.Settings.WORK_PROFILE_CONTACT_SEARCH_TITLE;
+import static android.app.admin.DevicePolicyResources.Strings.Settings.WORK_PROFILE_SETTING;
+
 import android.app.settings.SettingsEnums;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
-import android.content.pm.PackageManager;
 import android.os.Bundle;
 import android.os.UserHandle;
 import android.os.UserManager;
 import android.provider.SearchIndexableResource;
 import android.util.Log;
 
-import androidx.preference.Preference;
-import androidx.preference.PreferenceGroup;
-import androidx.preference.PreferenceManager;
-
 import com.android.settings.R;
 import com.android.settings.Utils;
 import com.android.settings.dashboard.DashboardFragment;
 import com.android.settings.search.BaseSearchIndexProvider;
-import com.android.settingslib.search.Indexable;
 import com.android.settingslib.search.SearchIndexable;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Set;
 
 /**
  * Setting page for managed profile.
@@ -73,12 +72,10 @@ public class ManagedProfileSettings extends DashboardFragment {
         super.onAttach(context);
         mUserManager = (UserManager) getSystemService(Context.USER_SERVICE);
         mManagedUser = getManagedUserFromArgument();
+
         if (mManagedUser == null) {
             getActivity().finish();
         }
-        use(WorkModePreferenceController.class).setManagedUser(mManagedUser);
-        use(ContactSearchPreferenceController.class).setManagedUser(mManagedUser);
-        use(CrossProfileCalendarPreferenceController.class).setManagedUser(mManagedUser);
     }
 
     @Override
@@ -86,6 +83,19 @@ public class ManagedProfileSettings extends DashboardFragment {
         super.onCreate(icicle);
         mManagedProfileBroadcastReceiver = new ManagedProfileBroadcastReceiver();
         mManagedProfileBroadcastReceiver.register(getActivity());
+        replaceEnterprisePreferenceScreenTitle(
+                MANAGED_PROFILE_SETTINGS_TITLE, R.string.managed_profile_settings_title);
+        replaceEnterpriseStringTitle("work_mode",
+                WORK_PROFILE_SETTING, R.string.work_mode_label);
+        replaceEnterpriseStringTitle("contacts_search",
+                WORK_PROFILE_CONTACT_SEARCH_TITLE, R.string.managed_profile_contact_search_title);
+        replaceEnterpriseStringSummary("contacts_search",
+                WORK_PROFILE_CONTACT_SEARCH_SUMMARY,
+                R.string.managed_profile_contact_search_summary);
+        replaceEnterpriseStringTitle("cross_profile_calendar",
+                CROSS_PROFILE_CALENDAR_TITLE, R.string.cross_profile_calendar_title);
+        replaceEnterpriseStringSummary("cross_profile_calendar",
+                CROSS_PROFILE_CALENDAR_SUMMARY, R.string.cross_profile_calendar_summary);
     }
 
     @Override
@@ -128,8 +138,11 @@ public class ManagedProfileSettings extends DashboardFragment {
                 }
                 @Override
                 protected boolean isPageSearchEnabled(Context context) {
-                    return false;
+                    UserManager userManager = context.getSystemService(UserManager.class);
+                    UserHandle managedUser = Utils.getManagedProfile(userManager);
+                    return managedUser != null;
                 }
+
             };
 
     private class ManagedProfileBroadcastReceiver extends BroadcastReceiver {

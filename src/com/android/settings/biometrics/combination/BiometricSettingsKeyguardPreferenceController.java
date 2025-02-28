@@ -22,6 +22,7 @@ import android.content.Context;
 import android.provider.Settings;
 
 import com.android.settings.Utils;
+import com.android.settings.biometrics.activeunlock.ActiveUnlockStatusUtils;
 import com.android.settings.core.TogglePreferenceController;
 import com.android.settingslib.RestrictedLockUtils;
 import com.android.settingslib.RestrictedLockUtilsInternal;
@@ -63,14 +64,29 @@ public class BiometricSettingsKeyguardPreferenceController extends TogglePrefere
 
     @Override
     public int getAvailabilityStatus() {
+        final ActiveUnlockStatusUtils activeUnlockStatusUtils =
+                new ActiveUnlockStatusUtils(mContext);
+        if (activeUnlockStatusUtils.isAvailable()) {
+            return getAvailabilityFromRestrictingAdmin();
+        }
         if (!Utils.isMultipleBiometricsSupported(mContext)) {
             return UNSUPPORTED_ON_DEVICE;
         }
+        return getAvailabilityFromRestrictingAdmin();
+    }
+
+    private int getAvailabilityFromRestrictingAdmin() {
         return getRestrictingAdmin() != null ? DISABLED_FOR_USER : AVAILABLE;
     }
 
     @Override
     public final boolean isSliceable() {
         return false;
+    }
+
+    @Override
+    public int getSliceHighlightMenuRes() {
+        // not needed since it's not sliceable
+        return NO_RES;
     }
 }

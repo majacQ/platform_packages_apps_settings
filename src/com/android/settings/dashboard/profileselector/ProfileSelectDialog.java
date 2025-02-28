@@ -17,25 +17,40 @@
 package com.android.settings.dashboard.profileselector;
 
 import android.app.Dialog;
+import android.app.PendingIntent;
 import android.content.Context;
 import android.content.DialogInterface;
-import android.content.DialogInterface.OnClickListener;
+import android.content.DialogInterface.OnCancelListener;
+import android.content.DialogInterface.OnDismissListener;
+import android.content.DialogInterface.OnShowListener;
 import android.content.Intent;
+import android.content.pm.UserInfo;
 import android.os.Bundle;
 import android.os.UserHandle;
 import android.os.UserManager;
 import android.util.Log;
+import android.view.LayoutInflater;
+import android.view.View;
 
+import androidx.annotation.NonNull;
 import androidx.appcompat.app.AlertDialog;
 import androidx.fragment.app.DialogFragment;
 import androidx.fragment.app.FragmentManager;
 
+import com.android.internal.widget.DialogTitle;
+import com.android.internal.widget.LinearLayoutManager;
+import com.android.internal.widget.RecyclerView;
+import com.android.settings.R;
+import com.android.settings.Utils;
 import com.android.settings.overlay.FeatureFactory;
 import com.android.settingslib.drawer.Tile;
 
 import java.util.List;
 
-public class ProfileSelectDialog extends DialogFragment implements OnClickListener {
+/**
+ * A {@link DialogFragment} that can select one of the different profiles.
+ */
+public class ProfileSelectDialog extends DialogFragment implements UserAdapter.OnClickListener {
 
     private static final String TAG = "ProfileSelectDialog";
     private static final String ARG_SELECTED_TILE = "selectedTile";
@@ -44,51 +59,121 @@ public class ProfileSelectDialog extends DialogFragment implements OnClickListen
 
     private int mSourceMetricCategory;
     private Tile mSelectedTile;
+    private OnShowListener mOnShowListener;
+    private OnCancelListener mOnCancelListener;
+    private OnDismissListener mOnDismissListener;
 
     /**
      * Display the profile select dialog, adding the fragment to the given FragmentManager.
-     * @param manager The FragmentManager this fragment will be added to.
-     * @param tile The tile for this fragment.
+     *
+     * @param manager              The FragmentManager this fragment will be added to.
+     * @param tile                 The tile for this fragment.
      * @param sourceMetricCategory The source metric category.
+     * @param onShowListener       The listener listens to the dialog showing event.
+     * @param onDismissListener    The listener listens to the dialog dismissing event.
+     * @param onCancelListener     The listener listens to the dialog cancelling event.
      */
-    public static void show(FragmentManager manager, Tile tile, int sourceMetricCategory) {
+    public static void show(FragmentManager manager, Tile tile, int sourceMetricCategory,
+            OnShowListener onShowListener, OnDismissListener onDismissListener,
+            OnCancelListener onCancelListener) {
         final ProfileSelectDialog dialog = new ProfileSelectDialog();
         final Bundle args = new Bundle();
         args.putParcelable(ARG_SELECTED_TILE, tile);
         args.putInt(ARG_SOURCE_METRIC_CATEGORY, sourceMetricCategory);
         dialog.setArguments(args);
+        dialog.mOnShowListener = onShowListener;
+        dialog.mOnDismissListener = onDismissListener;
+        dialog.mOnCancelListener = onCancelListener;
         dialog.show(manager, "select_profile");
     }
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        mSelectedTile = getArguments().getParcelable(ARG_SELECTED_TILE);
-        mSourceMetricCategory = getArguments().getInt(ARG_SOURCE_METRIC_CATEGORY);
+        Bundle arguments = requireArguments();
+        mSelectedTile = arguments.getParcelable(ARG_SELECTED_TILE, Tile.class);
+        mSourceMetricCategory = arguments.getInt(ARG_SOURCE_METRIC_CATEGORY);
     }
 
+    @NonNull
     @Override
     public Dialog onCreateDialog(Bundle savedInstanceState) {
-        final Context context = getActivity();
-        final AlertDialog.Builder builder = new AlertDialog.Builder(context);
-        final UserAdapter adapter = UserAdapter.createUserAdapter(UserManager.get(context), context,
-                mSelectedTile.userHandle);
-        builder.setTitle(com.android.settingslib.R.string.choose_profile)
-                .setAdapter(adapter, this);
+        return createDialog(getContext(), mSelectedTile.userHandle, this);
+    }
 
-        return builder.create();
+    /**
+     * Creates the profile select dialog.
+     */
+    public static Dialog createDialog(Context context, List<UserHandle> userProfiles,
+            UserAdapter.OnClickListener onClickListener) {
+        LayoutInflater layoutInflater = context.getSystemService(LayoutInflater.class);
+
+        DialogTitle titleView =
+                (DialogTitle) layoutInflater.inflate(R.layout.user_select_title, null);
+        titleView.setText(com.android.settingslib.R.string.choose_profile);
+
+        View contentView = layoutInflater.inflate(R.layout.user_select, null);
+
+        RecyclerView listView = contentView.findViewById(R.id.list);
+        listView.setAdapter(
+                UserAdapter.createUserRecycleViewAdapter(context, userProfiles, onClickListener));
+        listView.setLayoutManager(
+                new LinearLayoutManager(context, LinearLayoutManager.HORIZONTAL, false));
+
+        return new AlertDialog.Builder(context)
+                .setCustomTitle(titleView)
+                .setView(contentView)
+                .create();
     }
 
     @Override
-    public void onClick(DialogInterface dialog, int which) {
-        final UserHandle user = mSelectedTile.userHandle.get(which);
-        // Show menu on top level items.
-        final Intent intent = mSelectedTile.getIntent();
-        FeatureFactory.getFactory(getContext()).getMetricsFeatureProvider()
-                .logStartedIntentWithProfile(intent, mSourceMetricCategory,
-                        which == 1 /* isWorkProfile */);
-        intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TASK);
-        getActivity().startActivityAsUser(intent, user);
+    public void onClick(int position) {
+        final UserHandle user = mSelectedTile.userHandle.get(position);
+        if (!mSelectedTile.hasPendingIntent()) {
+            final Intent intent = new Intent(mSelectedTile.getIntent());
+            FeatureFactory.getFeatureFactory().getMetricsFeatureProvider()
+                    .logStartedIntentWithProfile(intent, mSourceMetricCategory,
+                            position == 1 /* isWorkProfile */);
+            intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TASK);
+            getActivity().startActivityAsUser(intent, user);
+        } else {
+            PendingIntent pendingIntent = mSelectedTile.pendingIntentMap.get(user);
+            FeatureFactory.getFeatureFactory().getMetricsFeatureProvider()
+                    .logSettingsTileClickWithProfile(mSelectedTile.getKey(getContext()),
+                            mSourceMetricCategory,
+                            position == 1 /* isWorkProfile */);
+            try {
+                pendingIntent.send();
+            } catch (PendingIntent.CanceledException e) {
+                Log.w(TAG, "Failed executing pendingIntent. " + pendingIntent.getIntent(), e);
+            }
+        }
+        dismiss();
+    }
+
+    @Override
+    public void onStart() {
+        super.onStart();
+        // The fragment shows the dialog within onStart()
+        if (mOnShowListener != null) {
+            mOnShowListener.onShow(getDialog());
+        }
+    }
+
+    @Override
+    public void onCancel(DialogInterface dialog) {
+        super.onCancel(dialog);
+        if (mOnCancelListener != null) {
+            mOnCancelListener.onCancel(dialog);
+        }
+    }
+
+    @Override
+    public void onDismiss(DialogInterface dialog) {
+        super.onDismiss(dialog);
+        if (mOnDismissListener != null) {
+            mOnDismissListener.onDismiss(dialog);
+        }
     }
 
     public static void updateUserHandlesIfNeeded(Context context, Tile tile) {
@@ -98,11 +183,48 @@ public class ProfileSelectDialog extends DialogFragment implements OnClickListen
         }
         final UserManager userManager = UserManager.get(context);
         for (int i = userHandles.size() - 1; i >= 0; i--) {
-            if (userManager.getUserInfo(userHandles.get(i).getIdentifier()) == null) {
+            UserInfo userInfo = userManager.getUserInfo(userHandles.get(i).getIdentifier());
+            if (userInfo == null
+                    || userInfo.isCloneProfile()
+                    || Utils.shouldHideUser(userHandles.get(i), userManager)) {
                 if (DEBUG) {
                     Log.d(TAG, "Delete the user: " + userHandles.get(i).getIdentifier());
                 }
                 userHandles.remove(i);
+            }
+        }
+    }
+
+    /**
+     * Checks the userHandle and pendingIntentMap in the provided tile, and remove the invalid
+     * entries if any.
+     */
+    public static void updatePendingIntentsIfNeeded(Context context, Tile tile) {
+        if (tile.userHandle == null || tile.userHandle.size() <= 1
+                || tile.pendingIntentMap.size() <= 1) {
+            return;
+        }
+        for (UserHandle userHandle : List.copyOf(tile.userHandle)) {
+            if (!tile.pendingIntentMap.containsKey(userHandle)) {
+                if (DEBUG) {
+                    Log.d(TAG, "Delete the user without pending intent: "
+                            + userHandle.getIdentifier());
+                }
+                tile.userHandle.remove(userHandle);
+            }
+        }
+
+        final UserManager userManager = UserManager.get(context);
+        for (UserHandle userHandle : List.copyOf(tile.pendingIntentMap.keySet())) {
+            UserInfo userInfo = userManager.getUserInfo(userHandle.getIdentifier());
+            if (userInfo == null
+                    || userInfo.isCloneProfile()
+                    || Utils.shouldHideUser(userHandle, userManager)) {
+                if (DEBUG) {
+                    Log.d(TAG, "Delete the user: " + userHandle.getIdentifier());
+                }
+                tile.userHandle.remove(userHandle);
+                tile.pendingIntentMap.remove(userHandle);
             }
         }
     }

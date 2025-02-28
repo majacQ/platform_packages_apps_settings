@@ -19,6 +19,7 @@ package com.android.settings.slices;
 import android.annotation.IntDef;
 import android.net.Uri;
 import android.text.TextUtils;
+import android.util.Log;
 
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
@@ -50,6 +51,8 @@ public class SliceData {
         int SLIDER = 2;
     }
 
+    private static final String TAG = "SliceData";
+
     private final String mKey;
 
     private final String mTitle;
@@ -67,6 +70,10 @@ public class SliceData {
     private final Uri mUri;
 
     private final String mPreferenceController;
+
+    private final int mHighlightMenuRes;
+
+    private final String mUserRestriction;
 
     @SliceType
     private final int mSliceType;
@@ -119,8 +126,16 @@ public class SliceData {
         return mUnavailableSliceSubtitle;
     }
 
+    public int getHighlightMenuRes() {
+        return mHighlightMenuRes;
+    }
+
     public boolean isPublicSlice() {
         return mIsPublicSlice;
+    }
+
+    public String getUserRestriction() {
+        return mUserRestriction;
     }
 
     private SliceData(Builder builder) {
@@ -136,6 +151,8 @@ public class SliceData {
         mSliceType = builder.mSliceType;
         mUnavailableSliceSubtitle = builder.mUnavailableSliceSubtitle;
         mIsPublicSlice = builder.mIsPublicSlice;
+        mHighlightMenuRes = builder.mHighlightMenuRes;
+        mUserRestriction = builder.mUserRestriction;
     }
 
     @Override
@@ -175,7 +192,11 @@ public class SliceData {
 
         private String mUnavailableSliceSubtitle;
 
+        private int mHighlightMenuRes;
+
         private boolean mIsPublicSlice;
+
+        private String mUserRestriction;
 
         public Builder setKey(String key) {
             mKey = key;
@@ -233,8 +254,18 @@ public class SliceData {
             return this;
         }
 
+        public Builder setHighlightMenuRes(int highlightMenuRes) {
+            mHighlightMenuRes = highlightMenuRes;
+            return this;
+        }
+
         public Builder setIsPublicSlice(boolean isPublicSlice) {
             mIsPublicSlice = isPublicSlice;
+            return this;
+        }
+
+        public Builder setUserRestriction(String userRestriction) {
+            mUserRestriction = userRestriction;
             return this;
         }
 
@@ -253,6 +284,10 @@ public class SliceData {
 
             if (TextUtils.isEmpty(mPrefControllerClassName)) {
                 throw new InvalidSliceDataException("Preference Controller cannot be empty");
+            }
+
+            if (mHighlightMenuRes == 0) {
+                Log.w(TAG, "Highlight menu key res is empty: " + mPrefControllerClassName);
             }
 
             return new SliceData(this);

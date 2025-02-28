@@ -19,7 +19,6 @@ package com.android.settings.security.trustagent;
 import android.content.Context;
 import android.os.UserHandle;
 
-import androidx.annotation.VisibleForTesting;
 import androidx.preference.Preference;
 
 import com.android.internal.widget.LockPatternUtils;
@@ -27,23 +26,18 @@ import com.android.settings.R;
 import com.android.settings.core.BasePreferenceController;
 import com.android.settings.overlay.FeatureFactory;
 import com.android.settings.security.SecurityFeatureProvider;
+import com.android.settingslib.utils.StringUtil;
 
 public class ManageTrustAgentsPreferenceController extends BasePreferenceController {
 
-    @VisibleForTesting
-    static final String KEY_MANAGE_TRUST_AGENTS = "manage_trust_agents";
     private static final int MY_USER_ID = UserHandle.myUserId();
 
     private final LockPatternUtils mLockPatternUtils;
     private TrustAgentManager mTrustAgentManager;
 
-    public ManageTrustAgentsPreferenceController(Context context) {
-        this(context, KEY_MANAGE_TRUST_AGENTS);
-    }
-
     public ManageTrustAgentsPreferenceController(Context context, String key) {
         super(context, key);
-        final SecurityFeatureProvider securityFeatureProvider = FeatureFactory.getFactory(context)
+        final SecurityFeatureProvider securityFeatureProvider = FeatureFactory.getFeatureFactory()
                 .getSecurityFeatureProvider();
         mLockPatternUtils = securityFeatureProvider.getLockPatternUtils(context);
         mTrustAgentManager = securityFeatureProvider.getTrustAgentManager();
@@ -63,9 +57,8 @@ public class ManageTrustAgentsPreferenceController extends BasePreferenceControl
             preference.setSummary(R.string.disabled_because_no_backup_security);
         } else if (numberOfTrustAgent > 0) {
             preference.setEnabled(true);
-            preference.setSummary(mContext.getResources().getQuantityString(
-                    R.plurals.manage_trust_agents_summary_on,
-                    numberOfTrustAgent, numberOfTrustAgent));
+            preference.setSummary(StringUtil.getIcuPluralsString(mContext, numberOfTrustAgent,
+                    R.string.manage_trust_agents_summary_on));
         } else {
             preference.setEnabled(true);
             preference.setSummary(R.string.manage_trust_agents_summary);
@@ -73,6 +66,6 @@ public class ManageTrustAgentsPreferenceController extends BasePreferenceControl
     }
 
     private int getTrustAgentCount() {
-        return mTrustAgentManager.getActiveTrustAgents(mContext, mLockPatternUtils).size();
+        return mTrustAgentManager.getActiveTrustAgents(mContext, mLockPatternUtils, false).size();
     }
 }

@@ -111,11 +111,11 @@ public class MoreSettingsPreferenceController extends BasePreferenceController i
 
     @Override
     public void onClick(View v) {
-        FeatureFactory.getFactory(mContext).getMetricsFeatureProvider()
+        FeatureFactory.getFeatureFactory().getMetricsFeatureProvider()
                 .logClickedPreference(mPreference, getMetricsCategory());
         final Intent intent = new Intent(mIntent)
                 .addCategory(Intent.CATEGORY_LAUNCHER)
-                .setFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP);
+                .setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
         Bundle bundle = new Bundle();
         bundle.putString(EXTRA_KEY_ATTRIBUTION, mContext.getPackageName());
         mContext.startActivity(intent, bundle);

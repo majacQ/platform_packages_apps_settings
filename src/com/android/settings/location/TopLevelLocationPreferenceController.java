@@ -21,6 +21,7 @@ import com.android.settings.core.BasePreferenceController;
 import com.android.settingslib.core.lifecycle.LifecycleObserver;
 import com.android.settingslib.core.lifecycle.events.OnStart;
 import com.android.settingslib.core.lifecycle.events.OnStop;
+import com.android.settingslib.utils.StringUtil;
 
 import java.util.Arrays;
 import java.util.List;
@@ -31,9 +32,9 @@ public class TopLevelLocationPreferenceController extends BasePreferenceControll
     private static final IntentFilter INTENT_FILTER_LOCATION_MODE_CHANGED =
             new IntentFilter(LocationManager.MODE_CHANGED_ACTION);
     private final LocationManager mLocationManager;
-    /** Total number of apps that has location permission. */
-    private int mNumTotal = -1;
     private int mNumTotalLoading = 0;
+    /** Summary text. */
+    private static String sSummary = null;
     private BroadcastReceiver mReceiver;
     private Preference mPreference;
     private AtomicInteger loadingInProgress = new AtomicInteger(0);
@@ -51,12 +52,11 @@ public class TopLevelLocationPreferenceController extends BasePreferenceControll
     @Override
     public CharSequence getSummary() {
         if (mLocationManager.isLocationEnabled()) {
-            if (mNumTotal == -1) {
-                return mContext.getString(R.string.location_settings_loading_app_permission_stats);
+            if (sSummary == null) {
+                sSummary = mContext.getString(
+                        R.string.location_settings_loading_app_permission_stats);
             }
-            return mContext.getResources().getQuantityString(
-                    R.plurals.location_settings_summary_location_on,
-                    mNumTotal, mNumTotal);
+            return sSummary;
         } else {
             return mContext.getString(R.string.location_settings_summary_location_off);
         }
@@ -64,7 +64,8 @@ public class TopLevelLocationPreferenceController extends BasePreferenceControll
 
     @VisibleForTesting
     void setLocationAppCount(int numApps) {
-        mNumTotal = numApps;
+        sSummary = StringUtil.getIcuPluralsString(mContext, numApps,
+                R.string.location_settings_summary_location_on);
         refreshSummary(mPreference);
     }
 

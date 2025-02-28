@@ -29,12 +29,14 @@ import com.android.settings.core.BasePreferenceController;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
-import org.mockito.MockitoAnnotations;
+import org.mockito.junit.MockitoJUnit;
+import org.mockito.junit.MockitoRule;
 import org.robolectric.Robolectric;
 import org.robolectric.RobolectricTestRunner;
 
 @RunWith(RobolectricTestRunner.class)
 public class WallpaperTypePreferenceControllerTest {
+    public final MockitoRule mMockitoRule = MockitoJUnit.rule();
 
     private Context mContext;
     private WallpaperTypePreferenceController mController;
@@ -43,7 +45,6 @@ public class WallpaperTypePreferenceControllerTest {
 
     @Before
     public void setUp() {
-        MockitoAnnotations.initMocks(this);
         mContext = Robolectric.setupActivity(Activity.class);
         mController = new WallpaperTypePreferenceController(mContext, "pref_key");
         mIntent = new Intent();

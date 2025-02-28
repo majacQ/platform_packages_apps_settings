@@ -16,7 +16,6 @@
 
 package com.android.settings.wifi.dpp;
 
-import android.annotation.Nullable;
 import android.app.settings.SettingsEnums;
 import android.content.ComponentName;
 import android.content.Intent;
@@ -39,11 +38,14 @@ import android.widget.Button;
 import android.widget.ImageView;
 import android.widget.TextView;
 
+import androidx.annotation.Nullable;
+
 import com.android.internal.annotations.VisibleForTesting;
 import com.android.internal.app.chooser.DisplayResolveInfo;
 import com.android.internal.app.chooser.TargetInfo;
 import com.android.settings.R;
-import com.android.settings.wifi.qrcode.QrCodeGenerator;
+import com.android.settings.flags.Flags;
+import com.android.settingslib.qrcode.QrCodeGenerator;
 
 import com.google.zxing.WriterException;
 
@@ -55,7 +57,7 @@ public class WifiDppQrCodeGeneratorFragment extends WifiDppQrCodeBaseFragment {
     private static final String TAG = "WifiDppQrCodeGeneratorFragment";
 
     private ImageView mQrCodeView;
-    private String mQrCode;
+    protected String mQrCode;
 
     private static final String CHIP_LABEL_METADATA_KEY = "android.service.chooser.chip_label";
     private static final String CHIP_ICON_METADATA_KEY = "android.service.chooser.chip_icon";
@@ -68,6 +70,10 @@ public class WifiDppQrCodeGeneratorFragment extends WifiDppQrCodeBaseFragment {
 
     @Override
     public int getMetricsCategory() {
+        if (Flags.enableWifiSharingRuntimeFragment()) {
+            return SettingsEnums.SETTINGS_WIFI_DPP_QR_SHARING;
+        }
+
         return SettingsEnums.SETTINGS_WIFI_DPP_CONFIGURATOR;
     }
 
@@ -108,6 +114,7 @@ public class WifiDppQrCodeGeneratorFragment extends WifiDppQrCodeBaseFragment {
         super.onViewCreated(view, savedInstanceState);
 
         mQrCodeView = view.findViewById(R.id.qrcode_view);
+        mQrCodeView.setContentDescription(getString(R.string.qr_code_content_description));
 
         final WifiNetworkConfig wifiNetworkConfig = getWifiNetworkConfigFromHostActivity();
         if (wifiNetworkConfig.isHotspot()) {
@@ -223,11 +230,9 @@ public class WifiDppQrCodeGeneratorFragment extends WifiDppQrCodeBaseFragment {
 
     private Button createActionButton(Drawable icon, CharSequence title, View.OnClickListener r) {
         final Button b = (Button) LayoutInflater.from(getContext()).inflate(
-                com.android.internal.R.layout.chooser_action_button, null);
+                R.layout.action_button, null);
         if (icon != null) {
-            final int size = getResources()
-                    .getDimensionPixelSize(
-                            com.android.internal.R.dimen.chooser_action_button_icon_size);
+            final int size = getResources().getDimensionPixelSize(R.dimen.action_button_icon_size);
             icon.setBounds(0, 0, size, size);
             b.setCompoundDrawablesRelative(icon, null, null, null);
         }
@@ -259,7 +264,7 @@ public class WifiDppQrCodeGeneratorFragment extends WifiDppQrCodeBaseFragment {
         return button;
     }
 
-    private void setQrCode() {
+    protected void setQrCode() {
         try {
             final int qrcodeSize = getContext().getResources().getDimensionPixelSize(
                     R.dimen.qrcode_size);

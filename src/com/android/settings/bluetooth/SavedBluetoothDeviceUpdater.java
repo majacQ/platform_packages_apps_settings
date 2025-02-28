@@ -15,6 +15,7 @@
  */
 package com.android.settings.bluetooth;
 
+import android.app.settings.SettingsEnums;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
 import android.content.Context;
@@ -24,10 +25,10 @@ import androidx.annotation.VisibleForTesting;
 import androidx.preference.Preference;
 
 import com.android.settings.connecteddevice.DevicePreferenceCallback;
-import com.android.settings.connecteddevice.PreviouslyConnectedDeviceDashboardFragment;
-import com.android.settings.dashboard.DashboardFragment;
+import com.android.settingslib.bluetooth.BluetoothUtils;
 import com.android.settingslib.bluetooth.CachedBluetoothDevice;
 import com.android.settingslib.bluetooth.CachedBluetoothDeviceManager;
+import com.android.settingslib.flags.Flags;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -39,19 +40,19 @@ public class SavedBluetoothDeviceUpdater extends BluetoothDeviceUpdater
         implements Preference.OnPreferenceClickListener {
 
     private static final String TAG = "SavedBluetoothDeviceUpdater";
-    private static final boolean DBG = Log.isLoggable(TAG, Log.DEBUG);
 
-    private static final String PREF_KEY = "saved_bt";
+    private static final String PREF_KEY_PREFIX = "saved_bt_";
 
-    private final boolean mDisplayConnected;
+    private final boolean mShowConnectedDevice;
 
     @VisibleForTesting
     BluetoothAdapter mBluetoothAdapter;
 
-    public SavedBluetoothDeviceUpdater(Context context, DashboardFragment fragment,
-            DevicePreferenceCallback devicePreferenceCallback) {
-        super(context, fragment, devicePreferenceCallback);
-        mDisplayConnected = (fragment instanceof PreviouslyConnectedDeviceDashboardFragment);
+    public SavedBluetoothDeviceUpdater(Context context,
+            DevicePreferenceCallback devicePreferenceCallback, boolean showConnectedDevice,
+            int metricsCategory) {
+        super(context, devicePreferenceCallback, metricsCategory);
+        mShowConnectedDevice = showConnectedDevice;
         mBluetoothAdapter = BluetoothAdapter.getDefaultAdapter();
     }
 
@@ -94,34 +95,51 @@ public class SavedBluetoothDeviceUpdater extends BluetoothDeviceUpdater
         } else {
             removePreference(cachedDevice);
         }
+        Log.d(TAG, "Map : " + mPreferenceMap);
     }
 
     @Override
     public boolean isFilterMatched(CachedBluetoothDevice cachedDevice) {
         final BluetoothDevice device = cachedDevice.getDevice();
-        if (DBG) {
-            Log.d(TAG, "isFilterMatched() device name : " + cachedDevice.getName() +
-                    ", is connected : " + device.isConnected() + ", is profile connected : "
-                    + cachedDevice.isConnected());
+        boolean isExclusivelyManaged = BluetoothUtils.isExclusivelyManagedBluetoothDevice(mContext,
+                cachedDevice.getDevice());
+        Log.d(TAG, "isFilterMatched() device name : " + cachedDevice.getName()
+                + ", is connected : " + device.isConnected() + ", is profile connected : "
+                + cachedDevice.isConnected() + ", is exclusively managed : "
+                + isExclusivelyManaged);
+        if (Flags.enableHideExclusivelyManagedBluetoothDevice()) {
+            return device.getBondState() == BluetoothDevice.BOND_BONDED
+                    && (mShowConnectedDevice || (!device.isConnected()
+                    && isDeviceInCachedDevicesList(cachedDevice)))
+                    && !isExclusivelyManaged;
+        } else {
+            return device.getBondState() == BluetoothDevice.BOND_BONDED
+                    && (mShowConnectedDevice || (!device.isConnected()
+                    && isDeviceInCachedDevicesList(cachedDevice)));
         }
-        return device.getBondState() == BluetoothDevice.BOND_BONDED
-                && (mDisplayConnected || !device.isConnected());
     }
 
     @Override
     public boolean onPreferenceClick(Preference preference) {
-        mMetricsFeatureProvider.logClickedPreference(preference, mFragment.getMetricsCategory());
+        mMetricsFeatureProvider.logClickedPreference(preference, mMetricsCategory);
         final CachedBluetoothDevice device = ((BluetoothDevicePreference) preference)
                 .getBluetoothDevice();
         if (device.isConnected()) {
             return device.setActive();
         }
+        mMetricsFeatureProvider.action(mPrefContext,
+                SettingsEnums.ACTION_SETTINGS_BLUETOOTH_CONNECT);
         device.connect();
         return true;
     }
 
     @Override
-    protected String getPreferenceKey() {
-        return PREF_KEY;
+    protected String getPreferenceKeyPrefix() {
+        return PREF_KEY_PREFIX;
+    }
+
+    @Override
+    protected String getLogTag() {
+        return TAG;
     }
 }

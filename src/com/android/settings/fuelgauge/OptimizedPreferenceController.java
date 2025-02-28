@@ -16,24 +16,21 @@
 
 package com.android.settings.fuelgauge;
 
-import static com.android.settings.fuelgauge.BatteryOptimizeUtils.AppUsageState.OPTIMIZED;
-
 import android.content.Context;
-import android.util.Log;
 
 import androidx.annotation.VisibleForTesting;
 import androidx.preference.Preference;
 
 import com.android.settings.core.PreferenceControllerMixin;
 import com.android.settingslib.core.AbstractPreferenceController;
-import com.android.settingslib.widget.RadioButtonPreference;
+import com.android.settingslib.widget.SelectorWithWidgetPreference;
 
 public class OptimizedPreferenceController extends AbstractPreferenceController
         implements PreferenceControllerMixin {
 
     private static final String TAG = "OPTIMIZED_PREF";
 
-    @VisibleForTesting String KEY_OPTIMIZED_PREF = "optimized_pref";
+    @VisibleForTesting static final String KEY_OPTIMIZED_PREF = "optimized_preference";
     @VisibleForTesting BatteryOptimizeUtils mBatteryOptimizeUtils;
 
     public OptimizedPreferenceController(Context context, int uid, String packageName) {
@@ -48,23 +45,13 @@ public class OptimizedPreferenceController extends AbstractPreferenceController
 
     @Override
     public void updateState(Preference preference) {
-        if (!mBatteryOptimizeUtils.isValidPackageName()) {
-            Log.d(TAG, "invalid package name, optimized states only");
-            preference.setEnabled(true);
-            ((RadioButtonPreference) preference).setChecked(true);
-            return;
-        }
+        preference.setEnabled(mBatteryOptimizeUtils.isSelectorPreferenceEnabled());
 
-        if (mBatteryOptimizeUtils.isSystemOrDefaultApp()) {
-            Log.d(TAG, "is system or default app, disable pref");
-            ((RadioButtonPreference) preference).setChecked(false);
-            preference.setEnabled(false);
-        } else if (mBatteryOptimizeUtils.getAppUsageState() == OPTIMIZED) {
-            Log.d(TAG, "is optimized states");
-            ((RadioButtonPreference) preference).setChecked(true);
-        } else {
-            ((RadioButtonPreference) preference).setChecked(false);
-        }
+        final boolean isOptimized =
+                mBatteryOptimizeUtils.isDisabledForOptimizeModeOnly()
+                        || mBatteryOptimizeUtils.getAppOptimizationMode()
+                                == BatteryOptimizeUtils.MODE_OPTIMIZED;
+        ((SelectorWithWidgetPreference) preference).setChecked(isOptimized);
     }
 
     @Override
@@ -74,12 +61,6 @@ public class OptimizedPreferenceController extends AbstractPreferenceController
 
     @Override
     public boolean handlePreferenceTreeClick(Preference preference) {
-        if (!KEY_OPTIMIZED_PREF.equals(preference.getKey())) {
-            return false;
-        }
-
-        mBatteryOptimizeUtils.setAppUsageState(OPTIMIZED);
-        Log.d(TAG, "Set optimized");
-        return true;
+        return getPreferenceKey().equals(preference.getKey());
     }
 }

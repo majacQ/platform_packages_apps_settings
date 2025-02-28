@@ -18,11 +18,14 @@ package com.android.settings.fuelgauge;
 
 import static com.google.common.truth.Truth.assertThat;
 
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.verifyZeroInteractions;
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.when;
 
-import com.android.settingslib.widget.RadioButtonPreference;
+import android.content.Context;
+import android.content.pm.PackageManager;
+
+import com.android.settingslib.widget.SelectorWithWidgetPreference;
 
 import org.junit.Before;
 import org.junit.Test;
@@ -38,34 +41,53 @@ public class OptimizedPreferenceControllerTest {
     private static final String PACKAGE_NAME = "com.android.app";
 
     private OptimizedPreferenceController mController;
-    private RadioButtonPreference mPreference;
+    private SelectorWithWidgetPreference mPreference;
+    private BatteryOptimizeUtils mBatteryOptimizeUtils;
 
-    @Mock BatteryOptimizeUtils mockBatteryOptimizeUtils;
+    @Mock PackageManager mMockPackageManager;
 
     @Before
-    public void setUp() {
+    public void setUp() throws Exception {
         MockitoAnnotations.initMocks(this);
 
-        mController = new OptimizedPreferenceController(
-                RuntimeEnvironment.application, UID, PACKAGE_NAME);
-        mPreference = new RadioButtonPreference(RuntimeEnvironment.application);
-        mController.mBatteryOptimizeUtils = mockBatteryOptimizeUtils;
+        Context context = spy(RuntimeEnvironment.application);
+        BatteryUtils.getInstance(context).reset();
+        doReturn(UID)
+                .when(mMockPackageManager)
+                .getPackageUid(PACKAGE_NAME, PackageManager.GET_META_DATA);
+
+        mController = new OptimizedPreferenceController(context, UID, PACKAGE_NAME);
+        mPreference = new SelectorWithWidgetPreference(RuntimeEnvironment.application);
+        mBatteryOptimizeUtils = spy(new BatteryOptimizeUtils(context, UID, PACKAGE_NAME));
+        mController.mBatteryOptimizeUtils = mBatteryOptimizeUtils;
     }
 
     @Test
     public void testUpdateState_invalidPackage_prefEnabled() {
-        when(mockBatteryOptimizeUtils.isValidPackageName()).thenReturn(false);
+        when(mBatteryOptimizeUtils.isDisabledForOptimizeModeOnly()).thenReturn(true);
 
         mController.updateState(mPreference);
 
-        assertThat(mPreference.isEnabled()).isTrue();
+        assertThat(mPreference.isEnabled()).isFalse();
+        assertThat(mPreference.isChecked()).isTrue();
+    }
+
+    @Test
+    public void testUpdateState_isSystemOrDefaultAppAndOptimizeStates_prefChecked() {
+        when(mBatteryOptimizeUtils.isDisabledForOptimizeModeOnly()).thenReturn(false);
+        when(mBatteryOptimizeUtils.isSystemOrDefaultApp()).thenReturn(true);
+        when(mBatteryOptimizeUtils.getAppOptimizationMode())
+                .thenReturn(BatteryOptimizeUtils.MODE_OPTIMIZED);
+
+        mController.updateState(mPreference);
+
         assertThat(mPreference.isChecked()).isTrue();
     }
 
     @Test
     public void testUpdateState_isSystemOrDefaultApp_prefUnchecked() {
-        when(mockBatteryOptimizeUtils.isValidPackageName()).thenReturn(true);
-        when(mockBatteryOptimizeUtils.isSystemOrDefaultApp()).thenReturn(true);
+        when(mBatteryOptimizeUtils.isDisabledForOptimizeModeOnly()).thenReturn(false);
+        when(mBatteryOptimizeUtils.isSystemOrDefaultApp()).thenReturn(true);
 
         mController.updateState(mPreference);
 
@@ -75,9 +97,9 @@ public class OptimizedPreferenceControllerTest {
 
     @Test
     public void testUpdateState_isOptimizedStates_prefChecked() {
-        when(mockBatteryOptimizeUtils.isValidPackageName()).thenReturn(true);
-        when(mockBatteryOptimizeUtils.getAppUsageState()).thenReturn(
-                BatteryOptimizeUtils.AppUsageState.OPTIMIZED);
+        when(mBatteryOptimizeUtils.isDisabledForOptimizeModeOnly()).thenReturn(false);
+        when(mBatteryOptimizeUtils.getAppOptimizationMode())
+                .thenReturn(BatteryOptimizeUtils.MODE_OPTIMIZED);
 
         mController.updateState(mPreference);
 
@@ -86,7 +108,7 @@ public class OptimizedPreferenceControllerTest {
 
     @Test
     public void testUpdateState_prefUnchecked() {
-        when(mockBatteryOptimizeUtils.isValidPackageName()).thenReturn(true);
+        when(mBatteryOptimizeUtils.isDisabledForOptimizeModeOnly()).thenReturn(false);
 
         mController.updateState(mPreference);
 
@@ -98,14 +120,11 @@ public class OptimizedPreferenceControllerTest {
         mPreference.setKey(mController.KEY_OPTIMIZED_PREF);
         mController.handlePreferenceTreeClick(mPreference);
 
-        verify(mockBatteryOptimizeUtils).setAppUsageState(
-                BatteryOptimizeUtils.AppUsageState.OPTIMIZED);
+        assertThat(mController.handlePreferenceTreeClick(mPreference)).isTrue();
     }
 
     @Test
     public void testHandlePreferenceTreeClick_incorrectPrefKey_noAction() {
-        mController.handlePreferenceTreeClick(mPreference);
-
-        verifyZeroInteractions(mockBatteryOptimizeUtils);
+        assertThat(mController.handlePreferenceTreeClick(mPreference)).isFalse();
     }
 }

@@ -17,15 +17,23 @@
 package com.android.settings.network.telephony;
 
 import android.content.Context;
-import android.telecom.PhoneAccountHandle;
-import android.telephony.SubscriptionInfo;
 import android.telephony.SubscriptionManager;
 
-import com.android.settings.Utils;
+import androidx.lifecycle.LifecycleOwner;
+
+import com.android.settingslib.core.lifecycle.Lifecycle;
+import com.android.settingslib.mobile.dataservice.SubscriptionInfoEntity;
 
 public class SmsDefaultSubscriptionController extends DefaultSubscriptionController {
 
     private final boolean mIsAskEverytimeSupported;
+
+    public SmsDefaultSubscriptionController(Context context, String preferenceKey,
+            Lifecycle lifecycle, LifecycleOwner lifecycleOwner) {
+        super(context, preferenceKey, lifecycle, lifecycleOwner);
+        mIsAskEverytimeSupported = mContext.getResources()
+                .getBoolean(com.android.internal.R.bool.config_sms_ask_every_time_support);
+    }
 
     public SmsDefaultSubscriptionController(Context context, String preferenceKey) {
         super(context, preferenceKey);
@@ -34,13 +42,15 @@ public class SmsDefaultSubscriptionController extends DefaultSubscriptionControl
     }
 
     @Override
-    protected SubscriptionInfo getDefaultSubscriptionInfo() {
-        return mManager.getActiveSubscriptionInfo(getDefaultSubscriptionId());
-    }
-
-    @Override
     protected int getDefaultSubscriptionId() {
-        return SubscriptionManager.getDefaultSmsSubscriptionId();
+        int defaultSmsSubId = SubscriptionManager.getDefaultSmsSubscriptionId();
+        for (SubscriptionInfoEntity subInfo : mSubInfoEntityList) {
+            int subId = subInfo.getSubId();
+            if (subInfo.isActiveSubscriptionId && subId == defaultSmsSubId) {
+                return subId;
+            }
+        }
+        return SubscriptionManager.INVALID_SUBSCRIPTION_ID;
     }
 
     @Override
@@ -54,17 +64,8 @@ public class SmsDefaultSubscriptionController extends DefaultSubscriptionControl
     }
 
     @Override
-    public PhoneAccountHandle getDefaultCallingAccountHandle() {
-        // Not supporting calling account override by VoIP
-        return null;
-    }
-
-    @Override
     public CharSequence getSummary() {
-        if (Utils.isProviderModelEnabled(mContext)) {
-            return MobileNetworkUtils.getPreferredStatus(isRtlMode(), mContext, mManager, false);
-        } else {
-            return super.getSummary();
-        }
+        return MobileNetworkUtils.getPreferredStatus(isRtlMode(), mContext, false,
+                mSubInfoEntityList);
     }
 }

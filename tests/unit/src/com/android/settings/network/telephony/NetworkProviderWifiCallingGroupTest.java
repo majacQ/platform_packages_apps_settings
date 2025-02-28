@@ -37,7 +37,6 @@ import android.telephony.CarrierConfigManager;
 import android.telephony.SubscriptionInfo;
 import android.telephony.SubscriptionManager;
 import android.telephony.TelephonyManager;
-import android.util.FeatureFlagUtils;
 
 import androidx.preference.PreferenceCategory;
 import androidx.preference.PreferenceManager;
@@ -100,6 +99,7 @@ public class NetworkProviderWifiCallingGroupTest {
         when(mContext.getSystemService(CarrierConfigManager.class)).thenReturn(
                 mCarrierConfigManager);
         when(mContext.getSystemService(SubscriptionManager.class)).thenReturn(mSubscriptionManager);
+        when(mSubscriptionManager.createForAllUserProfiles()).thenReturn(mSubscriptionManager);
         when(mContext.getSystemService(TelecomManager.class)).thenReturn(mTelecomManager);
         when(mContext.getSystemService(TelephonyManager.class)).thenReturn(mTelephonyManager);
         when(mTelephonyManager.createForSubscriptionId(SUB_ID)).thenReturn(mTelephonyManager);
@@ -114,7 +114,7 @@ public class NetworkProviderWifiCallingGroupTest {
         mCarrierConfig.putBoolean(CarrierConfigManager.KEY_CARRIER_WFC_IMS_AVAILABLE_BOOL, true);
         when(mTelecomManager.getSimCallManagerForSubscription(SUB_ID))
                 .thenReturn(mPhoneAccountHandle);
-        mMockQueryWfcState = new MockWfcQueryImsState(mContext, SUB_ID);
+        mMockQueryWfcState = spy(new MockWfcQueryImsState(mContext, SUB_ID));
 
         if (Looper.myLooper() == null) {
             Looper.prepare();
@@ -147,7 +147,6 @@ public class NetworkProviderWifiCallingGroupTest {
     @Test
     public void
     shouldShowWifiCallingForSub_wifiCallingDisabledWithWifiCallingNotReady_returnFalse() {
-        FeatureFlagUtils.setEnabled(mContext, FeatureFlagUtils.SETTINGS_PROVIDER_MODEL, true);
         setWifiCallingEnabled(false);
         doReturn(mMockQueryWfcState).when(mNetworkProviderWifiCallingGroup).queryImsState(SUB_ID);
 
@@ -157,7 +156,6 @@ public class NetworkProviderWifiCallingGroupTest {
 
     @Test
     public void shouldShowWifiCallingForSub_wifiCallingEnabledWithWifiCallingIsReady_returnTrue() {
-        FeatureFlagUtils.setEnabled(mContext, FeatureFlagUtils.SETTINGS_PROVIDER_MODEL, true);
         setWifiCallingEnabled(true);
         doReturn(mMockQueryWfcState).when(mNetworkProviderWifiCallingGroup).queryImsState(SUB_ID);
 
@@ -168,7 +166,6 @@ public class NetworkProviderWifiCallingGroupTest {
     @Test
     public void
     shouldShowWifiCallingForSub_wifiCallingDisabledWithNoActivityHandleIntent_returnFalse() {
-        FeatureFlagUtils.setEnabled(mContext, FeatureFlagUtils.SETTINGS_PROVIDER_MODEL, true);
         buildPhoneAccountConfigureIntent(false);
         doReturn(mMockQueryWfcState).when(mNetworkProviderWifiCallingGroup).queryImsState(SUB_ID);
         doReturn(mPhoneAccountHandle).when(mNetworkProviderWifiCallingGroup)
@@ -181,9 +178,9 @@ public class NetworkProviderWifiCallingGroupTest {
     @Test
     public void
     shouldShowWifiCallingForSub_wifiCallingEnabledWithActivityHandleIntent_returnTrue() {
-        FeatureFlagUtils.setEnabled(mContext, FeatureFlagUtils.SETTINGS_PROVIDER_MODEL, true);
         buildPhoneAccountConfigureIntent(true);
         doReturn(mMockQueryWfcState).when(mNetworkProviderWifiCallingGroup).queryImsState(SUB_ID);
+        doReturn(true).when(mMockQueryWfcState).isReadyToWifiCalling();
         doReturn(mPhoneAccountHandle).when(mNetworkProviderWifiCallingGroup)
                 .getPhoneAccountHandleForSubscriptionId(SUB_ID);
 

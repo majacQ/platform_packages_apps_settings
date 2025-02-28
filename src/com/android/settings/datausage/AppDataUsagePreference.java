@@ -20,6 +20,7 @@ import android.widget.ProgressBar;
 
 import androidx.preference.PreferenceViewHolder;
 
+import com.android.settings.R;
 import com.android.settingslib.AppItem;
 import com.android.settingslib.net.UidDetail;
 import com.android.settingslib.net.UidDetailProvider;
@@ -37,6 +38,7 @@ public class AppDataUsagePreference extends AppPreference {
     public AppDataUsagePreference(Context context, AppItem item, int percent,
             UidDetailProvider provider) {
         super(context);
+        setKey("app_data_usage_" + item.key);
         mItem = item;
         mPercent = percent;
 
@@ -49,6 +51,9 @@ public class AppDataUsagePreference extends AppPreference {
         if (mDetail != null) {
             setAppInfo();
         } else {
+            // Set a placeholder title before starting to fetch real title, this is necessary
+            // to avoid preference height change.
+            setTitle(R.string.summary_placeholder);
             ThreadUtils.postOnBackgroundThread(() -> {
                 mDetail = provider.getUidDetail(mItem.key, true /* blocking */);
                 ThreadUtils.postOnMainThread(() -> setAppInfo());

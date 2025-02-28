@@ -28,34 +28,34 @@ import androidx.preference.Preference;
 import androidx.preference.PreferenceScreen;
 
 import com.android.settings.core.BasePreferenceController;
+import com.android.settings.network.SubscriptionUtil;
 
 import java.util.List;
 
 public class SimLockPreferenceController extends BasePreferenceController {
-
-    private static final String KEY_SIM_LOCK = "sim_lock_settings";
 
     private final CarrierConfigManager mCarrierConfigManager;
     private final UserManager mUserManager;
     private final SubscriptionManager mSubscriptionManager;
     private TelephonyManager mTelephonyManager;
 
-    public SimLockPreferenceController(Context context) {
-        this(context, KEY_SIM_LOCK);
-    }
-
     public SimLockPreferenceController(Context context, String key) {
         super(context, key);
         mUserManager = (UserManager) context.getSystemService(Context.USER_SERVICE);
         mCarrierConfigManager = (CarrierConfigManager)
                 mContext.getSystemService(Context.CARRIER_CONFIG_SERVICE);
-        mSubscriptionManager = (SubscriptionManager) context
-                .getSystemService(Context.TELEPHONY_SUBSCRIPTION_SERVICE);
+        mSubscriptionManager = ((SubscriptionManager) context
+                .getSystemService(Context.TELEPHONY_SUBSCRIPTION_SERVICE))
+                .createForAllUserProfiles();
         mTelephonyManager = (TelephonyManager) context.getSystemService(Context.TELEPHONY_SERVICE);
     }
 
     @Override
     public int getAvailabilityStatus() {
+        if (!SubscriptionUtil.isSimHardwareVisible(mContext)) {
+            return UNSUPPORTED_ON_DEVICE;
+        }
+
         final List<SubscriptionInfo> subInfoList =
                 mSubscriptionManager.getActiveSubscriptionInfoList();
 
@@ -95,7 +95,8 @@ public class SimLockPreferenceController extends BasePreferenceController {
         for (SubscriptionInfo subInfo : subInfoList) {
             final int simState = mTelephonyManager.getSimState(subInfo.getSimSlotIndex());
             if ((simState != TelephonyManager.SIM_STATE_ABSENT)
-                    && (simState != TelephonyManager.SIM_STATE_UNKNOWN)) {
+                    && (simState != TelephonyManager.SIM_STATE_UNKNOWN)
+                    && (simState != TelephonyManager.SIM_STATE_PERM_DISABLED)) {
                 return true;
             }
         }

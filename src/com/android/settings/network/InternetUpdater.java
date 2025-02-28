@@ -24,7 +24,6 @@ import static androidx.lifecycle.Lifecycle.Event.ON_DESTROY;
 import static androidx.lifecycle.Lifecycle.Event.ON_PAUSE;
 import static androidx.lifecycle.Lifecycle.Event.ON_RESUME;
 
-import android.annotation.NonNull;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
@@ -37,6 +36,7 @@ import android.net.wifi.WifiInfo;
 import android.net.wifi.WifiManager;
 import android.util.Log;
 
+import androidx.annotation.NonNull;
 import androidx.annotation.VisibleForTesting;
 import androidx.lifecycle.Lifecycle;
 import androidx.lifecycle.LifecycleObserver;
@@ -182,7 +182,8 @@ public class InternetUpdater implements AirplaneModeEnabler.OnAirplaneModeChange
     public void onResume() {
         mAirplaneModeEnabler.start();
         mConnectivityManager.registerDefaultNetworkCallback(mNetworkCallback);
-        mContext.registerReceiver(mWifiStateReceiver, mWifiStateFilter);
+        mContext.registerReceiver(mWifiStateReceiver, mWifiStateFilter,
+                Context.RECEIVER_EXPORTED_UNAUDITED);
     }
 
     /** @OnLifecycleEvent(ON_PAUSE) */

@@ -27,13 +27,17 @@ import android.widget.AdapterView;
 import android.widget.Spinner;
 
 import com.android.settings.R;
-import com.android.settings.SettingsPreferenceFragment;
+import com.android.settings.dashboard.RestrictedDashboardFragment;
 import com.android.settings.dashboard.profileselector.UserAdapter;
 
 /**
  * Base fragment class for per profile settings.
  */
-public abstract class ProfileSettingsPreferenceFragment extends SettingsPreferenceFragment {
+public abstract class ProfileSettingsPreferenceFragment extends RestrictedDashboardFragment {
+
+    public ProfileSettingsPreferenceFragment(String restrictionKey) {
+        super(restrictionKey);
+    }
 
     @Override
     public void onViewCreated(View view, Bundle savedInstanceState) {
@@ -51,7 +55,8 @@ public abstract class ProfileSettingsPreferenceFragment extends SettingsPreferen
                     final UserHandle selectedUser = profileSpinnerAdapter.getUserHandle(position);
                     if (selectedUser.getIdentifier() != UserHandle.myUserId()) {
                         final Activity activity = getActivity();
-                        Intent intent = new Intent(getIntentActionString());
+                        Intent intent = new Intent(getIntentActionString())
+                                .setPackage(getContext().getPackageName());
                         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
                         intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TASK);
                         activity.startActivityAsUser(intent, selectedUser);

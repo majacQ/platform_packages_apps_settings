@@ -21,23 +21,19 @@ import android.content.Context;
 
 import com.android.settings.R;
 import com.android.settings.dashboard.DashboardFragment;
-import com.android.settings.search.BaseSearchIndexProvider;
-import com.android.settingslib.core.AbstractPreferenceController;
-import com.android.settingslib.search.SearchIndexable;
-
-import java.util.ArrayList;
-import java.util.List;
 
 /**
  * A page that configures the Location Services settings for work profile.
+ *
+ * Note that this page should not provide indexes because it is only used in the two tabs
+ * {@link ProfileSelectFragment} scenario and should not be launched independently.
  */
-@SearchIndexable(forTarget = SearchIndexable.ALL & ~SearchIndexable.ARC)
 public class LocationServicesForWork extends DashboardFragment {
     private static final String TAG = "LocationServicesForWork";
 
     @Override
     public int getMetricsCategory() {
-        return SettingsEnums.LOCATION_SERVICES;
+        return SettingsEnums.LOCATION_SERVICES_FOR_WORK;
     }
 
     @Override
@@ -51,31 +47,8 @@ public class LocationServicesForWork extends DashboardFragment {
     }
 
     @Override
-    protected List<AbstractPreferenceController> createPreferenceControllers(Context context) {
-        return buildPreferenceControllers(context);
-    }
-
-    @Override
     public void onAttach(Context context) {
         super.onAttach(context);
         use(LocationInjectedServicesForWorkPreferenceController.class).init(this);
     }
-
-    private static List<AbstractPreferenceController> buildPreferenceControllers(Context context) {
-        final List<AbstractPreferenceController> controllers = new ArrayList<>();
-        return controllers;
-    }
-
-    /**
-     * For Search.
-     */
-    public static final BaseSearchIndexProvider SEARCH_INDEX_DATA_PROVIDER =
-            new BaseSearchIndexProvider(R.xml.location_services_workprofile) {
-
-                @Override
-                public List<AbstractPreferenceController> createPreferenceControllers(Context
-                        context) {
-                    return buildPreferenceControllers(context);
-                }
-            };
 }

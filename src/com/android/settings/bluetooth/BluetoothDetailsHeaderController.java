@@ -16,6 +16,7 @@
 
 package com.android.settings.bluetooth;
 
+import android.bluetooth.BluetoothProfile;
 import android.content.Context;
 import android.graphics.drawable.Drawable;
 import android.text.TextUtils;
@@ -25,11 +26,10 @@ import androidx.preference.PreferenceFragmentCompat;
 import androidx.preference.PreferenceScreen;
 
 import com.android.settings.R;
+import com.android.settings.flags.Flags;
 import com.android.settings.widget.EntityHeaderController;
 import com.android.settingslib.bluetooth.BluetoothUtils;
 import com.android.settingslib.bluetooth.CachedBluetoothDevice;
-import com.android.settingslib.bluetooth.CachedBluetoothDeviceManager;
-import com.android.settingslib.bluetooth.LocalBluetoothManager;
 import com.android.settingslib.core.lifecycle.Lifecycle;
 import com.android.settingslib.widget.LayoutPreference;
 
@@ -40,20 +40,21 @@ public class BluetoothDetailsHeaderController extends BluetoothDetailsController
     private static final String KEY_DEVICE_HEADER = "bluetooth_device_header";
 
     private EntityHeaderController mHeaderController;
-    private LocalBluetoothManager mLocalManager;
-    private CachedBluetoothDeviceManager mDeviceManager;
 
     public BluetoothDetailsHeaderController(Context context, PreferenceFragmentCompat fragment,
-            CachedBluetoothDevice device, Lifecycle lifecycle,
-            LocalBluetoothManager bluetoothManager) {
+            CachedBluetoothDevice device, Lifecycle lifecycle) {
         super(context, fragment, device, lifecycle);
-        mLocalManager = bluetoothManager;
-        mDeviceManager = mLocalManager.getCachedDeviceManager();
     }
 
     @Override
     public boolean isAvailable() {
-        return !Utils.isAdvancedDetailsHeader(mCachedDevice.getDevice());
+        if (Flags.enableBluetoothDeviceDetailsPolish()) {
+            return false;
+        }
+        boolean hasLeAudio = mCachedDevice.getUiAccessibleProfiles()
+                .stream()
+                .anyMatch(profile -> profile.getProfileId() == BluetoothProfile.LE_AUDIO);
+        return !BluetoothUtils.isAdvancedDetailsHeader(mCachedDevice.getDevice()) && !hasLeAudio;
     }
 
     @Override
@@ -71,10 +72,8 @@ public class BluetoothDetailsHeaderController extends BluetoothDetailsController
         if (TextUtils.isEmpty(summaryText)) {
             // If first summary is unavailable, not to show second summary.
             mHeaderController.setSecondSummary((CharSequence)null);
-        } else {
-            // If both the hearing aids are connected, two device status should be shown.
-            mHeaderController.setSecondSummary(mDeviceManager.getSubDeviceSummary(mCachedDevice));
         }
+
         mHeaderController.setLabel(mCachedDevice.getName());
         mHeaderController.setIcon(pair.first);
         mHeaderController.setIconContentDescription(pair.second);
@@ -85,7 +84,7 @@ public class BluetoothDetailsHeaderController extends BluetoothDetailsController
     protected void refresh() {
         if (isAvailable()) {
             setHeaderProperties();
-            mHeaderController.done(mFragment.getActivity(), true /* rebindActions */);
+            mHeaderController.done(true /* rebindActions */);
         }
     }
 

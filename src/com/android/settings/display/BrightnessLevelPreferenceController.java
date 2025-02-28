@@ -14,11 +14,14 @@
 package com.android.settings.display;
 
 import static android.content.Intent.ACTION_SHOW_BRIGHTNESS_DIALOG;
+import static android.content.Intent.EXTRA_BRIGHTNESS_DIALOG_IS_FULL_WIDTH;
 
 import static com.android.settingslib.display.BrightnessUtils.GAMMA_SPACE_MAX;
 import static com.android.settingslib.display.BrightnessUtils.GAMMA_SPACE_MIN;
 import static com.android.settingslib.display.BrightnessUtils.convertLinearToGammaFloat;
 
+import android.annotation.Nullable;
+import android.app.ActivityOptions;
 import android.content.ContentResolver;
 import android.content.Context;
 import android.content.Intent;
@@ -29,21 +32,20 @@ import android.hardware.display.DisplayManager.DisplayListener;
 import android.net.Uri;
 import android.os.Handler;
 import android.os.Looper;
-import android.os.PowerManager;
-import android.os.RemoteException;
-import android.os.ServiceManager;
+import android.os.Process;
+import android.os.UserManager;
 import android.provider.Settings.System;
-import android.service.vr.IVrManager;
 import android.text.TextUtils;
-import android.util.Log;
 
-import androidx.annotation.VisibleForTesting;
 import androidx.preference.Preference;
 import androidx.preference.PreferenceScreen;
 
+import com.android.settings.R;
+import com.android.settings.Utils;
+import com.android.settings.accessibility.Flags;
+import com.android.settings.core.BasePreferenceController;
 import com.android.settings.core.PreferenceControllerMixin;
 import com.android.settings.core.SettingsBaseActivity;
-import com.android.settingslib.core.AbstractPreferenceController;
 import com.android.settingslib.core.lifecycle.Lifecycle;
 import com.android.settingslib.core.lifecycle.LifecycleObserver;
 import com.android.settingslib.core.lifecycle.events.OnStart;
@@ -52,24 +54,20 @@ import com.android.settingslib.transition.SettingsTransitionHelper;
 
 import java.text.NumberFormat;
 
-public class BrightnessLevelPreferenceController extends AbstractPreferenceController implements
+public class BrightnessLevelPreferenceController extends BasePreferenceController implements
         PreferenceControllerMixin, LifecycleObserver, OnStart, OnStop {
 
     private static final String TAG = "BrightnessPrefCtrl";
-    private static final String KEY_BRIGHTNESS = "brightness";
-    private static final Uri BRIGHTNESS_FOR_VR_URI;
-    private static final Uri BRIGHTNESS_ADJ_URI;
 
-    private final float mMinVrBrightness;
-    private final float mMaxVrBrightness;
+    private static final Uri BRIGHTNESS_ADJ_URI;
     private final ContentResolver mContentResolver;
     private final Handler mHandler = new Handler(Looper.getMainLooper());
     private final DisplayManager mDisplayManager;
-
+    @Nullable
     private Preference mPreference;
+    private boolean mInSetupWizard;
 
     static {
-        BRIGHTNESS_FOR_VR_URI = System.getUriFor(System.SCREEN_BRIGHTNESS_FOR_VR);
         BRIGHTNESS_ADJ_URI = System.getUriFor(System.SCREEN_AUTO_BRIGHTNESS_ADJ);
     }
 
@@ -96,50 +94,53 @@ public class BrightnessLevelPreferenceController extends AbstractPreferenceContr
         }
     };
 
-
     public BrightnessLevelPreferenceController(Context context, Lifecycle lifecycle) {
-        super(context);
+        this(context, context.getString(R.string.preference_key_brightness_level), lifecycle);
+    }
+
+    private BrightnessLevelPreferenceController(Context context, String key, Lifecycle lifecycle) {
+        super(context, key);
         mDisplayManager = context.getSystemService(DisplayManager.class);
 
         if (lifecycle != null) {
             lifecycle.addObserver(this);
         }
-        final PowerManager powerManager = context.getSystemService(PowerManager.class);
-
-        mMinVrBrightness = powerManager.getBrightnessConstraint(
-                PowerManager.BRIGHTNESS_CONSTRAINT_TYPE_MINIMUM_VR);
-        mMaxVrBrightness = powerManager.getBrightnessConstraint(
-                PowerManager.BRIGHTNESS_CONSTRAINT_TYPE_MAXIMUM_VR);
         mContentResolver = mContext.getContentResolver();
     }
 
-    @Override
-    public boolean isAvailable() {
-        return true;
+    public void setInSetupWizard(boolean inSetupWizard) {
+        mInSetupWizard = inSetupWizard;
     }
 
     @Override
-    public String getPreferenceKey() {
-        return KEY_BRIGHTNESS;
+    public int getAvailabilityStatus() {
+        if (mInSetupWizard && !Flags.addBrightnessSettingsInSuw()) {
+            return CONDITIONALLY_UNAVAILABLE;
+        }
+        return AVAILABLE;
     }
 
     @Override
     public void displayPreference(PreferenceScreen screen) {
         super.displayPreference(screen);
-        mPreference = screen.findPreference(KEY_BRIGHTNESS);
+        mPreference = screen.findPreference(getPreferenceKey());
     }
 
     @Override
     public void updateState(Preference preference) {
+        if (preference.isEnabled() && UserManager.get(mContext).hasBaseUserRestriction(
+                UserManager.DISALLOW_CONFIG_BRIGHTNESS, Process.myUserHandle())) {
+            preference.setEnabled(false);
+        }
         updatedSummary(preference);
     }
 
     @Override
     public void onStart() {
-        mContentResolver.registerContentObserver(BRIGHTNESS_FOR_VR_URI, false, mBrightnessObserver);
         mContentResolver.registerContentObserver(BRIGHTNESS_ADJ_URI, false, mBrightnessObserver);
         mDisplayManager.registerDisplayListener(mDisplayListener, mHandler,
                 DisplayManager.EVENT_FLAG_DISPLAY_BRIGHTNESS);
+        updatedSummary(mPreference);
     }
 
     @Override
@@ -154,9 +155,15 @@ public class BrightnessLevelPreferenceController extends AbstractPreferenceContr
             return false;
         }
         final Intent intent = new Intent(ACTION_SHOW_BRIGHTNESS_DIALOG);
+        intent.setPackage(Utils.SYSTEMUI_PACKAGE_NAME);
         intent.putExtra(SettingsBaseActivity.EXTRA_PAGE_TRANSITION_TYPE,
                 SettingsTransitionHelper.TransitionType.TRANSITION_NONE);
-        mContext.startActivity(intent);
+        intent.putExtra(EXTRA_BRIGHTNESS_DIALOG_IS_FULL_WIDTH, true);
+
+        // Start activity in the same task and pass fade animations
+        final ActivityOptions options = ActivityOptions.makeCustomAnimation(mContext,
+                android.R.anim.fade_in, android.R.anim.fade_out);
+        mContext.startActivityForResult(preference.getKey(), intent, 0, options.toBundle());
         return true;
     }
 
@@ -168,16 +175,10 @@ public class BrightnessLevelPreferenceController extends AbstractPreferenceContr
 
     private double getCurrentBrightness() {
         int value = 0;
-        if (isInVrMode()) {
-            value = convertLinearToGammaFloat(System.getFloat(mContentResolver,
-                    System.SCREEN_BRIGHTNESS_FOR_VR_FLOAT, mMaxVrBrightness),
-                    mMinVrBrightness, mMaxVrBrightness);
-        } else {
-            final BrightnessInfo info = mContext.getDisplay().getBrightnessInfo();
-            if (info != null) {
-                value = convertLinearToGammaFloat(info.brightness, info.brightnessMinimum,
-                        info.brightnessMaximum);
-            }
+        final BrightnessInfo info = mContext.getDisplay().getBrightnessInfo();
+        if (info != null) {
+            value = convertLinearToGammaFloat(info.brightness, info.brightnessMinimum,
+                    info.brightnessMaximum);
         }
         return getPercentage(value, GAMMA_SPACE_MIN, GAMMA_SPACE_MAX);
     }
@@ -190,24 +191,5 @@ public class BrightnessLevelPreferenceController extends AbstractPreferenceContr
             return 0.0;
         }
         return (value - min) / (max - min);
-    }
-
-    @VisibleForTesting
-    IVrManager safeGetVrManager() {
-        return IVrManager.Stub.asInterface(ServiceManager.getService(
-                Context.VR_SERVICE));
-    }
-
-    @VisibleForTesting
-    boolean isInVrMode() {
-        IVrManager vrManager = safeGetVrManager();
-        if (vrManager != null) {
-            try {
-                return vrManager.getVrModeState();
-            } catch (RemoteException e) {
-                Log.e(TAG, "Failed to check vr mode!", e);
-            }
-        }
-        return false;
     }
 }

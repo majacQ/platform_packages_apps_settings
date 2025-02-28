@@ -15,9 +15,11 @@
  */
 package com.android.settings.testutils.shadow;
 
+import android.annotation.NonNull;
 import android.annotation.UserIdInt;
 import android.app.admin.DevicePolicyManager;
 import android.content.Context;
+import android.content.Intent;
 
 import com.android.internal.util.ArrayUtils;
 import com.android.settingslib.RestrictedLockUtils.EnforcedAdmin;
@@ -33,10 +35,13 @@ public class ShadowRestrictedLockUtilsInternal {
     private static boolean sIsRestricted;
     private static boolean sHasSystemFeature;
     private static boolean sMaximumTimeToLockIsSet;
+    private static boolean sMteOverridden;
     private static String[] sRestrictedPkgs;
     private static DevicePolicyManager sDevicePolicyManager;
     private static String[] sDisabledTypes;
     private static int sKeyguardDisabledFeatures;
+    private static String[] sEcmRestrictedPkgs;
+    private static boolean sAccessibilityServiceRestricted;
 
     @Resetter
     public static void reset() {
@@ -45,10 +50,13 @@ public class ShadowRestrictedLockUtilsInternal {
         sKeyguardDisabledFeatures = 0;
         sDisabledTypes = new String[0];
         sMaximumTimeToLockIsSet = false;
+        sMteOverridden = false;
+        sEcmRestrictedPkgs = new String[0];
+        sAccessibilityServiceRestricted = false;
     }
 
     @Implementation
-    protected static EnforcedAdmin checkIfMeteredDataRestricted(Context context,
+    protected static EnforcedAdmin checkIfMeteredDataUsageUserControlDisabled(Context context,
             String packageName, int userId) {
         if (sIsRestricted) {
             return new EnforcedAdmin();
@@ -101,8 +109,38 @@ public class ShadowRestrictedLockUtilsInternal {
         return sMaximumTimeToLockIsSet ? new EnforcedAdmin() : null;
     }
 
+    @Implementation
+    public static EnforcedAdmin checkIfMteIsDisabled(Context context) {
+        return sMteOverridden ? new EnforcedAdmin() : null;
+    }
+
+    public static EnforcedAdmin checkIfAccessibilityServiceDisallowed(Context context,
+            String packageName, int userId) {
+        return sAccessibilityServiceRestricted ? new EnforcedAdmin() : null;
+    }
+
+    @Implementation
+    public static Intent checkIfRequiresEnhancedConfirmation(@NonNull Context context,
+            @NonNull String settingIdentifier, @NonNull String packageName) {
+        if (ArrayUtils.contains(sEcmRestrictedPkgs, packageName)) {
+            return new Intent();
+        }
+
+        return null;
+    }
+
+    @Implementation
+    public static boolean isEnhancedConfirmationRestricted(@NonNull Context context,
+            @NonNull String settingIdentifier, @NonNull String packageName) {
+        return false;
+    }
+
     public static void setRestricted(boolean restricted) {
         sIsRestricted = restricted;
+    }
+
+    public static void setEcmRestrictedPkgs(String... pkgs) {
+        sEcmRestrictedPkgs = pkgs;
     }
 
     public static void setRestrictedPkgs(String... pkgs) {
@@ -131,5 +169,9 @@ public class ShadowRestrictedLockUtilsInternal {
 
     public static void setMaximumTimeToLockIsSet(boolean isSet) {
         sMaximumTimeToLockIsSet = isSet;
+    }
+
+    public static void setMteIsDisabled(boolean isSet) {
+        sMteOverridden = isSet;
     }
 }

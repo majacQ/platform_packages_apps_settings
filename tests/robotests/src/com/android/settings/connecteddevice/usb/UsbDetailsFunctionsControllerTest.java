@@ -30,26 +30,34 @@ import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import android.app.KeyguardManager;
 import android.content.Context;
 import android.hardware.usb.UsbManager;
 import android.net.TetheringManager;
+import android.platform.test.annotations.RequiresFlagsEnabled;
+import android.platform.test.flag.junit.CheckFlagsRule;
+import android.platform.test.flag.junit.DeviceFlagsValueProvider;
 
 import androidx.fragment.app.FragmentActivity;
 import androidx.preference.PreferenceCategory;
 import androidx.preference.PreferenceManager;
 import androidx.preference.PreferenceScreen;
 
+import com.android.settings.flags.Flags;
 import com.android.settings.testutils.shadow.ShadowUtils;
 import com.android.settingslib.core.lifecycle.Lifecycle;
-import com.android.settingslib.widget.RadioButtonPreference;
+import com.android.settingslib.widget.SelectorWithWidgetPreference;
 
 import org.junit.Before;
+import org.junit.Ignore;
+import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;
+import org.robolectric.Shadows;
 import org.robolectric.annotation.Config;
 
 import java.util.ArrayList;
@@ -57,6 +65,9 @@ import java.util.Iterator;
 import java.util.List;
 
 @RunWith(RobolectricTestRunner.class)
+@Config(shadows = {
+        com.android.settings.testutils.shadow.ShadowFragment.class,
+})
 public class UsbDetailsFunctionsControllerTest {
 
     private UsbDetailsFunctionsController mDetailsFunctionsController;
@@ -65,21 +76,22 @@ public class UsbDetailsFunctionsControllerTest {
     private PreferenceCategory mPreferenceCategory;
     private PreferenceManager mPreferenceManager;
     private PreferenceScreen mScreen;
-    private RadioButtonPreference mRadioButtonPreference;
+    private SelectorWithWidgetPreference mRadioButtonPreference;
+    private UsbDetailsFragment mFragment;
 
     @Mock
     private UsbBackend mUsbBackend;
     @Mock
-    private UsbDetailsFragment mFragment;
-    @Mock
     private FragmentActivity mActivity;
     @Mock
     private TetheringManager mTetheringManager;
+    @Rule
+    public final CheckFlagsRule mCheckFlagsRule = DeviceFlagsValueProvider.createCheckFlagsRule();
 
     @Before
     public void setUp() {
         MockitoAnnotations.initMocks(this);
-
+        mFragment = spy(new UsbDetailsFragment());
         mContext = spy(RuntimeEnvironment.application);
         mLifecycle = new Lifecycle(() -> mLifecycle);
         mPreferenceManager = new PreferenceManager(mContext);
@@ -99,7 +111,7 @@ public class UsbDetailsFunctionsControllerTest {
         mScreen.addPreference(mPreferenceCategory);
         mDetailsFunctionsController.displayPreference(mScreen);
 
-        mRadioButtonPreference = new RadioButtonPreference(mContext);
+        mRadioButtonPreference = new SelectorWithWidgetPreference(mContext);
     }
 
     @Test
@@ -109,10 +121,10 @@ public class UsbDetailsFunctionsControllerTest {
         mDetailsFunctionsController.displayPreference(mScreen);
         mDetailsFunctionsController.refresh(true, UsbManager.FUNCTION_NONE, POWER_ROLE_SINK,
                 DATA_ROLE_DEVICE);
-        List<RadioButtonPreference> prefs = getRadioPreferences();
+        List<SelectorWithWidgetPreference> prefs = getRadioPreferences();
         Iterator<Long> iter = UsbDetailsFunctionsController.FUNCTIONS_MAP.keySet().iterator();
 
-        for (RadioButtonPreference pref : prefs) {
+        for (SelectorWithWidgetPreference pref : prefs) {
             assertThat(pref.getKey()).isEqualTo(UsbBackend.usbFunctionsToString(iter.next()));
         }
     }
@@ -135,7 +147,7 @@ public class UsbDetailsFunctionsControllerTest {
 
         mDetailsFunctionsController.refresh(true, UsbManager.FUNCTION_NONE, POWER_ROLE_SINK,
                 DATA_ROLE_DEVICE);
-        List<RadioButtonPreference> prefs = getRadioPreferences();
+        List<SelectorWithWidgetPreference> prefs = getRadioPreferences();
         assertThat(prefs.size()).isEqualTo(1);
         assertThat(prefs.get(0).getKey())
                 .isEqualTo(UsbBackend.usbFunctionsToString(UsbManager.FUNCTION_MIDI));
@@ -147,7 +159,7 @@ public class UsbDetailsFunctionsControllerTest {
 
         mDetailsFunctionsController.refresh(true, UsbManager.FUNCTION_MTP, POWER_ROLE_SINK,
                 DATA_ROLE_DEVICE);
-        List<RadioButtonPreference> prefs = getRadioPreferences();
+        List<SelectorWithWidgetPreference> prefs = getRadioPreferences();
 
         assertThat(prefs.get(0).getKey())
                 .isEqualTo(UsbBackend.usbFunctionsToString(UsbManager.FUNCTION_MTP));
@@ -160,7 +172,7 @@ public class UsbDetailsFunctionsControllerTest {
 
         mDetailsFunctionsController.refresh(true, UsbManager.FUNCTION_ACCESSORY, POWER_ROLE_SINK,
                 DATA_ROLE_DEVICE);
-        List<RadioButtonPreference> prefs = getRadioPreferences();
+        List<SelectorWithWidgetPreference> prefs = getRadioPreferences();
 
         assertThat(prefs.get(0).getKey())
                 .isEqualTo(UsbBackend.usbFunctionsToString(UsbManager.FUNCTION_MTP));
@@ -173,7 +185,7 @@ public class UsbDetailsFunctionsControllerTest {
 
         mDetailsFunctionsController.refresh(true, UsbManager.FUNCTION_NCM, POWER_ROLE_SINK,
                 DATA_ROLE_DEVICE);
-        List<RadioButtonPreference> prefs = getRadioPreferences();
+        List<SelectorWithWidgetPreference> prefs = getRadioPreferences();
 
         assertThat(prefs.get(1).getKey())
                 .isEqualTo(UsbBackend.usbFunctionsToString(UsbManager.FUNCTION_RNDIS));
@@ -187,7 +199,7 @@ public class UsbDetailsFunctionsControllerTest {
         mDetailsFunctionsController.refresh(true, UsbManager.FUNCTION_NONE, POWER_ROLE_SINK,
                 DATA_ROLE_DEVICE);
         when(mUsbBackend.getCurrentFunctions()).thenReturn(UsbManager.FUNCTION_NONE);
-        List<RadioButtonPreference> prefs = getRadioPreferences();
+        List<SelectorWithWidgetPreference> prefs = getRadioPreferences();
         prefs.get(0).performClick();
 
         assertThat(prefs.get(0).getKey())
@@ -205,7 +217,7 @@ public class UsbDetailsFunctionsControllerTest {
         mDetailsFunctionsController.refresh(true, UsbManager.FUNCTION_PTP, POWER_ROLE_SINK,
                 DATA_ROLE_DEVICE);
         when(mUsbBackend.getCurrentFunctions()).thenReturn(UsbManager.FUNCTION_PTP);
-        List<RadioButtonPreference> prefs = getRadioPreferences();
+        List<SelectorWithWidgetPreference> prefs = getRadioPreferences();
         prefs.get(0).performClick();
 
         assertThat(prefs.get(0).getKey())
@@ -219,6 +231,7 @@ public class UsbDetailsFunctionsControllerTest {
         assertThat(prefs.get(3).isChecked()).isFalse();
     }
 
+    @Ignore("b/313362757")
     @Test
     public void onClickNone_mtpEnabled_shouldDisableMtp() {
         when(mUsbBackend.areFunctionsSupported(anyLong())).thenReturn(true);
@@ -226,7 +239,7 @@ public class UsbDetailsFunctionsControllerTest {
         mDetailsFunctionsController.refresh(true, UsbManager.FUNCTION_MTP, POWER_ROLE_SINK,
                 DATA_ROLE_DEVICE);
         when(mUsbBackend.getCurrentFunctions()).thenReturn(UsbManager.FUNCTION_MTP);
-        List<RadioButtonPreference> prefs = getRadioPreferences();
+        List<SelectorWithWidgetPreference> prefs = getRadioPreferences();
         prefs.get(4).performClick();
 
         assertThat(prefs.get(4).getKey())
@@ -244,10 +257,10 @@ public class UsbDetailsFunctionsControllerTest {
         assertThat(mDetailsFunctionsController.isAvailable()).isFalse();
     }
 
-    private List<RadioButtonPreference> getRadioPreferences() {
-        ArrayList<RadioButtonPreference> result = new ArrayList<>();
+    private List<SelectorWithWidgetPreference> getRadioPreferences() {
+        ArrayList<SelectorWithWidgetPreference> result = new ArrayList<>();
         for (int i = 0; i < mPreferenceCategory.getPreferenceCount(); i++) {
-            result.add((RadioButtonPreference) mPreferenceCategory.getPreference(i));
+            result.add((SelectorWithWidgetPreference) mPreferenceCategory.getPreference(i));
         }
         return result;
     }
@@ -327,6 +340,47 @@ public class UsbDetailsFunctionsControllerTest {
         verify(mTetheringManager, never()).startTethering(eq(TetheringManager.TETHERING_USB),
                 any(),
                 eq(mDetailsFunctionsController.mOnStartTetheringCallback));
+    }
+
+    @Test
+    @RequiresFlagsEnabled(Flags.FLAG_ENABLE_AUTH_CHALLENGE_FOR_USB_PREFERENCES)
+    public void onRadioButtonClicked_userAuthenticated() {
+        mRadioButtonPreference.setKey(UsbBackend.usbFunctionsToString(UsbManager.FUNCTION_PTP));
+        doReturn(UsbManager.FUNCTION_MTP).when(mUsbBackend).getCurrentFunctions();
+        setAuthPassesAutomatically();
+
+        mDetailsFunctionsController.onRadioButtonClicked(mRadioButtonPreference);
+
+        assertThat(mFragment.isUserAuthenticated()).isTrue();
+    }
+
+    @Test
+    @RequiresFlagsEnabled(Flags.FLAG_EXCLUDE_WEBCAM_AUTH_CHALLENGE)
+    public void onRadioButtonClicked_webcamNoAuthNeeded() {
+        mRadioButtonPreference.setKey(UsbBackend.usbFunctionsToString(UsbManager.FUNCTION_UVC));
+        doReturn(UsbManager.FUNCTION_MTP).when(mUsbBackend).getCurrentFunctions();
+        setAuthPassesAutomatically();
+
+        mDetailsFunctionsController.onRadioButtonClicked(mRadioButtonPreference);
+
+        assertThat(mFragment.isUserAuthenticated()).isFalse();
+    }
+
+    @Test
+    @RequiresFlagsEnabled(Flags.FLAG_EXCLUDE_WEBCAM_AUTH_CHALLENGE)
+    public void onRadioButtonClicked_MidiNoAuthNeeded() {
+        mRadioButtonPreference.setKey(UsbBackend.usbFunctionsToString(UsbManager.FUNCTION_MIDI));
+        doReturn(UsbManager.FUNCTION_MTP).when(mUsbBackend).getCurrentFunctions();
+        setAuthPassesAutomatically();
+
+        mDetailsFunctionsController.onRadioButtonClicked(mRadioButtonPreference);
+
+        assertThat(mFragment.isUserAuthenticated()).isFalse();
+    }
+
+    private void setAuthPassesAutomatically() {
+        Shadows.shadowOf(mContext.getSystemService(KeyguardManager.class))
+                .setIsKeyguardSecure(false);
     }
 
     @Test

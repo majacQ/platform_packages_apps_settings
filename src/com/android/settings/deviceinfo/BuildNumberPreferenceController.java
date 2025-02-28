@@ -17,6 +17,7 @@
 package com.android.settings.deviceinfo;
 
 import android.app.Activity;
+import android.app.ActivityManager;
 import android.app.settings.SettingsEnums;
 import android.content.ComponentName;
 import android.content.Context;
@@ -29,22 +30,25 @@ import android.text.BidiFormatter;
 import android.text.TextUtils;
 import android.widget.Toast;
 
+import androidx.annotation.VisibleForTesting;
 import androidx.preference.Preference;
 
 import com.android.internal.logging.nano.MetricsProto.MetricsEvent;
 import com.android.settings.R;
 import com.android.settings.Utils;
+import com.android.settings.biometrics.IdentityCheckBiometricErrorDialog;
 import com.android.settings.core.BasePreferenceController;
 import com.android.settings.core.InstrumentedPreferenceFragment;
 import com.android.settings.overlay.FeatureFactory;
 import com.android.settings.password.ChooseLockSettingsHelper;
-import com.android.settings.slices.Sliceable;
+import com.android.settings.password.ConfirmDeviceCredentialActivity;
 import com.android.settingslib.RestrictedLockUtils;
 import com.android.settingslib.RestrictedLockUtilsInternal;
 import com.android.settingslib.core.instrumentation.MetricsFeatureProvider;
 import com.android.settingslib.core.lifecycle.LifecycleObserver;
 import com.android.settingslib.core.lifecycle.events.OnStart;
 import com.android.settingslib.development.DevelopmentSettingsEnabler;
+import com.android.settingslib.utils.StringUtil;
 
 import com.google.android.setupcompat.util.WizardManagerHelper;
 
@@ -53,6 +57,7 @@ public class BuildNumberPreferenceController extends BasePreferenceController im
 
     static final int TAPS_TO_BE_A_DEVELOPER = 7;
     static final int REQUEST_CONFIRM_PASSWORD_FOR_DEV_PREF = 100;
+    static final int REQUEST_IDENTITY_CHECK_FOR_DEV_PREF = 101;
 
     private Activity mActivity;
     private InstrumentedPreferenceFragment mFragment;
@@ -68,7 +73,7 @@ public class BuildNumberPreferenceController extends BasePreferenceController im
     public BuildNumberPreferenceController(Context context, String key) {
         super(context, key);
         mUm = (UserManager) context.getSystemService(Context.USER_SERVICE);
-        mMetricsFeatureProvider = FeatureFactory.getFactory(context).getMetricsFeatureProvider();
+        mMetricsFeatureProvider = FeatureFactory.getFeatureFactory().getMetricsFeatureProvider();
     }
 
     public void setHost(InstrumentedPreferenceFragment fragment) {
@@ -103,16 +108,11 @@ public class BuildNumberPreferenceController extends BasePreferenceController im
     }
 
     @Override
-    public void copy() {
-        Sliceable.setCopyContent(mContext, getSummary(), mContext.getText(R.string.build_number));
-    }
-
-    @Override
     public boolean handlePreferenceTreeClick(Preference preference) {
         if (!TextUtils.equals(preference.getKey(), getPreferenceKey())) {
             return false;
         }
-        if (Utils.isMonkeyRunning()) {
+        if (isUserAMonkey()) {
             return false;
         }
         // Don't enable developer options for secondary non-demo users.
@@ -185,9 +185,8 @@ public class BuildNumberPreferenceController extends BasePreferenceController im
                     mDevHitToast.cancel();
                 }
                 mDevHitToast = Toast.makeText(mContext,
-                        mContext.getResources().getQuantityString(
-                                R.plurals.show_dev_countdown, mDevHitCountdown,
-                                mDevHitCountdown),
+                        StringUtil.getIcuPluralsString(mContext, mDevHitCountdown,
+                                R.string.show_dev_countdown),
                         Toast.LENGTH_SHORT);
                 mDevHitToast.show();
             }
@@ -221,11 +220,35 @@ public class BuildNumberPreferenceController extends BasePreferenceController im
      * @return if activity result is handled.
      */
     public boolean onActivityResult(int requestCode, int resultCode, Intent data) {
-        if (requestCode != REQUEST_CONFIRM_PASSWORD_FOR_DEV_PREF) {
+        if (requestCode != REQUEST_CONFIRM_PASSWORD_FOR_DEV_PREF
+                && requestCode != REQUEST_IDENTITY_CHECK_FOR_DEV_PREF) {
             return false;
         }
-        if (resultCode == Activity.RESULT_OK) {
-            enableDevelopmentSettings();
+        if (requestCode == REQUEST_CONFIRM_PASSWORD_FOR_DEV_PREF
+                && resultCode == Activity.RESULT_OK) {
+            final int userId = mContext.getUserId();
+            final Utils.BiometricStatus biometricAuthStatus =
+                    Utils.requestBiometricAuthenticationForMandatoryBiometrics(mContext,
+                            false /* biometricsAuthenticationRequested */,
+                            userId);
+            if (biometricAuthStatus == Utils.BiometricStatus.OK) {
+                Utils.launchBiometricPromptForMandatoryBiometrics(mFragment,
+                        REQUEST_IDENTITY_CHECK_FOR_DEV_PREF,
+                        userId, false /* hideBackground */);
+            } else if (biometricAuthStatus == Utils.BiometricStatus.NOT_ACTIVE) {
+                enableDevelopmentSettings();
+            } else {
+                IdentityCheckBiometricErrorDialog.showBiometricErrorDialog(mFragment.getActivity(),
+                        biometricAuthStatus, true /* twoFactorAuthentication */);
+            }
+        } else if (requestCode == REQUEST_IDENTITY_CHECK_FOR_DEV_PREF) {
+            if (resultCode == Activity.RESULT_OK) {
+                enableDevelopmentSettings();
+            } else if (resultCode
+                    == ConfirmDeviceCredentialActivity.BIOMETRIC_LOCKOUT_ERROR_RESULT) {
+                IdentityCheckBiometricErrorDialog.showBiometricErrorDialog(mFragment.getActivity(),
+                        Utils.BiometricStatus.LOCKOUT, true /* twoFactorAuthentication */);
+            }
         }
         mProcessingLastDevHit = false;
         return true;
@@ -244,5 +267,12 @@ public class BuildNumberPreferenceController extends BasePreferenceController im
         mDevHitToast = Toast.makeText(mContext, R.string.show_dev_on,
                 Toast.LENGTH_LONG);
         mDevHitToast.show();
+
+        FeatureFactory.getFeatureFactory().getSearchFeatureProvider().sendPreIndexIntent(mContext);
+    }
+
+    @VisibleForTesting
+    protected boolean isUserAMonkey() {
+        return ActivityManager.isUserAMonkey();
     }
 }

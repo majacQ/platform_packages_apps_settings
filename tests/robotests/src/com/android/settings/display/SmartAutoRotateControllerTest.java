@@ -39,7 +39,11 @@ import android.provider.Settings;
 import androidx.preference.Preference;
 
 import com.android.settings.testutils.ResolveInfoBuilder;
+import com.android.settings.testutils.shadow.ShadowDeviceStateRotationLockSettingsManager;
+import com.android.settings.testutils.shadow.ShadowRotationPolicy;
 import com.android.settings.testutils.shadow.ShadowSensorPrivacyManager;
+import com.android.settings.testutils.shadow.ShadowSystemSettings;
+import com.android.settingslib.devicestate.DeviceStateRotationLockSettingsManager;
 
 import org.junit.Before;
 import org.junit.Test;
@@ -50,9 +54,10 @@ import org.mockito.MockitoAnnotations;
 import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;
 import org.robolectric.annotation.Config;
+import org.robolectric.shadow.api.Shadow;
 
 @RunWith(RobolectricTestRunner.class)
-@Config(shadows = ShadowSensorPrivacyManager.class)
+@Config(shadows = {ShadowSensorPrivacyManager.class, ShadowSystemSettings.class})
 public class SmartAutoRotateControllerTest {
 
     private static final String PACKAGE_NAME = "package_name";
@@ -63,6 +68,8 @@ public class SmartAutoRotateControllerTest {
     @Mock
     private Preference mPreference;
     private ContentResolver mContentResolver;
+    private final DeviceStateRotationLockSettingsManager mDeviceStateAutoRotateSettingsManager =
+            DeviceStateRotationLockSettingsManager.getInstance(RuntimeEnvironment.application);
 
     @Before
     public void setUp() {
@@ -122,6 +129,34 @@ public class SmartAutoRotateControllerTest {
         assertThat(mController.getAvailabilityStatus()).isEqualTo(DISABLED_DEPENDENT_SETTING);
     }
 
+    @Test
+    @Config(shadows = {
+            ShadowDeviceStateRotationLockSettingsManager.class,
+            ShadowRotationPolicy.class
+    })
+    public void getAvailabilityStatus_deviceStateRotationLocked_returnDisableDependentSetting() {
+        enableDeviceStateRotation();
+        lockDeviceStateRotation();
+
+        int availabilityStatus = mController.getAvailabilityStatus();
+
+        assertThat(availabilityStatus).isEqualTo(DISABLED_DEPENDENT_SETTING);
+    }
+
+    @Test
+    @Config(shadows = {
+            ShadowDeviceStateRotationLockSettingsManager.class,
+            ShadowRotationPolicy.class
+    })
+    public void getAvailabilityStatus_deviceStateRotationUnlocked_returnAvailable() {
+        enableDeviceStateRotation();
+        unlockDeviceStateRotation();
+
+        int availabilityStatus = mController.getAvailabilityStatus();
+
+        assertThat(availabilityStatus).isEqualTo(AVAILABLE);
+    }
+
     private void enableAutoRotation() {
         Settings.System.putIntForUser(mContentResolver,
                 Settings.System.ACCELEROMETER_ROTATION, 1, UserHandle.USER_CURRENT);
@@ -130,5 +165,22 @@ public class SmartAutoRotateControllerTest {
     private void disableAutoRotation() {
         Settings.System.putIntForUser(mContentResolver,
                 Settings.System.ACCELEROMETER_ROTATION, 0, UserHandle.USER_CURRENT);
+    }
+
+    private void enableDeviceStateRotation() {
+        ShadowRotationPolicy.setRotationSupported(true);
+        ShadowDeviceStateRotationLockSettingsManager.setDeviceStateRotationLockEnabled(true);
+    }
+
+    private void lockDeviceStateRotation() {
+        ShadowDeviceStateRotationLockSettingsManager shadowManager =
+                Shadow.extract(mDeviceStateAutoRotateSettingsManager);
+        shadowManager.setRotationLockedForAllStates(true);
+    }
+
+    private void unlockDeviceStateRotation() {
+        ShadowDeviceStateRotationLockSettingsManager shadowManager =
+                Shadow.extract(mDeviceStateAutoRotateSettingsManager);
+        shadowManager.setRotationLockedForAllStates(false);
     }
 }

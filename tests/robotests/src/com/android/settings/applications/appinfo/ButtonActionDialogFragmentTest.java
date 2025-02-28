@@ -18,7 +18,9 @@ package com.android.settings.applications.appinfo;
 import static com.google.common.truth.Truth.assertThat;
 
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.verify;
 
@@ -48,8 +50,6 @@ public class ButtonActionDialogFragmentTest {
 
     private static final int FORCE_STOP_ID = ButtonActionDialogFragment.DialogType.FORCE_STOP;
     private static final int DISABLE_ID = ButtonActionDialogFragment.DialogType.DISABLE;
-    private static final int SPECIAL_DISABLE_ID =
-            ButtonActionDialogFragment.DialogType.SPECIAL_DISABLE;
     @Mock
     private TestFragment mTargetFragment;
     private ButtonActionDialogFragment mFragment;
@@ -70,6 +70,21 @@ public class ButtonActionDialogFragmentTest {
         mFragment.onClick(null, 0);
 
         verify(mTargetFragment).handleDialogClick(anyInt());
+    }
+
+    @Test
+    public void testOnClick_forceStop_dismissDialog() {
+        ButtonActionDialogFragment fragment =
+                ButtonActionDialogFragment.newInstance(FORCE_STOP_ID);
+        FragmentController.setupFragment(fragment, FragmentActivity.class, 0 /* containerViewId */,
+                null /* bundle */);
+        fragment.setTargetFragment(mTargetFragment, 0);
+        doNothing().when(mTargetFragment).handleDialogClick(anyInt());
+        final AlertDialog dialog = mock(AlertDialog.class);
+
+        fragment.onClick(dialog, 0);
+
+        verify(dialog).dismiss();
     }
 
     @Test
@@ -96,26 +111,6 @@ public class ButtonActionDialogFragmentTest {
     @Test
     public void testOnCreateDialog_disableDialog() {
         ButtonActionDialogFragment fragment = ButtonActionDialogFragment.newInstance(DISABLE_ID);
-        FragmentController.setupFragment(fragment, FragmentActivity.class, 0 /* containerViewId */,
-                null /* bundle */);
-        final AlertDialog dialog = ShadowAlertDialogCompat.getLatestAlertDialog();
-
-        assertThat(dialog).isNotNull();
-
-        ShadowAlertDialogCompat shadowDialog = ShadowAlertDialogCompat.shadowOf(dialog);
-
-        assertThat(shadowDialog.getMessage()).isEqualTo(
-                mShadowContext.getString(R.string.app_disable_dlg_text));
-        assertThat(dialog.getButton(DialogInterface.BUTTON_POSITIVE).getText()).isEqualTo(
-                mShadowContext.getString(R.string.app_disable_dlg_positive));
-        assertThat(dialog.getButton(DialogInterface.BUTTON_NEGATIVE).getText()).isEqualTo(
-                mShadowContext.getString(R.string.dlg_cancel));
-    }
-
-    @Test
-    public void testOnCreateDialog_specialDisableDialog() {
-        ButtonActionDialogFragment fragment =
-                ButtonActionDialogFragment.newInstance(SPECIAL_DISABLE_ID);
         FragmentController.setupFragment(fragment, FragmentActivity.class, 0 /* containerViewId */,
                 null /* bundle */);
         final AlertDialog dialog = ShadowAlertDialogCompat.getLatestAlertDialog();

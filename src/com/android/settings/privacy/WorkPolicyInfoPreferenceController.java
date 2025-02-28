@@ -24,6 +24,8 @@ import androidx.preference.Preference;
 import com.android.settings.core.BasePreferenceController;
 import com.android.settings.enterprise.EnterprisePrivacyFeatureProvider;
 import com.android.settings.overlay.FeatureFactory;
+import com.android.settings.safetycenter.SafetyCenterManagerWrapper;
+
 
 public class WorkPolicyInfoPreferenceController extends BasePreferenceController {
 
@@ -32,20 +34,23 @@ public class WorkPolicyInfoPreferenceController extends BasePreferenceController
     public WorkPolicyInfoPreferenceController(Context context, String preferenceKey) {
         super(context, preferenceKey);
         mEnterpriseProvider =
-                FeatureFactory.getFactory(context).getEnterprisePrivacyFeatureProvider(context);
+                FeatureFactory.getFeatureFactory().getEnterprisePrivacyFeatureProvider();
     }
 
     @Override
     public int getAvailabilityStatus() {
-        return mEnterpriseProvider.hasWorkPolicyInfo()
-                ? AVAILABLE_UNSEARCHABLE
+        // Your Work policy info will be shown in the Safety Center.
+        // No need to show it in the privacy settings.
+        return !SafetyCenterManagerWrapper.get().isEnabled(mContext)
+                && mEnterpriseProvider.hasWorkPolicyInfo()
+                ? AVAILABLE
                 : UNSUPPORTED_ON_DEVICE;
     }
 
     @Override
     public boolean handlePreferenceTreeClick(Preference preference) {
         if (TextUtils.equals(getPreferenceKey(), preference.getKey())) {
-            mEnterpriseProvider.showWorkPolicyInfo();
+            mEnterpriseProvider.showWorkPolicyInfo(preference.getContext());
             return true;
         }
         return false;

@@ -15,7 +15,6 @@
  */
 package com.android.settings;
 
-import android.annotation.NonNull;
 import android.app.Activity;
 import android.app.admin.DevicePolicyManager;
 import android.content.DialogInterface;
@@ -31,10 +30,11 @@ import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.Spinner;
 
+import androidx.annotation.NonNull;
 import androidx.appcompat.app.AlertDialog;
 
 import com.android.internal.widget.LockPatternUtils;
-import com.android.settings.TrustedCredentialsSettings.CertHolder;
+import com.android.settings.TrustedCredentialsFragment.CertHolder;
 import com.android.settingslib.RestrictedLockUtils;
 
 import java.security.cert.X509Certificate;
@@ -171,8 +171,8 @@ class TrustedCredentialsDialogBuilder extends AlertDialog.Builder {
             } else {
                 new AlertDialog.Builder(mActivity)
                         .setMessage(R.string.trusted_credentials_remove_confirmation)
-                        .setPositiveButton(android.R.string.yes, onConfirm)
-                        .setNegativeButton(android.R.string.no, null)
+                        .setPositiveButton(android.R.string.ok, onConfirm)
+                        .setNegativeButton(android.R.string.cancel, null)
                         .show();
 
             }
@@ -309,6 +309,8 @@ class TrustedCredentialsDialogBuilder extends AlertDialog.Builder {
 
             LinearLayout certLayout = new LinearLayout(mActivity);
             certLayout.setOrientation(LinearLayout.VERTICAL);
+            // Prevent content overlapping with spinner
+            certLayout.setClipChildren(true);
             certLayout.addView(spinner);
             for (int i = 0; i < views.size(); ++i) {
                 View certificateView = views.get(i);

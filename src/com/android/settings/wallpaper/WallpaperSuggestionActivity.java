@@ -17,7 +17,6 @@
 package com.android.settings.wallpaper;
 
 import android.app.WallpaperManager;
-import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 
@@ -42,19 +41,20 @@ public class WallpaperSuggestionActivity extends StyleSuggestionActivityBase imp
     private static final String WALLPAPER_FOCUS = "focus_wallpaper";
     private static final String WALLPAPER_ONLY = "wallpaper_only";
     private static final String LAUNCHED_SUW = "app_launched_suw";
-
-    private String mWallpaperLaunchExtra;
+    private static final String LAUNCH_SOURCE_SETTINGS_SEARCH = "app_launched_settings_search";
 
     @Override
     protected void addExtras(Intent intent) {
+        String wallpaperLaunchExtra =
+                getResources().getString(R.string.config_wallpaper_picker_launch_extra);;
         if (WizardManagerHelper.isAnySetupWizard(intent)) {
             intent.putExtra(WALLPAPER_FLAVOR_EXTRA, WALLPAPER_ONLY);
-
-            mWallpaperLaunchExtra =
-                    getResources().getString(R.string.config_wallpaper_picker_launch_extra);
-            intent.putExtra(mWallpaperLaunchExtra, LAUNCHED_SUW);
+            intent.putExtra(wallpaperLaunchExtra, LAUNCHED_SUW);
         } else {
+            // This is the case when user enter the wallpaper picker from the search result entry
+            // on the Settings app
             intent.putExtra(WALLPAPER_FLAVOR_EXTRA, WALLPAPER_FOCUS);
+            intent.putExtra(wallpaperLaunchExtra, LAUNCH_SOURCE_SETTINGS_SEARCH);
         }
     }
 
@@ -81,9 +81,8 @@ public class WallpaperSuggestionActivity extends StyleSuggestionActivityBase imp
                     SearchIndexableRaw data = new SearchIndexableRaw(context);
                     data.title = controller.getTitle();
                     data.screenTitle = data.title;
-                    ComponentName component = controller.getComponentName();
-                    data.intentTargetPackage = component.getPackageName();
-                    data.intentTargetClass = component.getClassName();
+                    data.intentTargetPackage = context.getPackageName();
+                    data.intentTargetClass = WallpaperSuggestionActivity.class.getName();
                     data.intentAction = Intent.ACTION_MAIN;
                     data.key = SUPPORT_SEARCH_INDEX_KEY;
                     data.keywords = controller.getKeywords();

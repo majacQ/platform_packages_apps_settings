@@ -31,8 +31,8 @@ import com.android.settings.core.BasePreferenceController;
 import com.android.settings.deletionhelper.ActivationWarningFragment;
 import com.android.settings.overlay.FeatureFactory;
 import com.android.settings.widget.GenericSwitchController;
-import com.android.settings.widget.PrimarySwitchPreference;
 import com.android.settings.widget.SwitchWidgetController;
+import com.android.settingslib.PrimarySwitchPreference;
 import com.android.settingslib.Utils;
 import com.android.settingslib.core.instrumentation.MetricsFeatureProvider;
 import com.android.settingslib.core.lifecycle.LifecycleObserver;
@@ -50,7 +50,7 @@ public class AutomaticStorageManagementSwitchPreferenceController extends
 
     public AutomaticStorageManagementSwitchPreferenceController(Context context, String key) {
         super(context, key);
-        mMetricsFeatureProvider = FeatureFactory.getFactory(context).getMetricsFeatureProvider();
+        mMetricsFeatureProvider = FeatureFactory.getFeatureFactory().getMetricsFeatureProvider();
     }
 
     public AutomaticStorageManagementSwitchPreferenceController setFragmentManager(

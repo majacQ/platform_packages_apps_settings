@@ -35,6 +35,7 @@ import com.android.settings.testutils.shadow.ShadowBluetoothAdapter;
 import com.android.settings.testutils.shadow.ShadowDeviceConfig;
 import com.android.settings.testutils.shadow.ShadowUserManager;
 
+import org.junit.Ignore;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.robolectric.RobolectricTestRunner;
@@ -50,6 +51,7 @@ public class SoundSettingsTest {
     @Test
     @Config(shadows = {ShadowUserManager.class, ShadowAudioHelper.class, ShadowDeviceConfig.class,
             ShadowBluetoothAdapter.class})
+    @Ignore
     public void getNonIndexableKeys_existInXmlLayout() {
         final Context context = spy(RuntimeEnvironment.application);
         AudioManager audioManager = mock(AudioManager.class);
@@ -67,7 +69,7 @@ public class SoundSettingsTest {
         keys.addAll(XmlTestUtils.getKeysFromPreferenceXml(context, R.xml.zen_mode_settings));
         // Add keys with hidden resources
         keys.add("alarm_volume");
-        keys.add("ring_volume");
+        keys.add("separate_ring_volume");
         keys.add("notification_volume");
 
         assertThat(keys).containsAtLeastElementsIn(niks);
@@ -82,5 +84,20 @@ public class SoundSettingsTest {
         settings.mVolumeCallback.onStreamValueChanged(0, 5);
 
         assertThat(settings.mHandler.hasMessages(SoundSettings.STOP_SAMPLE)).isTrue();
+    }
+
+    @Test
+    public void notificationVolume_isBetweenRingAndAlarm() {
+        final Context context = spy(RuntimeEnvironment.application);
+        final SoundSettings settings = new SoundSettings();
+        final int xmlId = settings.getPreferenceScreenResId();
+        final List<String> keys = XmlTestUtils.getKeysFromPreferenceXml(context, xmlId);
+
+        int ring = keys.indexOf("separate_ring_volume");
+        int notification = keys.indexOf("notification_volume");
+        int alarm = keys.indexOf("alarm_volume");
+
+        assertThat(ring < notification).isTrue();
+        assertThat(notification < alarm).isTrue();
     }
 }

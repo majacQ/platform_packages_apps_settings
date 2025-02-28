@@ -17,13 +17,19 @@
 package com.android.settings.accessibility;
 
 import android.app.settings.SettingsEnums;
+import android.content.Context;
+import android.os.Vibrator;
+
+import androidx.annotation.VisibleForTesting;
 
 import com.android.settings.R;
 import com.android.settings.dashboard.DashboardFragment;
 import com.android.settings.search.BaseSearchIndexProvider;
 import com.android.settingslib.search.SearchIndexable;
 
-/** Accessibility settings for the vibration. */
+/**
+ * Accessibility settings for the vibration.
+ */
 @SearchIndexable(forTarget = SearchIndexable.ALL & ~SearchIndexable.ARC)
 public class VibrationSettings extends DashboardFragment {
 
@@ -49,6 +55,19 @@ public class VibrationSettings extends DashboardFragment {
         return TAG;
     }
 
+    @VisibleForTesting
+    static boolean isPageSearchEnabled(Context context) {
+        final int supportedIntensityLevels = context.getResources().getInteger(
+                R.integer.config_vibration_supported_intensity_levels);
+        final boolean hasVibrator = context.getSystemService(Vibrator.class).hasVibrator();
+        return hasVibrator && supportedIntensityLevels == 1;
+    }
+
     public static final BaseSearchIndexProvider SEARCH_INDEX_DATA_PROVIDER =
-            new BaseSearchIndexProvider(R.xml.accessibility_vibration_settings);
+            new BaseSearchIndexProvider(R.xml.accessibility_vibration_settings) {
+                @Override
+                protected boolean isPageSearchEnabled(Context context) {
+                    return VibrationSettings.isPageSearchEnabled(context);
+                }
+            };
 }

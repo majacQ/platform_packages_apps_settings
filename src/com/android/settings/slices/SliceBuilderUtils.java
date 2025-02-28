@@ -16,16 +16,20 @@
 
 package com.android.settings.slices;
 
+import static android.provider.Settings.EXTRA_SETTINGS_EMBEDDED_DEEP_LINK_HIGHLIGHT_MENU_KEY;
+
+import static com.android.settings.SettingsActivity.EXTRA_IS_FROM_SLICE;
 import static com.android.settings.core.BasePreferenceController.DISABLED_DEPENDENT_SETTING;
 import static com.android.settings.slices.SettingsSliceProvider.EXTRA_SLICE_KEY;
 
 import android.annotation.ColorInt;
 import android.app.PendingIntent;
-import android.app.settings.SettingsEnums;
+import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.net.Uri;
 import android.os.Bundle;
+import android.os.UserHandle;
 import android.provider.SettingsSlicesContract;
 import android.text.TextUtils;
 import android.util.ArraySet;
@@ -44,11 +48,13 @@ import com.android.settings.R;
 import com.android.settings.SettingsActivity;
 import com.android.settings.SubSettings;
 import com.android.settings.Utils;
+import com.android.settings.accessibility.AccessibilitySlicePreferenceController;
 import com.android.settings.core.BasePreferenceController;
 import com.android.settings.core.SliderPreferenceController;
 import com.android.settings.core.SubSettingLauncher;
 import com.android.settings.core.TogglePreferenceController;
-import com.android.settings.overlay.FeatureFactory;
+import com.android.settingslib.RestrictedLockUtils;
+import com.android.settingslib.RestrictedLockUtilsInternal;
 import com.android.settingslib.core.AbstractPreferenceController;
 
 import java.util.Arrays;
@@ -75,12 +81,6 @@ public class SliceBuilderUtils {
     public static Slice buildSlice(Context context, SliceData sliceData) {
         Log.d(TAG, "Creating slice for: " + sliceData.getPreferenceController());
         final BasePreferenceController controller = getPreferenceController(context, sliceData);
-        FeatureFactory.getFactory(context).getMetricsFeatureProvider()
-                .action(SettingsEnums.PAGE_UNKNOWN,
-                        SettingsEnums.ACTION_SETTINGS_SLICE_REQUESTED,
-                        SettingsEnums.PAGE_UNKNOWN,
-                        sliceData.getKey(),
-                        0);
 
         if (!controller.isAvailable()) {
             // Cannot guarantee setting page is accessible, let the presenter handle error case.
@@ -91,8 +91,14 @@ public class SliceBuilderUtils {
             return buildUnavailableSlice(context, sliceData);
         }
 
-        if (controller.isCopyableSlice()) {
-            return buildCopyableSlice(context, sliceData, controller);
+        String userRestriction = sliceData.getUserRestriction();
+        if (!TextUtils.isEmpty(userRestriction)) {
+            RestrictedLockUtils.EnforcedAdmin admin =
+                    RestrictedLockUtilsInternal.checkIfRestrictionEnforced(context,
+                            userRestriction, UserHandle.myUserId());
+            if (admin != null) {
+                return buildIntentSlice(context, sliceData, controller);
+            }
         }
 
         switch (sliceData.getSliceType()) {
@@ -202,8 +208,15 @@ public class SliceBuilderUtils {
     }
 
     public static Intent buildSearchResultPageIntent(Context context, String className, String key,
-            String screenTitle, int sourceMetricsCategory) {
+            String screenTitle, int sourceMetricsCategory, int highlightMenuRes) {
         final Bundle args = new Bundle();
+        String highlightMenuKey = null;
+        if (highlightMenuRes != 0) {
+            highlightMenuKey = context.getString(highlightMenuRes);
+            if (TextUtils.isEmpty(highlightMenuKey)) {
+                Log.w(TAG, "Invalid menu key res from: " + screenTitle);
+            }
+        }
         args.putString(SettingsActivity.EXTRA_FRAGMENT_ARG_KEY, key);
         final Intent searchDestination = new SubSettingLauncher(context)
                 .setDestination(className)
@@ -211,12 +224,24 @@ public class SliceBuilderUtils {
                 .setTitleText(screenTitle)
                 .setSourceMetricsCategory(sourceMetricsCategory)
                 .toIntent();
-        searchDestination.putExtra(SettingsActivity.EXTRA_FRAGMENT_ARG_KEY, key)
+        searchDestination
+                .putExtra(SettingsActivity.EXTRA_FRAGMENT_ARG_KEY, key)
+                .putExtra(EXTRA_IS_FROM_SLICE, true)
+                .putExtra(EXTRA_SETTINGS_EMBEDDED_DEEP_LINK_HIGHLIGHT_MENU_KEY, highlightMenuKey)
                 .setAction("com.android.settings.SEARCH_RESULT_TRAMPOLINE")
                 .setComponent(null);
         searchDestination.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_NEW_TASK);
 
         return searchDestination;
+    }
+
+    /**
+     * Build a search result page intent for {@link CustomSliceable}
+     */
+    public static Intent buildSearchResultPageIntent(Context context, String className, String key,
+            String screenTitle, int sourceMetricsCategory, CustomSliceable sliceable) {
+        return buildSearchResultPageIntent(context, className, key, screenTitle,
+                sourceMetricsCategory, sliceable.getSliceHighlightMenuRes());
     }
 
     public static Intent getContentIntent(Context context, SliceData sliceData) {
@@ -225,7 +250,7 @@ public class SliceBuilderUtils {
                 : sliceData.getScreenTitle().toString();
         final Intent intent = buildSearchResultPageIntent(context,
                 sliceData.getFragmentClassName(), sliceData.getKey(),
-                screenTitle, 0 /* TODO */);
+                screenTitle, 0 /* TODO */, sliceData.getHighlightMenuRes());
         intent.setClassName(context.getPackageName(), SubSettings.class.getName());
         intent.setData(contentUri);
         return intent;
@@ -321,35 +346,14 @@ public class SliceBuilderUtils {
             inputRangeBuilder.setSubtitle(subtitleText);
         }
 
-        return new ListBuilder(context, sliceData.getUri(), ListBuilder.INFINITY)
-                .setAccentColor(color)
-                .addInputRange(inputRangeBuilder)
-                .setKeywords(keywords)
-                .build();
-    }
-
-    private static Slice buildCopyableSlice(Context context, SliceData sliceData,
-            BasePreferenceController controller) {
-        final SliceAction copyableAction = getCopyableAction(context, sliceData);
-        final PendingIntent contentIntent = getContentPendingIntent(context, sliceData);
-        final IconCompat icon = getSafeIcon(context, sliceData);
-        final SliceAction primaryAction = SliceAction.createDeeplink(contentIntent, icon,
-                ListBuilder.ICON_IMAGE,
-                sliceData.getTitle());
-        final CharSequence subtitleText = getSubtitleText(context, controller, sliceData);
-        @ColorInt final int color = Utils.getColorAccentDefaultColor(context);
-        final Set<String> keywords = buildSliceKeywords(sliceData);
-        final RowBuilder rowBuilder = new RowBuilder()
-                .setTitle(sliceData.getTitle())
-                .setPrimaryAction(primaryAction)
-                .addEndItem(copyableAction);
-        if (!Utils.isSettingsIntelligence(context)) {
-            rowBuilder.setSubtitle(subtitleText);
+        SliceAction endItemAction = sliderController.getSliceEndItem(context);
+        if (endItemAction != null) {
+            inputRangeBuilder.addEndItem(endItemAction);
         }
 
         return new ListBuilder(context, sliceData.getUri(), ListBuilder.INFINITY)
                 .setAccentColor(color)
-                .addRow(rowBuilder)
+                .addInputRange(inputRangeBuilder)
                 .setKeywords(keywords)
                 .build();
     }
@@ -374,14 +378,6 @@ public class SliceBuilderUtils {
 
     private static PendingIntent getSliderAction(Context context, SliceData sliceData) {
         return getActionIntent(context, SettingsSliceProvider.ACTION_SLIDER_CHANGED, sliceData);
-    }
-
-    private static SliceAction getCopyableAction(Context context, SliceData sliceData) {
-        final PendingIntent intent = getActionIntent(context,
-                SettingsSliceProvider.ACTION_COPY, sliceData);
-        final IconCompat icon = IconCompat.createWithResource(context,
-                R.drawable.ic_content_copy_grey600_24dp);
-        return SliceAction.create(intent, icon, ListBuilder.ICON_IMAGE, sliceData.getTitle());
     }
 
     private static boolean isValidSummary(Context context, CharSequence summary) {
@@ -454,7 +450,17 @@ public class SliceBuilderUtils {
             iconResource = R.drawable.ic_settings_accent;
         }
         try {
-            return IconCompat.createWithResource(context, iconResource);
+            // LINT.IfChange(createA11yIcon)
+            if (AccessibilitySlicePreferenceController.class.getName().equals(
+                    data.getPreferenceController())) {
+                ComponentName serviceComponent = ComponentName.unflattenFromString(data.getKey());
+                return IconCompat.createWithResource(
+                        context.createPackageContext(serviceComponent.getPackageName(), 0),
+                        iconResource);
+                // LINT.ThenChange()
+            } else {
+                return IconCompat.createWithResource(context, iconResource);
+            }
         } catch (Exception e) {
             Log.w(TAG, "Falling back to settings icon because there is an error getting slice icon "
                     + data.getUri(), e);

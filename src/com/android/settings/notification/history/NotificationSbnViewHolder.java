@@ -16,6 +16,9 @@
 
 package com.android.settings.notification.history;
 
+import static android.app.ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED;
+
+import android.app.ActivityOptions;
 import android.app.PendingIntent;
 import android.content.ActivityNotFoundException;
 import android.content.Intent;
@@ -98,9 +101,7 @@ public class NotificationSbnViewHolder extends RecyclerView.ViewHolder {
             boolean isSnoozed, UiEventLogger uiEventLogger) {
         Intent appIntent = itemView.getContext().getPackageManager()
                 .getLaunchIntentForPackage(pkg);
-        boolean isPendingIntentValid = pi != null && PendingIntent.getActivity(
-                itemView.getContext(), 0, pi.getIntent(),
-                PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_NO_CREATE) != null;
+        boolean isPendingIntentValid = pi != null && pi.isActivity();
         if (isPendingIntentValid || appIntent != null) {
             itemView.setOnClickListener(v -> {
                 uiEventLogger.logWithInstanceIdAndPosition(
@@ -112,7 +113,10 @@ public class NotificationSbnViewHolder extends RecyclerView.ViewHolder {
                         uid, pkg, instanceId, position);
                 if (pi != null && isPendingIntentValid) {
                     try {
-                        pi.send();
+                        ActivityOptions options = ActivityOptions.makeBasic();
+                        options.setPendingIntentBackgroundActivityStartMode(
+                                MODE_BACKGROUND_ACTIVITY_START_ALLOWED);
+                        pi.send(options.toBundle());
                     } catch (PendingIntent.CanceledException e) {
                         Slog.e(TAG, "Could not launch", e);
                     }

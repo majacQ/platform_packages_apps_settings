@@ -16,15 +16,10 @@
 
 package com.android.settings.testutils.shadow;
 
-import static android.provider.SearchIndexablesContract.INDEXABLES_RAW_COLUMNS;
-
 import android.accounts.Account;
+import android.annotation.UserIdInt;
 import android.content.ContentResolver;
 import android.content.SyncAdapterType;
-import android.database.Cursor;
-import android.database.MatrixCursor;
-import android.net.Uri;
-import android.provider.SearchIndexablesContract;
 import android.text.TextUtils;
 
 import org.robolectric.annotation.Implementation;
@@ -34,7 +29,7 @@ import java.util.HashMap;
 import java.util.Map;
 
 @Implements(ContentResolver.class)
-public class ShadowContentResolver {
+public class ShadowContentResolver extends org.robolectric.shadows.ShadowContentResolver {
 
     private static SyncAdapterType[] sSyncAdapterTypes = new SyncAdapterType[0];
     private static Map<String, Integer> sSyncable = new HashMap<>();
@@ -47,23 +42,14 @@ public class ShadowContentResolver {
     }
 
     @Implementation
-    protected final Cursor query(Uri uri, String[] projection, String selection,
-            String[] selectionArgs, String sortOrder) {
-        MatrixCursor cursor = new MatrixCursor(INDEXABLES_RAW_COLUMNS);
-        MatrixCursor.RowBuilder builder = cursor.newRow()
-                .add(SearchIndexablesContract.NonIndexableKey.COLUMN_KEY_VALUE, "");
-        return cursor;
-    }
-
-    @Implementation
     protected static int getIsSyncableAsUser(Account account, String authority, int userId) {
-        return sSyncable.containsKey(authority) ? sSyncable.get(authority) : 1;
+        return sSyncable.getOrDefault(authority, 1);
     }
 
     @Implementation
     protected static boolean getSyncAutomaticallyAsUser(Account account, String authority,
             int userId) {
-        return sSyncAutomatically.containsKey(authority) ? sSyncAutomatically.get(authority) : true;
+        return sSyncAutomatically.getOrDefault(authority, true);
     }
 
     @Implementation
@@ -76,8 +62,12 @@ public class ShadowContentResolver {
 
     @Implementation
     protected static boolean getMasterSyncAutomaticallyAsUser(int userId) {
-        return sMasterSyncAutomatically.containsKey(userId)
-                ? sMasterSyncAutomatically.get(userId) : true;
+        return sMasterSyncAutomatically.getOrDefault(userId, true);
+    }
+
+    @Implementation
+    protected static void setMasterSyncAutomaticallyAsUser(boolean sync, @UserIdInt int userId) {
+        sMasterSyncAutomatically.put(userId, sync);
     }
 
     public static void setSyncAdapterTypes(SyncAdapterType[] syncAdapterTypes) {
