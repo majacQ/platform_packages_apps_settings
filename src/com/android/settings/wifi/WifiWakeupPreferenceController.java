@@ -31,7 +31,7 @@ import androidx.annotation.VisibleForTesting;
 import androidx.fragment.app.Fragment;
 import androidx.preference.Preference;
 import androidx.preference.PreferenceScreen;
-import androidx.preference.SwitchPreference;
+import androidx.preference.TwoStatePreference;
 
 import com.android.settings.R;
 import com.android.settings.core.TogglePreferenceController;
@@ -53,7 +53,7 @@ public class WifiWakeupPreferenceController extends TogglePreferenceController i
     private Fragment mFragment;
 
     @VisibleForTesting
-    SwitchPreference mPreference;
+    TwoStatePreference mPreference;
 
     @VisibleForTesting
     LocationManager mLocationManager;
@@ -89,6 +89,13 @@ public class WifiWakeupPreferenceController extends TogglePreferenceController i
 
     @Override
     public int getAvailabilityStatus() {
+        // Since mFragment is set only when entering Network preferences settings. So when
+        // mFragment == null, we can assume that the object is created by Search settings.
+        // When Search settings is called, if the dependent condition is not enabled, then
+        // return DISABLED_DEPENDENT_SETTING to hide the toggle.
+        if (mFragment == null && (!getLocationEnabled() || !getWifiScanningEnabled())) {
+            return DISABLED_DEPENDENT_SETTING;
+        }
         return AVAILABLE;
     }
 
@@ -96,18 +103,19 @@ public class WifiWakeupPreferenceController extends TogglePreferenceController i
     public boolean isChecked() {
         return getWifiWakeupEnabled()
                 && getWifiScanningEnabled()
-                && mLocationManager.isLocationEnabled();
+                && getLocationEnabled();
     }
 
     @Override
     public boolean setChecked(boolean isChecked) {
         if (isChecked) {
-            if (mFragment == null) {
-                throw new IllegalStateException("No fragment to start activity");
-            }
+            if (!getLocationEnabled()) {
+                if (mFragment == null) {
+                    throw new IllegalStateException("No fragment to start activity");
+                }
 
-            if (!mLocationManager.isLocationEnabled()) {
-                final Intent intent = new Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS);
+                final Intent intent = new Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS)
+                        .setPackage(mContext.getPackageName());
                 mFragment.startActivityForResult(intent, WIFI_WAKEUP_REQUEST_CODE);
                 return false;
             } else if (!getWifiScanningEnabled()) {
@@ -128,11 +136,16 @@ public class WifiWakeupPreferenceController extends TogglePreferenceController i
 
     @Override
     public CharSequence getSummary() {
-        if (!mLocationManager.isLocationEnabled()) {
+        if (!getLocationEnabled()) {
             return getNoLocationSummary();
         } else {
             return mContext.getText(R.string.wifi_wakeup_summary);
         }
+    }
+
+    @Override
+    public int getSliceHighlightMenuRes() {
+        return R.string.menu_key_network;
     }
 
     @VisibleForTesting
@@ -146,10 +159,14 @@ public class WifiWakeupPreferenceController extends TogglePreferenceController i
         if (requestCode != WIFI_WAKEUP_REQUEST_CODE) {
             return;
         }
-        if (mLocationManager.isLocationEnabled() && getWifiScanningEnabled()) {
+        if (getLocationEnabled() && getWifiScanningEnabled()) {
             setWifiWakeupEnabled(true);
             updateState(mPreference);
         }
+    }
+
+    private boolean getLocationEnabled() {
+        return mLocationManager.isLocationEnabled();
     }
 
     private boolean getWifiScanningEnabled() {

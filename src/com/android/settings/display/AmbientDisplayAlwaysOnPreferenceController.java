@@ -29,6 +29,7 @@ import androidx.preference.Preference;
 import com.android.settings.R;
 import com.android.settings.core.TogglePreferenceController;
 
+// LINT.IfChange
 public class AmbientDisplayAlwaysOnPreferenceController extends TogglePreferenceController {
 
     private final int ON = 1;
@@ -59,12 +60,17 @@ public class AmbientDisplayAlwaysOnPreferenceController extends TogglePreference
 
     @Override
     public boolean isSliceable() {
-        return TextUtils.equals(getPreferenceKey(), "ambient_display_always_on");
+        return true;
     }
 
     @Override
     public boolean isPublicSlice() {
-        return true;
+        return TextUtils.equals(getPreferenceKey(), "ambient_display_always_on");
+    }
+
+    @Override
+    public int getSliceHighlightMenuRes() {
+        return R.string.menu_key_display;
     }
 
     @Override
@@ -116,7 +122,7 @@ public class AmbientDisplayAlwaysOnPreferenceController extends TogglePreference
         final PowerManager powerManager = context.getSystemService(PowerManager.class);
         final PackageManager packageManager = context.getPackageManager();
         final String packageName = context.getString(
-                com.android.internal.R.string.config_defaultWellbeingPackage);
+                com.android.internal.R.string.config_systemWellbeing);
         try {
             uid = packageManager.getApplicationInfo(packageName, /* flags= */ 0).uid;
         } catch (PackageManager.NameNotFoundException e) {
@@ -125,3 +131,4 @@ public class AmbientDisplayAlwaysOnPreferenceController extends TogglePreference
         return powerManager.isAmbientDisplaySuppressedForTokenByApp(AOD_SUPPRESSED_TOKEN, uid);
     }
 }
+// LINT.ThenChange(AmbientDisplayAlwaysOnPreference.kt)

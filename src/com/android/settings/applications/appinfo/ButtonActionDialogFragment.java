@@ -48,12 +48,10 @@ public class ButtonActionDialogFragment extends InstrumentedDialogFragment imple
     @Retention(RetentionPolicy.SOURCE)
     @IntDef({
             DialogType.DISABLE,
-            DialogType.SPECIAL_DISABLE,
             DialogType.FORCE_STOP
     })
     public @interface DialogType {
         int DISABLE = 0;
-        int SPECIAL_DISABLE = 1;
         int FORCE_STOP = 2;
     }
 
@@ -90,6 +88,12 @@ public class ButtonActionDialogFragment extends InstrumentedDialogFragment imple
 
     @Override
     public void onClick(DialogInterface dialog, int which) {
+        // When it's in a multi-window mode, force stopping an app will lead to an activity
+        // recreate, and the dialog fragment will also be recreated. So dismiss the dialog before
+        // stopping the app.
+        if (mId == ButtonActionDialogFragment.DialogType.FORCE_STOP) {
+            dialog.dismiss();
+        }
         final AppButtonsDialogListener lsn =
                 (AppButtonsDialogListener) getTargetFragment();
         lsn.handleDialogClick(mId);
@@ -99,7 +103,6 @@ public class ButtonActionDialogFragment extends InstrumentedDialogFragment imple
         final Context context = getContext();
         switch (id) {
             case DialogType.DISABLE:
-            case DialogType.SPECIAL_DISABLE:
                 return new AlertDialog.Builder(context)
                         .setMessage(R.string.app_disable_dlg_text)
                         .setPositiveButton(R.string.app_disable_dlg_positive, this)

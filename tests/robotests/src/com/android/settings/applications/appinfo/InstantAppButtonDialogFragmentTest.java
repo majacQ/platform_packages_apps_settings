@@ -32,6 +32,7 @@ import android.content.pm.PackageManager;
 
 import androidx.appcompat.app.AlertDialog;
 import androidx.fragment.app.FragmentActivity;
+import androidx.test.core.app.ApplicationProvider;
 
 import com.android.settings.R;
 import com.android.settings.testutils.shadow.ShadowAlertDialogCompat;
@@ -41,8 +42,8 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.robolectric.Robolectric;
 import org.robolectric.RobolectricTestRunner;
-import org.robolectric.RuntimeEnvironment;
 import org.robolectric.annotation.Config;
+import org.robolectric.shadows.ShadowLooper;
 
 @RunWith(RobolectricTestRunner.class)
 @Config(shadows = ShadowAlertDialogCompat.class)
@@ -56,18 +57,20 @@ public class InstantAppButtonDialogFragmentTest {
     @Before
     public void setUp() {
         final FragmentActivity activity = Robolectric.setupActivity(FragmentActivity.class);
-        mContext = spy(RuntimeEnvironment.application);
-        mFragment = spy(InstantAppButtonDialogFragment.newInstance(TEST_PACKAGE));
+        mContext = spy(ApplicationProvider.getApplicationContext());
+        mFragment = InstantAppButtonDialogFragment.newInstance(TEST_PACKAGE);
         mFragment.show(activity.getSupportFragmentManager(), "InstantAppButtonDialogFragment");
-        doReturn(mContext).when(mFragment).getContext();
+        ShadowLooper.idleMainLooper();
     }
 
     @Test
     public void onClick_shouldDeleteApp() {
+        final InstantAppButtonDialogFragment spyFragment = spy(mFragment);
+        doReturn(mContext).when(spyFragment).getContext();
         final PackageManager packageManager = mock(PackageManager.class);
         when(mContext.getPackageManager()).thenReturn(packageManager);
 
-        mFragment.onClick(null /* dialog */, 0  /* which */);
+        spyFragment.onClick(null /* dialog */, 0  /* which */);
 
         verify(packageManager)
             .deletePackageAsUser(eq(TEST_PACKAGE), any(), anyInt(), anyInt());

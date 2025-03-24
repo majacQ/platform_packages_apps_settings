@@ -16,17 +16,22 @@
 
 package com.android.settings.notification.zen;
 
+import android.app.AutomaticZenRule;
 import android.app.Dialog;
+import android.app.Flags;
 import android.app.NotificationManager;
 import android.app.settings.SettingsEnums;
 import android.content.Context;
 import android.content.DialogInterface;
+import android.content.Intent;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.ComponentInfo;
 import android.content.pm.PackageManager;
+import android.content.pm.ResolveInfo;
 import android.graphics.drawable.Drawable;
 import android.os.AsyncTask;
 import android.os.Bundle;
+import android.service.notification.SystemZenRules;
 import android.service.notification.ZenModeConfig;
 import android.util.Log;
 import android.view.LayoutInflater;
@@ -45,6 +50,7 @@ import com.android.settings.utils.ZenServiceListing;
 import java.lang.ref.WeakReference;
 import java.text.Collator;
 import java.util.Comparator;
+import java.util.List;
 import java.util.Set;
 import java.util.TreeSet;
 
@@ -113,6 +119,14 @@ public class ZenRuleSelectionDialog extends InstrumentedDialogFragment {
         }
     }
 
+    // Returns whether the rule's configuration activity exists and is valid.
+    private boolean isRuleActivityValid(final ZenRuleInfo ri) {
+        Intent intent = new Intent().setComponent(ri.configurationActivity);
+        List<ResolveInfo> results = mPm.queryIntentActivities(
+                intent, PackageManager.ResolveInfoFlags.of(0));
+        return intent.resolveActivity(mPm) != null && results.size() > 0;
+    }
+
     private void bindType(final ZenRuleInfo ri) {
         try {
             ApplicationInfo info = mPm.getApplicationInfo(ri.packageName, 0);
@@ -122,6 +136,11 @@ public class ZenRuleSelectionDialog extends InstrumentedDialogFragment {
             ImageView iconView = v.findViewById(R.id.icon);
             ((TextView) v.findViewById(R.id.title)).setText(ri.title);
             if (!ri.isSystem) {
+                // Omit rule if the externally provided rule activity is not valid.
+                if (!isRuleActivityValid(ri)) {
+                    Log.w(TAG, "rule configuration activity invalid: " + ri.configurationActivity);
+                    return;
+                }
                 LoadIconTask task = new LoadIconTask(iconView);
                 task.execute(info);
 
@@ -162,6 +181,11 @@ public class ZenRuleSelectionDialog extends InstrumentedDialogFragment {
         rt.title = mContext.getString(R.string.zen_schedule_rule_type_name);
         rt.packageName = ZenModeConfig.getEventConditionProvider().getPackageName();
         rt.defaultConditionId = ZenModeConfig.toScheduleConditionId(schedule);
+        if (Flags.modesApi() && Flags.modesUi()) {
+            rt.type = AutomaticZenRule.TYPE_SCHEDULE_TIME;
+            rt.defaultTriggerDescription = SystemZenRules.getTriggerDescriptionForScheduleTime(
+                    mContext, schedule);
+        }
         rt.serviceComponent = ZenModeConfig.getScheduleConditionProvider();
         rt.isSystem = true;
         return rt;
@@ -177,6 +201,11 @@ public class ZenRuleSelectionDialog extends InstrumentedDialogFragment {
         rt.title = mContext.getString(R.string.zen_event_rule_type_name);
         rt.packageName = ZenModeConfig.getScheduleConditionProvider().getPackageName();
         rt.defaultConditionId = ZenModeConfig.toEventConditionId(event);
+        if (Flags.modesApi() && Flags.modesUi()) {
+            rt.type = AutomaticZenRule.TYPE_SCHEDULE_CALENDAR;
+            rt.defaultTriggerDescription = SystemZenRules.getTriggerDescriptionForScheduleEvent(
+                    mContext, event);
+        }
         rt.serviceComponent = ZenModeConfig.getEventConditionProvider();
         rt.isSystem = true;
         return rt;

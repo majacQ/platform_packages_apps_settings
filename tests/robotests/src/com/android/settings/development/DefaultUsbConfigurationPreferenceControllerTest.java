@@ -32,7 +32,7 @@ import android.os.UserHandle;
 import androidx.preference.PreferenceScreen;
 
 import com.android.settingslib.RestrictedLockUtils;
-import com.android.settingslib.RestrictedSwitchPreference;
+import com.android.settingslib.RestrictedPreference;
 
 import org.junit.Before;
 import org.junit.Test;
@@ -48,7 +48,7 @@ public class DefaultUsbConfigurationPreferenceControllerTest {
     private static final ComponentName TEST_COMPONENT_NAME = new ComponentName("test", "test");
 
     @Mock
-    private RestrictedSwitchPreference mPreference;
+    private RestrictedPreference mPreference;
     @Mock
     private PreferenceScreen mPreferenceScreen;
     @Mock
@@ -71,8 +71,7 @@ public class DefaultUsbConfigurationPreferenceControllerTest {
 
     @Test
     public void updateState_usbDataSignalingEnabled_shouldNotDisablePreference() {
-        when(mDevicePolicyManager.isUsbDataSignalingEnabledForUser(
-                UserHandle.myUserId())).thenReturn(true);
+        when(mDevicePolicyManager.isUsbDataSignalingEnabled()).thenReturn(true);
         when(mDevicePolicyManager.getProfileOwner()).thenReturn(TEST_COMPONENT_NAME);
 
         mController.updateState(mPreference);
@@ -82,8 +81,7 @@ public class DefaultUsbConfigurationPreferenceControllerTest {
 
     @Test
     public void updateState_usbDataSignalingDisabled_shouldDisablePreference() {
-        when(mDevicePolicyManager.isUsbDataSignalingEnabledForUser(
-                UserHandle.myUserId())).thenReturn(false);
+        when(mDevicePolicyManager.isUsbDataSignalingEnabled()).thenReturn(false);
         when(mDevicePolicyManager.getProfileOwner()).thenReturn(TEST_COMPONENT_NAME);
 
         mController.updateState(mPreference);
@@ -94,8 +92,7 @@ public class DefaultUsbConfigurationPreferenceControllerTest {
 
     @Test
     public void onDeveloperOptionsSwitchEnabled_usbEnabled_shouldNotDisablePreference() {
-        when(mDevicePolicyManager.isUsbDataSignalingEnabledForUser(
-                UserHandle.myUserId())).thenReturn(true);
+        when(mDevicePolicyManager.isUsbDataSignalingEnabled()).thenReturn(true);
         when(mDevicePolicyManager.getProfileOwner()).thenReturn(TEST_COMPONENT_NAME);
 
         mController.onDeveloperOptionsSwitchEnabled();
@@ -105,8 +102,7 @@ public class DefaultUsbConfigurationPreferenceControllerTest {
 
     @Test
     public void onDeveloperOptionsSwitchEnabled_usbDisabled_shouldDisablePreference() {
-        when(mDevicePolicyManager.isUsbDataSignalingEnabledForUser(
-                UserHandle.myUserId())).thenReturn(false);
+        when(mDevicePolicyManager.isUsbDataSignalingEnabled()).thenReturn(false);
         when(mDevicePolicyManager.getProfileOwner()).thenReturn(TEST_COMPONENT_NAME);
 
         mController.onDeveloperOptionsSwitchEnabled();

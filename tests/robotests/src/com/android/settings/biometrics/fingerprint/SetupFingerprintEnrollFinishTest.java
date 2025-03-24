@@ -135,7 +135,7 @@ public class SetupFingerprintEnrollFinishTest {
     }
 
     @Test
-    public void clickNext_fingerprintCountIsOne_fngerprintSuggestionActivityEnabled() {
+    public void clickNext_fingerprintCountIsOne_fingerprintSuggestionActivityEnabled() {
         Shadows.shadowOf((FingerprintManager) mFingerprintManager).setDefaultFingerprints(1);
 
         mLayout.getMixin(FooterBarMixin.class).getPrimaryButtonView().performClick();
@@ -155,7 +155,7 @@ public class SetupFingerprintEnrollFinishTest {
     }
 
     @Test
-    public void onBackPressed_fingerprintCountIsOne_fngerprintSuggestionActivityEnabled() {
+    public void onBackPressed_fingerprintCountIsOne_fingerprintSuggestionActivityEnabled() {
         Shadows.shadowOf((FingerprintManager) mFingerprintManager).setDefaultFingerprints(1);
 
         mActivity.onBackPressed();

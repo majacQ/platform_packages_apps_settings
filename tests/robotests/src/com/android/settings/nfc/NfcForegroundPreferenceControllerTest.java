@@ -25,28 +25,35 @@ import static org.mockito.Mockito.when;
 import android.app.settings.SettingsEnums;
 import android.content.Context;
 import android.content.pm.PackageManager;
+import android.platform.test.annotations.RequiresFlagsDisabled;
+import android.platform.test.flag.junit.CheckFlagsRule;
+import android.platform.test.flag.junit.DeviceFlagsValueProvider;
 
-import androidx.preference.DropDownPreference;
+import androidx.preference.ListPreference;
 import androidx.preference.PreferenceScreen;
 
 import com.android.settings.R;
 import com.android.settings.testutils.FakeFeatureFactory;
 
 import org.junit.Before;
+import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;
-import org.robolectric.util.ReflectionHelpers;
 
 import java.util.ArrayList;
 
 @RunWith(RobolectricTestRunner.class)
+@RequiresFlagsDisabled(android.permission.flags.Flags.FLAG_WALLET_ROLE_ENABLED)
 public class NfcForegroundPreferenceControllerTest {
 
     private static final String PREF_KEY = PaymentSettingsTest.FOREGROUND_KEY;
+
+    @Rule
+    public final CheckFlagsRule mCheckFlagsRule = DeviceFlagsValueProvider.createCheckFlagsRule();
 
     @Mock
     private PaymentBackend mPaymentBackend;
@@ -56,7 +63,7 @@ public class NfcForegroundPreferenceControllerTest {
     private PackageManager mManager;
 
     private Context mContext;
-    private DropDownPreference mPreference;
+    private ListPreference mPreference;
     private NfcForegroundPreferenceController mController;
     private FakeFeatureFactory mFakeFeatureFactory;
 
@@ -67,7 +74,9 @@ public class NfcForegroundPreferenceControllerTest {
         when(mContext.getPackageManager()).thenReturn(mManager);
         mFakeFeatureFactory = FakeFeatureFactory.setupForTest();
         mController = new NfcForegroundPreferenceController(mContext, PREF_KEY);
-        mPreference = new DropDownPreference(mContext);
+        mPreference = new ListPreference(mContext);
+        mPreference.setEntries(R.array.nfc_payment_favor);
+        mPreference.setEntryValues(R.array.nfc_payment_favor_values);
         when(mScreen.findPreference(PREF_KEY)).thenReturn(mPreference);
     }
 
@@ -146,17 +155,14 @@ public class NfcForegroundPreferenceControllerTest {
         final CharSequence favorDefault = mContext.getText(R.string.nfc_payment_favor_default);
         final CharSequence favorOpen = mContext.getText(R.string.nfc_payment_favor_open);
 
-        assertThat(mPreference.getEntry()).isEqualTo(favorDefault);
-        assertThat(mPreference.getSummary()).isEqualTo(favorDefault);
-
-        mPreference.setValueIndex(0);
-        mPreference.callChangeListener(mPreference.getEntryValues()[0]);
+        mPreference.setValueIndex(1);
+        mPreference.callChangeListener(mPreference.getEntryValues()[1]);
         verify(mPaymentBackend).setForegroundMode(true);
         assertThat(mPreference.getEntry()).isEqualTo(favorOpen);
         assertThat(mPreference.getSummary()).isEqualTo(favorOpen);
 
-        mPreference.setValueIndex(1);
-        mPreference.callChangeListener(mPreference.getEntryValues()[1]);
+        mPreference.setValueIndex(0);
+        mPreference.callChangeListener(mPreference.getEntryValues()[0]);
         verify(mPaymentBackend).setForegroundMode(false);
         assertThat(mPreference.getEntry()).isEqualTo(favorDefault);
         assertThat(mPreference.getSummary()).isEqualTo(favorDefault);
@@ -168,14 +174,14 @@ public class NfcForegroundPreferenceControllerTest {
         mController.displayPreference(mScreen);
         mController.onPaymentAppsChanged();
 
-        mPreference.setValueIndex(0);
-        mPreference.callChangeListener(mPreference.getEntryValues()[0]);
+        mPreference.setValueIndex(1);
+        mPreference.callChangeListener(mPreference.getEntryValues()[1]);
         verify(mPaymentBackend).setForegroundMode(true);
         verify(mFakeFeatureFactory.metricsFeatureProvider).action(mContext,
                 SettingsEnums.ACTION_NFC_PAYMENT_FOREGROUND_SETTING);
 
-        mPreference.setValueIndex(1);
-        mPreference.callChangeListener(mPreference.getEntryValues()[1]);
+        mPreference.setValueIndex(0);
+        mPreference.callChangeListener(mPreference.getEntryValues()[0]);
         verify(mPaymentBackend).setForegroundMode(false);
         verify(mFakeFeatureFactory.metricsFeatureProvider).action(mContext,
                 SettingsEnums.ACTION_NFC_PAYMENT_ALWAYS_SETTING);

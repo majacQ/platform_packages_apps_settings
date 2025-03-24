@@ -28,6 +28,7 @@ import android.content.res.TypedArray;
 import android.graphics.drawable.Drawable;
 import android.net.Uri;
 import android.os.Bundle;
+import android.os.UserManager;
 import android.print.PrintJob;
 import android.print.PrintJobId;
 import android.print.PrintJobInfo;
@@ -45,6 +46,8 @@ import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.TextView;
 
+import androidx.annotation.NonNull;
+import androidx.annotation.VisibleForTesting;
 import androidx.loader.app.LoaderManager.LoaderCallbacks;
 import androidx.loader.content.AsyncTaskLoader;
 import androidx.loader.content.Loader;
@@ -52,7 +55,9 @@ import androidx.preference.Preference;
 import androidx.preference.PreferenceCategory;
 
 import com.android.settings.R;
+import com.android.settings.flags.Flags;
 import com.android.settings.search.BaseSearchIndexProvider;
+import com.android.settings.spa.SpaActivity;
 import com.android.settingslib.search.Indexable;
 import com.android.settingslib.search.SearchIndexable;
 import com.android.settingslib.widget.AppPreference;
@@ -92,6 +97,31 @@ public class PrintSettingsFragment extends ProfileSettingsPreferenceFragment
     private PrintServicesController mPrintServicesController;
 
     private Button mAddNewServiceButton;
+    @VisibleForTesting
+    boolean mIsUiRestricted;
+
+    public PrintSettingsFragment() {
+        super(UserManager.DISALLOW_PRINTING);
+    }
+
+    @Override
+    public void onAttach(@NonNull Context context) {
+        super.onAttach(context);
+        if (Flags.refactorPrintSettings()) {
+            SpaActivity.startSpaActivity(context, PrintSettingsPageProvider.INSTANCE.getName());
+            finish();
+        }
+    }
+
+    @Override
+    protected String getLogTag() {
+        return TAG;
+    }
+
+    @Override
+    protected int getPreferenceScreenResId() {
+        return R.xml.print_settings;
+    }
 
     @Override
     public int getMetricsCategory() {
@@ -107,12 +137,19 @@ public class PrintSettingsFragment extends ProfileSettingsPreferenceFragment
     public View onCreateView(LayoutInflater inflater, ViewGroup container,
             Bundle savedInstanceState) {
         View root = super.onCreateView(inflater, container, savedInstanceState);
-        addPreferencesFromResource(R.xml.print_settings);
+        mIsUiRestricted = isUiRestricted();
+        setupPreferences();
+        return root;
+    }
 
-        mActivePrintJobsCategory = (PreferenceCategory) findPreference(
-                PRINT_JOBS_CATEGORY);
-        mPrintServicesCategory = (PreferenceCategory) findPreference(
-                PRINT_SERVICES_CATEGORY);
+    @VisibleForTesting
+    void setupPreferences() {
+        if (mIsUiRestricted) {
+            return;
+        }
+
+        mActivePrintJobsCategory = (PreferenceCategory) findPreference(PRINT_JOBS_CATEGORY);
+        mPrintServicesCategory = (PreferenceCategory) findPreference(PRINT_SERVICES_CATEGORY);
         getPreferenceScreen().removePreference(mActivePrintJobsCategory);
 
         mPrintJobsController = new PrintJobsController();
@@ -120,20 +157,20 @@ public class PrintSettingsFragment extends ProfileSettingsPreferenceFragment
 
         mPrintServicesController = new PrintServicesController();
         getLoaderManager().initLoader(LOADER_ID_PRINT_SERVICES, null, mPrintServicesController);
-
-        return root;
-    }
-
-    @Override
-    public void onStart() {
-        super.onStart();
-        setHasOptionsMenu(true);
-        startSubSettingsIfNeeded();
     }
 
     @Override
     public void onViewCreated(View view, Bundle savedInstanceState) {
         super.onViewCreated(view, savedInstanceState);
+        setupEmptyViews();
+    }
+
+    @VisibleForTesting
+    void setupEmptyViews() {
+        if (mIsUiRestricted) {
+            return;
+        }
+
         ViewGroup contentRoot = (ViewGroup) getListView().getParent();
         View emptyView = getActivity().getLayoutInflater().inflate(
                 R.layout.empty_print_state, contentRoot, false);
@@ -150,6 +187,23 @@ public class PrintSettingsFragment extends ProfileSettingsPreferenceFragment
 
         contentRoot.addView(emptyView);
         setEmptyView(emptyView);
+    }
+
+    @Override
+    public void onStart() {
+        super.onStart();
+        startSettings();
+    }
+
+    @VisibleForTesting
+    void startSettings() {
+        if (mIsUiRestricted) {
+            getPreferenceScreen().removeAll();
+            return;
+        }
+
+        setHasOptionsMenu(true);
+        startSubSettingsIfNeeded();
     }
 
     @Override

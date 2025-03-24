@@ -32,10 +32,14 @@ import android.os.Bundle;
 import android.os.RemoteException;
 import android.os.ServiceManager;
 import android.os.UserHandle;
+import android.os.UserManager;
+import android.util.Log;
 
 import androidx.appcompat.app.AlertDialog;
 
 import com.android.settings.R;
+import com.android.settings.fuelgauge.BatteryOptimizeUtils;
+import com.android.settings.fuelgauge.datasaver.DynamicDenylistManager;
 
 import java.util.Arrays;
 import java.util.List;
@@ -44,6 +48,7 @@ public class ResetAppsHelper implements DialogInterface.OnClickListener,
         DialogInterface.OnDismissListener {
 
     private static final String EXTRA_RESET_DIALOG = "resetDialog";
+    private static final String TAG = "ResetAppsHelper";
 
     private final PackageManager mPm;
     private final IPackageManager mIPm;
@@ -51,6 +56,7 @@ public class ResetAppsHelper implements DialogInterface.OnClickListener,
     private final NetworkPolicyManager mNpm;
     private final AppOpsManager mAom;
     private final Context mContext;
+    private final UserManager mUm;
 
     private AlertDialog mResetDialog;
 
@@ -62,6 +68,7 @@ public class ResetAppsHelper implements DialogInterface.OnClickListener,
                 ServiceManager.getService(Context.NOTIFICATION_SERVICE));
         mNpm = NetworkPolicyManager.from(context);
         mAom = (AppOpsManager) context.getSystemService(Context.APP_OPS_SERVICE);
+        mUm = (UserManager) context.getSystemService(Context.USER_SERVICE);
     }
 
     public void onRestoreInstanceState(Bundle savedInstanceState) {
@@ -104,49 +111,59 @@ public class ResetAppsHelper implements DialogInterface.OnClickListener,
 
     @Override
     public void onClick(DialogInterface dialog, int which) {
-        if (mResetDialog != dialog) {
-            return;
+        if (mResetDialog == dialog) {
+            resetApps();
         }
-        AsyncTask.execute(new Runnable() {
-            @Override
-            public void run() {
-                final List<ApplicationInfo> apps = mPm.getInstalledApplications(
-                        PackageManager.GET_DISABLED_COMPONENTS);
-                final List<String> allowList = Arrays.asList(
-                        mContext.getResources().getStringArray(
-                                R.array.config_skip_reset_apps_package_name));
+    }
 
-                for (int i = 0; i < apps.size(); i++) {
-                    ApplicationInfo app = apps.get(i);
+    /** Resets the app preferences. */
+    public void resetApps() {
+        AsyncTask.execute(() -> {
+            final List<String> allowList = Arrays.asList(
+                    mContext.getResources().getStringArray(
+                            R.array.config_skip_reset_apps_package_name));
+            for (UserHandle userHandle : mUm.getEnabledProfiles()) {
+                final int userId = userHandle.getIdentifier();
+                final List<ApplicationInfo> apps = mPm.getInstalledApplicationsAsUser(
+                        PackageManager.GET_DISABLED_COMPONENTS, userId);
+                for (ApplicationInfo app : apps) {
                     if (allowList.contains(app.packageName)) {
                         continue;
                     }
                     try {
                         mNm.clearData(app.packageName, app.uid, false);
-                    } catch (android.os.RemoteException ex) {
+                    } catch (RemoteException ex) {
                     }
                     if (!app.enabled) {
-                        if (mPm.getApplicationEnabledSetting(app.packageName)
-                                == PackageManager.COMPONENT_ENABLED_STATE_DISABLED_USER) {
-                            mPm.setApplicationEnabledSetting(app.packageName,
-                                    PackageManager.COMPONENT_ENABLED_STATE_DEFAULT,
-                                    PackageManager.DONT_KILL_APP);
+                        try {
+                            if (mIPm.getApplicationEnabledSetting(app.packageName, userId)
+                                    == PackageManager.COMPONENT_ENABLED_STATE_DISABLED_USER) {
+                                mIPm.setApplicationEnabledSetting(app.packageName,
+                                        PackageManager.COMPONENT_ENABLED_STATE_DEFAULT,
+                                        PackageManager.DONT_KILL_APP,
+                                        userId,
+                                        mContext.getPackageName());
+                            }
+                        } catch (RemoteException e) {
+                            Log.e(TAG, "Error during reset disabled apps.", e);
                         }
                     }
                 }
-                try {
-                    mIPm.resetApplicationPreferences(UserHandle.myUserId());
-                } catch (RemoteException e) {
-                }
-                mAom.resetAllModes();
-                final int[] restrictedUids = mNpm.getUidsWithPolicy(
-                        POLICY_REJECT_METERED_BACKGROUND);
-                final int currentUserId = ActivityManager.getCurrentUser();
-                for (int uid : restrictedUids) {
-                    // Only reset for current user
-                    if (UserHandle.getUserId(uid) == currentUserId) {
-                        mNpm.setUidPolicy(uid, POLICY_NONE);
-                    }
+            }
+            try {
+                mIPm.resetApplicationPreferences(UserHandle.myUserId());
+            } catch (RemoteException e) {
+            }
+            mAom.resetAllModes();
+            BatteryOptimizeUtils.resetAppOptimizationMode(mContext, mIPm, mAom);
+            DynamicDenylistManager.getInstance(mContext)
+                    .resetDenylistIfNeeded(/* packageName= */ null, /* force= */ true);
+            final int[] restrictedUids = mNpm.getUidsWithPolicy(POLICY_REJECT_METERED_BACKGROUND);
+            final int currentUserId = ActivityManager.getCurrentUser();
+            for (int uid : restrictedUids) {
+                // Only reset for current user
+                if (UserHandle.getUserId(uid) == currentUserId) {
+                    mNpm.setUidPolicy(uid, POLICY_NONE);
                 }
             }
         });

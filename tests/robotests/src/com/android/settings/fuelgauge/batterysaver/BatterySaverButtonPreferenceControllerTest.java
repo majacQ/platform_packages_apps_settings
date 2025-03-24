@@ -40,6 +40,7 @@ import org.mockito.MockitoAnnotations;
 import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;
 
+// LINT.IfChange
 @RunWith(RobolectricTestRunner.class)
 public class BatterySaverButtonPreferenceControllerTest {
 
@@ -47,10 +48,8 @@ public class BatterySaverButtonPreferenceControllerTest {
     private Context mContext;
     private MainSwitchPreference mPreference;
 
-    @Mock
-    private PowerManager mPowerManager;
-    @Mock
-    private PreferenceScreen mPreferenceScreen;
+    @Mock private PowerManager mPowerManager;
+    @Mock private PreferenceScreen mPreferenceScreen;
 
     @Before
     public void setUp() {
@@ -75,7 +74,7 @@ public class BatterySaverButtonPreferenceControllerTest {
     public void updateState_lowPowerOn_preferenceIsChecked() {
         when(mPowerManager.isPowerSaveMode()).thenReturn(true);
 
-        mController.onSwitchChanged(null, mPowerManager.isPowerSaveMode());
+        mPreference.updateStatus(mPowerManager.isPowerSaveMode());
 
         assertThat(mPreference.isChecked()).isTrue();
     }
@@ -84,7 +83,7 @@ public class BatterySaverButtonPreferenceControllerTest {
     public void testUpdateState_lowPowerOff_preferenceIsUnchecked() {
         when(mPowerManager.isPowerSaveMode()).thenReturn(false);
 
-        mController.onSwitchChanged(null, mPowerManager.isPowerSaveMode());
+        mPreference.updateStatus(mPowerManager.isPowerSaveMode());
 
         assertThat(mPreference.isChecked()).isFalse();
     }
@@ -122,3 +121,4 @@ public class BatterySaverButtonPreferenceControllerTest {
         assertThat(mController.isPublicSlice()).isTrue();
     }
 }
+// LINT.ThenChange(BatterySaverPreferenceTest.kt)

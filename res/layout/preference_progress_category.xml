@@ -47,11 +47,14 @@
         android:layout_weight="1"
         android:layout_gravity="start|center"
         android:textAppearance="@*android:style/TextAppearance.DeviceDefault.Body2"
+        android:hyphenationFrequency="normalFast"
+        android:lineBreakWordStyle="phrase"
         android:textColor="?android:attr/colorAccent"/>
 
     <ProgressBar
         android:id="@+id/scanning_progress"
         style="?android:attr/progressBarStyleSmallTitle"
+        android:focusable="true"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_gravity="center_vertical"

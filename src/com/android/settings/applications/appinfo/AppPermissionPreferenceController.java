@@ -23,6 +23,7 @@ import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.content.res.Resources;
 import android.icu.text.ListFormatter;
+import android.icu.text.MessageFormat;
 import android.util.Log;
 
 import androidx.annotation.VisibleForTesting;
@@ -35,7 +36,10 @@ import com.android.settingslib.core.lifecycle.events.OnStart;
 import com.android.settingslib.core.lifecycle.events.OnStop;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 import java.util.Random;
 
 /**
@@ -56,7 +60,7 @@ public class AppPermissionPreferenceController extends AppInfoPreferenceControll
     final PermissionsSummaryHelper.PermissionsResultCallback mPermissionCallback
             = new PermissionsSummaryHelper.PermissionsResultCallback() {
         @Override
-        public void onPermissionSummaryResult(int standardGrantedPermissionCount,
+        public void onPermissionSummaryResult(
                 int requestedPermissionCount, int additionalGrantedPermissionCount,
                 List<CharSequence> grantedGroupLabels) {
             final Resources res = mContext.getResources();
@@ -70,9 +74,12 @@ public class AppPermissionPreferenceController extends AppInfoPreferenceControll
                 final ArrayList<CharSequence> list = new ArrayList<>(grantedGroupLabels);
                 if (additionalGrantedPermissionCount > 0) {
                     // N additional permissions.
-                    list.add(res.getQuantityString(
-                            R.plurals.runtime_permissions_additional_count,
-                            additionalGrantedPermissionCount, additionalGrantedPermissionCount));
+                    MessageFormat msgFormat = new MessageFormat(
+                            res.getString(R.string.runtime_permissions_additional_count),
+                            Locale.getDefault());
+                    Map<String, Object> arguments = new HashMap<>();
+                    arguments.put("count", additionalGrantedPermissionCount);
+                    list.add(msgFormat.format(arguments));
                 }
                 if (list.size() == 0) {
                     summary = res.getString(
@@ -125,6 +132,7 @@ public class AppPermissionPreferenceController extends AppInfoPreferenceControll
     private void startManagePermissionsActivity() {
         // start new activity to manage app permissions
         final Intent permIntent = new Intent(Intent.ACTION_MANAGE_APP_PERMISSIONS);
+        permIntent.setPackage(mPackageManager.getPermissionControllerPackageName());
         permIntent.putExtra(Intent.EXTRA_PACKAGE_NAME, mParent.getAppEntry().info.packageName);
         permIntent.putExtra(EXTRA_HIDE_INFO_BUTTON, true);
         Activity activity = mParent.getActivity();

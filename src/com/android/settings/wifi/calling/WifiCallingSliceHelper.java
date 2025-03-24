@@ -131,12 +131,7 @@ public class WifiCallingSliceHelper {
     public Slice createWifiCallingSlice(Uri sliceUri) {
         final int subId = getDefaultVoiceSubId();
 
-        if (!SubscriptionManager.isValidSubscriptionId(subId)) {
-            Log.d(TAG, "Invalid subscription Id");
-            return null;
-        }
-
-        if (!queryImsState(subId).isWifiCallingProvisioned()) {
+        if (!queryImsState(subId).isReadyToWifiCalling()) {
             Log.d(TAG, "Wifi calling is either not provisioned or not enabled by Platform");
             return null;
         }
@@ -179,7 +174,8 @@ public class WifiCallingSliceHelper {
                         .setTitle(res.getText(R.string.wifi_calling_settings_title))
                         .addEndItem(
                                 SliceAction.createToggle(
-                                        getBroadcastIntent(ACTION_WIFI_CALLING_CHANGED),
+                                        getBroadcastIntent(ACTION_WIFI_CALLING_CHANGED,
+                                                isWifiCallingEnabled),
                                         null /* actionTitle */, isWifiCallingEnabled))
                         .setPrimaryAction(SliceAction.createDeeplink(
                                 getActivityIntent(ACTION_WIFI_CALLING_SETTINGS_ACTIVITY),
@@ -222,7 +218,7 @@ public class WifiCallingSliceHelper {
             return null;
         }
 
-        if (!queryImsState(subId).isWifiCallingProvisioned()) {
+        if (!queryImsState(subId).isReadyToWifiCalling()) {
             Log.d(TAG, "Wifi calling is either not provisioned or not enabled by platform");
             return null;
         }
@@ -316,7 +312,7 @@ public class WifiCallingSliceHelper {
         final Resources res = getResourcesForSubId(subId);
         return new RowBuilder()
                 .setTitle(res.getText(preferenceTitleResId))
-                .setTitleItem(SliceAction.createToggle(getBroadcastIntent(action),
+                .setTitleItem(SliceAction.createToggle(getBroadcastIntent(action, checked),
                         icon, res.getText(preferenceTitleResId), checked));
     }
 
@@ -353,7 +349,13 @@ public class WifiCallingSliceHelper {
         final FutureTask<Integer> wfcModeTask = new FutureTask<>(new Callable<Integer>() {
             @Override
             public Integer call() {
-                return imsMmTelManager.getVoWiFiModeSetting();
+                int wfcMode = ImsMmTelManager.WIFI_MODE_UNKNOWN;
+                try {
+                    wfcMode = imsMmTelManager.getVoWiFiModeSetting();
+                } catch (IllegalArgumentException e) {
+                    Log.e(TAG, "getResourceIdForWfcMode: Exception", e);
+                }
+                return wfcMode;
             }
         });
         final ExecutorService executor = Executors.newSingleThreadExecutor();
@@ -370,25 +372,37 @@ public class WifiCallingSliceHelper {
     public void handleWifiCallingChanged(Intent intent) {
         final int subId = getDefaultVoiceSubId();
 
-        if (SubscriptionManager.isValidSubscriptionId(subId)) {
+        if (SubscriptionManager.isValidSubscriptionId(subId)
+                && intent.hasExtra(EXTRA_TOGGLE_STATE)) {
             final WifiCallingQueryImsState queryState = queryImsState(subId);
             if (queryState.isWifiCallingProvisioned()) {
-                final boolean currentValue = queryState.isEnabledByUser()
-                        && queryState.isAllowUserControl();
-                final boolean newValue = intent.getBooleanExtra(EXTRA_TOGGLE_STATE,
-                        currentValue);
+                final boolean currentValue = isWifiCallingEnabled();
+                final boolean newValue = !(intent.getBooleanExtra(EXTRA_TOGGLE_STATE,
+                        currentValue));
                 final Intent activationAppIntent =
                         getWifiCallingCarrierActivityIntent(subId);
-                if (!newValue || activationAppIntent == null) {
+                // 1. If activationApp is not null, users only can turn off WFC, or
+                // 2. Turn on/off directly if there is no activationApp.
+                if ((newValue != currentValue) && (activationAppIntent == null || !newValue)) {
                     // If either the action is to turn off wifi calling setting
                     // or there is no activation involved - Update the setting
-                    if (newValue != currentValue) {
-                        final ImsMmTelManager imsMmTelManager = getImsMmTelManager(subId);
+                    final ImsMmTelManager imsMmTelManager = getImsMmTelManager(subId);
+                    try {
                         imsMmTelManager.setVoWiFiSettingEnabled(newValue);
+                    } catch (IllegalArgumentException e) {
+                        Log.e(TAG, "handleWifiCallingChanged: Exception", e);
                     }
+                } else {
+                    Log.w(TAG, "action not taken: subId " + subId
+                            + " from " + currentValue + " to " + newValue);
                 }
+            } else {
+                Log.w(TAG, "action not taken: subId " + subId + " needs provision");
             }
+        } else {
+            Log.w(TAG, "action not taken: subId " + subId);
         }
+
         // notify change in slice in any case to get re-queried. This would result in displaying
         // appropriate message with the updated setting.
         mContext.getContentResolver().notifyChange(WIFI_CALLING_URI, null);
@@ -421,7 +435,14 @@ public class WifiCallingSliceHelper {
                 // Change the preference only when wifi calling is enabled
                 // And when wifi calling preference is editable for the current carrier
                 final ImsMmTelManager imsMmTelManager = getImsMmTelManager(subId);
-                final int currentValue = imsMmTelManager.getVoWiFiModeSetting();
+                int currentValue = ImsMmTelManager.WIFI_MODE_UNKNOWN;
+                try {
+                    currentValue = imsMmTelManager.getVoWiFiModeSetting();
+                } catch (IllegalArgumentException e) {
+                    Log.e(TAG, "handleWifiCallingPreferenceChanged: Exception", e);
+                    return;
+                }
+
                 int newValue = errorValue;
                 switch (intent.getAction()) {
                     case ACTION_WIFI_CALLING_PREFERENCE_WIFI_ONLY:
@@ -439,7 +460,11 @@ public class WifiCallingSliceHelper {
                 }
                 if (newValue != errorValue && newValue != currentValue) {
                     // Update the setting only when there is a valid update
-                    imsMmTelManager.setVoWiFiModeSetting(newValue);
+                    try {
+                        imsMmTelManager.setVoWiFiModeSetting(newValue);
+                    } catch (IllegalArgumentException e) {
+                        Log.e(TAG, "handleWifiCallingPreferenceChanged: Exception", e);
+                    }
                 }
             }
         }
@@ -541,10 +566,20 @@ public class WifiCallingSliceHelper {
                 PendingIntent.FLAG_IMMUTABLE);
     }
 
-    private PendingIntent getBroadcastIntent(String action) {
+    /**
+     * Create PendingIntent for Slice.
+     * Note: SliceAction#createDeeplink() didn't support toggle status so far,
+     *       therefore, embedding toggle status within PendingIntent.
+     *
+     * @param action Slice action
+     * @param isChecked Status when Slice created.
+     * @return PendingIntent
+     */
+    private PendingIntent getBroadcastIntent(String action, boolean isChecked) {
         final Intent intent = new Intent(action);
         intent.setClass(mContext, SliceBroadcastReceiver.class);
         intent.addFlags(Intent.FLAG_RECEIVER_FOREGROUND);
+        intent.putExtra(EXTRA_TOGGLE_STATE, isChecked);
         return PendingIntent.getBroadcast(mContext, 0 /* requestCode */, intent,
                 PendingIntent.FLAG_CANCEL_CURRENT | PendingIntent.FLAG_IMMUTABLE);
     }

@@ -19,14 +19,14 @@
     xmlns:settings="http://schemas.android.com/apk/res-auto"
     android:title="@string/wifi_configure_settings_preference_title">
 
-    <SwitchPreference
+    <SwitchPreferenceCompat
         android:key="enable_wifi_wakeup"
         android:title="@string/wifi_wakeup"
         android:icon="@drawable/ic_auto_wifi"
         android:summary="@string/wifi_wakeup_summary"
         settings:controller="com.android.settings.wifi.WifiWakeupPreferenceController"/>
 
-    <SwitchPreference
+    <SwitchPreferenceCompat
         android:key="notify_open_networks"
         android:title="@string/wifi_notify_open_networks"
         android:icon="@drawable/ic_open_wifi_notifications"
@@ -34,7 +34,12 @@
         settings:keywords="@string/keywords_wifi_notify_open_networks"
         settings:controller="com.android.settings.wifi.NotifyOpenNetworksPreferenceController"/>
 
-    <SwitchPreference
+    <com.android.settings.spa.preference.ComposePreference
+        android:key="allow_wep_networks"
+        android:title="@string/wifi_allow_wep_networks"
+        settings:controller="com.android.settings.wifi.WepNetworksPreferenceController"/>
+
+    <SwitchPreferenceCompat
         android:key="wifi_cellular_data_fallback"
         android:title="@string/wifi_cellular_data_fallback_title"
         android:summary="@string/wifi_cellular_data_fallback_summary"
@@ -42,15 +47,7 @@
 
     <Preference
         android:key="install_credentials"
-        android:title="@string/wifi_install_credentials">
-        <intent
-            android:action="android.credentials.INSTALL"
-            android:targetPackage="com.android.certinstaller"
-            android:targetClass="com.android.certinstaller.CertInstallerMain">
-            <!-- Same value as CERTIFICATE_USAGE_WIFI in keystore/java/android/security/Credentials.java -->
-            <extra android:name="certificate_install_usage" android:value="wifi"/>
-        </intent>
-    </Preference>
+        android:title="@string/wifi_install_credentials"/>
 
     <Preference
         android:key="wifi_direct"

@@ -19,19 +19,20 @@ package com.android.settings.widget;
 import static com.android.settingslib.RestrictedLockUtils.EnforcedAdmin;
 
 import android.content.Context;
-import android.content.res.TypedArray;
-import android.text.TextUtils;
 import android.util.AttributeSet;
-import android.widget.Switch;
+import android.widget.CompoundButton;
+import android.widget.CompoundButton.OnCheckedChangeListener;
 
-import androidx.core.content.res.TypedArrayUtils;
+import androidx.annotation.NonNull;
 import androidx.preference.PreferenceViewHolder;
 import androidx.preference.TwoStatePreference;
 
 import com.android.settings.R;
 import com.android.settings.widget.SettingsMainSwitchBar.OnBeforeCheckedChangeListener;
 import com.android.settingslib.RestrictedPreferenceHelper;
-import com.android.settingslib.widget.OnMainSwitchChangeListener;
+import com.android.settingslib.RestrictedPreferenceHelperProvider;
+import com.android.settingslib.core.instrumentation.SettingsJankMonitor;
+import com.android.settingslib.widget.GroupSectionDividerMixin;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -39,17 +40,16 @@ import java.util.List;
 /**
  * SettingsMainSwitchPreference is a Preference with a customized Switch.
  * This component is used as the main switch of the page
- * to enable or disable the prefereces on the page.
+ * to enable or disable the preferences on the page.
  */
 public class SettingsMainSwitchPreference extends TwoStatePreference implements
-        OnMainSwitchChangeListener {
+        OnCheckedChangeListener, RestrictedPreferenceHelperProvider, GroupSectionDividerMixin {
 
     private final List<OnBeforeCheckedChangeListener> mBeforeCheckedChangeListeners =
             new ArrayList<>();
-    private final List<OnMainSwitchChangeListener> mSwitchChangeListeners = new ArrayList<>();
+    private final List<OnCheckedChangeListener> mSwitchChangeListeners = new ArrayList<>();
 
     private SettingsMainSwitchBar mMainSwitchBar;
-    private CharSequence mTitle;
     private EnforcedAdmin mEnforcedAdmin;
     private RestrictedPreferenceHelper mRestrictedHelper;
 
@@ -75,13 +75,18 @@ public class SettingsMainSwitchPreference extends TwoStatePreference implements
     }
 
     @Override
+    public @NonNull RestrictedPreferenceHelper getRestrictedPreferenceHelper() {
+        return mRestrictedHelper;
+    }
+
+    @Override
     public void onBindViewHolder(PreferenceViewHolder holder) {
         super.onBindViewHolder(holder);
 
         holder.setDividerAllowedAbove(false);
         holder.setDividerAllowedBelow(false);
 
-        if (mRestrictedHelper != null) {
+        if (mEnforcedAdmin == null && mRestrictedHelper != null) {
             mEnforcedAdmin = mRestrictedHelper.checkRestrictionEnforced();
         }
         mMainSwitchBar = (SettingsMainSwitchBar) holder.findViewById(R.id.main_switch_bar);
@@ -102,17 +107,6 @@ public class SettingsMainSwitchPreference extends TwoStatePreference implements
         mSwitchChangeListeners.add(this);
 
         if (attrs != null) {
-            final TypedArray a = context.obtainStyledAttributes(attrs,
-                    androidx.preference.R.styleable.Preference, 0/*defStyleAttr*/,
-                    0/*defStyleRes*/);
-            final CharSequence title = TypedArrayUtils.getText(a,
-                    androidx.preference.R.styleable.Preference_title,
-                    androidx.preference.R.styleable.Preference_android_title);
-            if (!TextUtils.isEmpty(title)) {
-                setTitle(title.toString());
-            }
-            a.recycle();
-
             mRestrictedHelper = new RestrictedPreferenceHelper(context, this, attrs);
         }
     }
@@ -134,15 +128,16 @@ public class SettingsMainSwitchPreference extends TwoStatePreference implements
 
     @Override
     public void setTitle(CharSequence title) {
-        mTitle = title;
+        super.setTitle(title);
         if (mMainSwitchBar != null) {
-            mMainSwitchBar.setTitle(mTitle);
+            mMainSwitchBar.setTitle(title);
         }
     }
 
     @Override
-    public void onSwitchChanged(Switch switchView, boolean isChecked) {
+    public void onCheckedChanged(CompoundButton buttonView, boolean isChecked) {
         super.setChecked(isChecked);
+        SettingsJankMonitor.detectToggleJank(getKey(), buttonView);
     }
 
     /**
@@ -199,9 +194,10 @@ public class SettingsMainSwitchPreference extends TwoStatePreference implements
      * Set the OnBeforeCheckedChangeListener.
      */
     public void setOnBeforeCheckedChangeListener(OnBeforeCheckedChangeListener listener) {
-        if (mMainSwitchBar == null) {
+        if (!mBeforeCheckedChangeListeners.contains(listener)) {
             mBeforeCheckedChangeListeners.add(listener);
-        } else {
+        }
+        if (mMainSwitchBar != null) {
             mMainSwitchBar.setOnBeforeCheckedChangeListener(listener);
         }
     }
@@ -209,10 +205,11 @@ public class SettingsMainSwitchPreference extends TwoStatePreference implements
     /**
      * Adds a listener for switch changes
      */
-    public void addOnSwitchChangeListener(OnMainSwitchChangeListener listener) {
-        if (mMainSwitchBar == null) {
+    public void addOnSwitchChangeListener(OnCheckedChangeListener listener) {
+        if (!mSwitchChangeListeners.contains(listener)) {
             mSwitchChangeListeners.add(listener);
-        } else {
+        }
+        if (mMainSwitchBar != null) {
             mMainSwitchBar.addOnSwitchChangeListener(listener);
         }
     }
@@ -220,10 +217,9 @@ public class SettingsMainSwitchPreference extends TwoStatePreference implements
     /**
      * Remove a listener for switch changes
      */
-    public void removeOnSwitchChangeListener(OnMainSwitchChangeListener listener) {
-        if (mMainSwitchBar == null) {
-            mSwitchChangeListeners.remove(listener);
-        } else {
+    public void removeOnSwitchChangeListener(OnCheckedChangeListener listener) {
+        mSwitchChangeListeners.remove(listener);
+        if (mMainSwitchBar != null) {
             mMainSwitchBar.removeOnSwitchChangeListener(listener);
         }
     }
@@ -242,8 +238,13 @@ public class SettingsMainSwitchPreference extends TwoStatePreference implements
 
     private void initMainSwitchBar() {
         if (mMainSwitchBar != null) {
-            mMainSwitchBar.setTitle(mTitle);
+            mMainSwitchBar.setTitle(getTitle());
             mMainSwitchBar.setDisabledByAdmin(mEnforcedAdmin);
+
+            // Disable the focusability of the switch bar. The parent FrameLayout
+            // will be the only focusable view for the Main Switch Bar to avoid
+            // duplicate a11y focus.
+            mMainSwitchBar.setFocusable(false);
         }
     }
 
@@ -251,10 +252,8 @@ public class SettingsMainSwitchPreference extends TwoStatePreference implements
         for (OnBeforeCheckedChangeListener listener : mBeforeCheckedChangeListeners) {
             mMainSwitchBar.setOnBeforeCheckedChangeListener(listener);
         }
-        for (OnMainSwitchChangeListener listener : mSwitchChangeListeners) {
+        for (OnCheckedChangeListener listener : mSwitchChangeListeners) {
             mMainSwitchBar.addOnSwitchChangeListener(listener);
         }
-        mBeforeCheckedChangeListeners.clear();
-        mSwitchChangeListeners.clear();
     }
 }

@@ -18,18 +18,27 @@ import static android.provider.Settings.System.SCREEN_BRIGHTNESS_MODE_AUTOMATIC;
 import static android.provider.Settings.System.SCREEN_BRIGHTNESS_MODE_MANUAL;
 
 import android.content.Context;
+import android.os.Process;
+import android.os.UserManager;
 import android.provider.Settings;
+
+import androidx.annotation.NonNull;
+import androidx.preference.Preference;
 
 import com.android.settings.R;
 import com.android.settings.core.TogglePreferenceController;
+import com.android.settingslib.PrimarySwitchPreference;
 
-
+/**
+ * The top-level preference controller that updates the adaptive brightness.
+ */
+// LINT.IfChange
 public class AutoBrightnessPreferenceController extends TogglePreferenceController {
 
     private final String SYSTEM_KEY = SCREEN_BRIGHTNESS_MODE;
     private final int DEFAULT_VALUE = SCREEN_BRIGHTNESS_MODE_MANUAL;
 
-    public AutoBrightnessPreferenceController(Context context, String key) {
+    public AutoBrightnessPreferenceController(@NonNull Context context, @NonNull String key) {
         super(context, key);
     }
 
@@ -56,9 +65,30 @@ public class AutoBrightnessPreferenceController extends TogglePreferenceControll
     }
 
     @Override
+    public void updateState(Preference preference) {
+        super.updateState(preference);
+        if (!(preference instanceof PrimarySwitchPreference)) {
+            return;
+        }
+
+        PrimarySwitchPreference pref = (PrimarySwitchPreference) preference;
+        if (pref.isEnabled() && UserManager.get(mContext).hasBaseUserRestriction(
+                UserManager.DISALLOW_CONFIG_BRIGHTNESS, Process.myUserHandle())) {
+            pref.setEnabled(false);
+            pref.setSwitchEnabled(false);
+        }
+    }
+
+    @Override
     public CharSequence getSummary() {
         return mContext.getText(isChecked()
                 ? R.string.auto_brightness_summary_on
                 : R.string.auto_brightness_summary_off);
     }
+
+    @Override
+    public int getSliceHighlightMenuRes() {
+        return R.string.menu_key_display;
+    }
 }
+// LINT.ThenChange(AutoBrightnessScreen.kt)

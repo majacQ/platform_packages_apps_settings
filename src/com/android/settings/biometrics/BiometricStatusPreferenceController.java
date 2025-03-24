@@ -16,23 +16,24 @@
 
 package com.android.settings.biometrics;
 
-import static com.android.settings.Utils.SETTINGS_PACKAGE_NAME;
-import static com.android.settings.biometrics.BiometricEnrollBase.EXTRA_FROM_SETTINGS_SUMMARY;
-
 import android.content.Context;
 import android.content.Intent;
 import android.os.UserHandle;
 import android.os.UserManager;
 import android.text.TextUtils;
 
+import androidx.activity.result.ActivityResultLauncher;
+import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
 import androidx.preference.Preference;
 
 import com.android.internal.widget.LockPatternUtils;
 import com.android.settings.Utils;
+import com.android.settings.biometrics.activeunlock.ActiveUnlockStatusUtils;
 import com.android.settings.core.BasePreferenceController;
-import com.android.settings.core.SettingsBaseActivity;
 import com.android.settings.overlay.FeatureFactory;
-import com.android.settingslib.transition.SettingsTransitionHelper;
+
+import java.lang.ref.WeakReference;
 
 public abstract class BiometricStatusPreferenceController extends BasePreferenceController {
 
@@ -42,55 +43,74 @@ public abstract class BiometricStatusPreferenceController extends BasePreference
     private final int mUserId = UserHandle.myUserId();
     protected final int mProfileChallengeUserId;
 
+    private final BiometricNavigationUtils mBiometricNavigationUtils;
+    private final ActiveUnlockStatusUtils mActiveUnlockStatusUtils;
+    @NonNull private WeakReference<ActivityResultLauncher<Intent>> mLauncherWeakReference =
+            new WeakReference<>(null);
+
     /**
-     * @return true if the manager is not null and the hardware is detected.
+     * @return true if the controller should be shown exclusively.
      */
     protected abstract boolean isDeviceSupported();
 
     /**
-     * @return true if the user has enrolled biometrics of the subclassed type.
+     * @return true if the manager is not null and the hardware is detected.
      */
-    protected abstract boolean hasEnrolledBiometrics();
+    protected abstract boolean isHardwareSupported();
 
     /**
-     * @return the summary text if biometrics are enrolled.
+     * @return the summary text.
      */
-    protected abstract String getSummaryTextEnrolled();
-
-    /**
-     * @return the summary text if no biometrics are enrolled.
-     */
-    protected abstract String getSummaryTextNoneEnrolled();
+    protected abstract String getSummaryText();
 
     /**
      * @return the class name for the settings page.
      */
     protected abstract String getSettingsClassName();
 
-    /**
-     * @return the class name for entry to enrollment.
-     */
-    protected abstract String getEnrollClassName();
-
     public BiometricStatusPreferenceController(Context context, String key) {
         super(context, key);
         mUm = (UserManager) context.getSystemService(Context.USER_SERVICE);
-        mLockPatternUtils = FeatureFactory.getFactory(context)
+        mLockPatternUtils = FeatureFactory.getFeatureFactory()
                 .getSecurityFeatureProvider()
                 .getLockPatternUtils(context);
         mProfileChallengeUserId = Utils.getManagedProfileId(mUm, mUserId);
+        mBiometricNavigationUtils = new BiometricNavigationUtils(getUserId());
+        mActiveUnlockStatusUtils = new ActiveUnlockStatusUtils(context);
     }
 
     @Override
     public int getAvailabilityStatus() {
+        if (mActiveUnlockStatusUtils.isAvailable()) {
+            return getAvailabilityStatusWithWorkProfileCheck();
+        }
         if (!isDeviceSupported()) {
             return UNSUPPORTED_ON_DEVICE;
         }
+        return getAvailabilityFromUserSupported();
+    }
+
+    private int getAvailabilityFromUserSupported() {
         if (isUserSupported()) {
             return AVAILABLE;
         } else {
             return DISABLED_FOR_USER;
         }
+    }
+
+    // Since this code is flag guarded by mActiveUnlockStatusUtils.isAvailable(), we don't need to
+    // do another check here.
+    private int getAvailabilityStatusWithWorkProfileCheck() {
+        if (!isHardwareSupported()) {
+            // no hardware, never show
+            return UNSUPPORTED_ON_DEVICE;
+        }
+        if (!isDeviceSupported() && isWorkProfileController()) {
+            // hardware supported but work profile, don't show
+            return UNSUPPORTED_ON_DEVICE;
+        }
+        // hardware supported, not work profile, active unlock enabled
+        return getAvailabilityFromUserSupported();
     }
 
     @Override
@@ -103,8 +123,24 @@ public abstract class BiometricStatusPreferenceController extends BasePreference
         } else {
             preference.setVisible(true);
         }
-        preference.setSummary(hasEnrolledBiometrics() ? getSummaryTextEnrolled()
-                : getSummaryTextNoneEnrolled());
+        preference.setSummary(getSummaryText());
+    }
+
+    /**
+     * Set ActivityResultLauncher that will be used later during handlePreferenceTreeClick()
+     *
+     * @param preference the preference being compared
+     * @param launcher the ActivityResultLauncher
+     * @return {@code true} if matched preference.
+     */
+    public boolean setPreferenceTreeClickLauncher(@NonNull Preference preference,
+            @Nullable ActivityResultLauncher<Intent> launcher) {
+        if (!TextUtils.equals(preference.getKey(), getPreferenceKey())) {
+            return false;
+        }
+
+        mLauncherWeakReference = new WeakReference<>(launcher);
+        return true;
     }
 
     @Override
@@ -113,26 +149,8 @@ public abstract class BiometricStatusPreferenceController extends BasePreference
             return super.handlePreferenceTreeClick(preference);
         }
 
-        final Context context = preference.getContext();
-        final UserManager userManager = UserManager.get(context);
-        final int userId = getUserId();
-        if (Utils.startQuietModeDialogIfNecessary(context, userManager, userId)) {
-            return false;
-        }
-
-        final Intent intent = new Intent();
-        final String clazz = hasEnrolledBiometrics() ? getSettingsClassName()
-                : getEnrollClassName();
-        intent.setClassName(SETTINGS_PACKAGE_NAME, clazz);
-        if (!preference.getExtras().isEmpty()) {
-            intent.putExtras(preference.getExtras());
-        }
-        intent.putExtra(Intent.EXTRA_USER_ID, userId);
-        intent.putExtra(EXTRA_FROM_SETTINGS_SUMMARY, true);
-        intent.putExtra(SettingsBaseActivity.EXTRA_PAGE_TRANSITION_TYPE,
-                SettingsTransitionHelper.TransitionType.TRANSITION_SLIDE);
-        context.startActivity(intent);
-        return true;
+        return mBiometricNavigationUtils.launchBiometricSettings(preference.getContext(),
+                getSettingsClassName(), preference.getExtras(), mLauncherWeakReference.get());
     }
 
     protected int getUserId() {
@@ -141,5 +159,12 @@ public abstract class BiometricStatusPreferenceController extends BasePreference
 
     protected boolean isUserSupported() {
         return true;
+    }
+
+    /**
+     * Returns true if the controller controls is used for work profile.
+     */
+    protected boolean isWorkProfileController() {
+        return false;
     }
 }

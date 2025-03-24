@@ -18,13 +18,11 @@ package com.android.settings.notification.zen;
 
 import android.app.settings.SettingsEnums;
 import android.content.Context;
-import android.provider.SearchIndexableResource;
 
 import com.android.settings.R;
-import com.android.settings.search.BaseSearchIndexProvider;
+import com.android.settings.notification.NotificationBackend;
 import com.android.settingslib.core.AbstractPreferenceController;
 import com.android.settingslib.core.lifecycle.Lifecycle;
-import com.android.settingslib.search.SearchIndexable;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -33,7 +31,6 @@ import java.util.List;
  * DND Messages Settings page to determine which priority senders can bypass DND.
  * "Messages" include SMS, MMS, and messaging apps.
  */
-@SearchIndexable
 public class ZenModeMessagesSettings extends ZenModeSettingsBase {
 
     @Override
@@ -44,10 +41,9 @@ public class ZenModeMessagesSettings extends ZenModeSettingsBase {
     private static List<AbstractPreferenceController> buildPreferenceControllers(Context context,
             Lifecycle lifecycle) {
         List<AbstractPreferenceController> controllers = new ArrayList<>();
-        controllers.add(new ZenModeSendersImagePreferenceController(context,
-                "zen_mode_messages_image", lifecycle, true));
         controllers.add(new ZenModePrioritySendersPreferenceController(context,
-                "zen_mode_settings_category_messages", lifecycle, true));
+                "zen_mode_settings_category_messages", lifecycle, true,
+                new NotificationBackend()));
         controllers.add(new ZenModeBehaviorFooterPreferenceController(
                 context, lifecycle, R.string.zen_mode_messages_footer));
         return controllers;
@@ -62,27 +58,4 @@ public class ZenModeMessagesSettings extends ZenModeSettingsBase {
     public int getMetricsCategory() {
         return SettingsEnums.DND_MESSAGES;
     }
-
-    /**
-     * For Search.
-     */
-    public static final SearchIndexProvider SEARCH_INDEX_DATA_PROVIDER =
-            new BaseSearchIndexProvider() {
-        @Override
-        public List<SearchIndexableResource> getXmlResourcesToIndex(Context context,
-                boolean enabled) {
-            final ArrayList<SearchIndexableResource> result = new ArrayList<>();
-
-            final SearchIndexableResource sir = new SearchIndexableResource(context);
-            sir.xmlResId = R.xml.zen_mode_messages_settings;
-            result.add(sir);
-            return result;
-        }
-
-        @Override
-        public List<AbstractPreferenceController> createPreferenceControllers(
-                Context context) {
-            return buildPreferenceControllers(context, null);
-        }
-    };
 }

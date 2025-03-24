@@ -16,12 +16,14 @@
 
 package com.android.settings.enterprise;
 
-import android.annotation.NonNull;
+import static android.app.admin.DevicePolicyResources.Strings.Settings.DISABLED_BY_IT_ADMIN_TITLE;
+
 import android.annotation.UserIdInt;
 import android.app.Activity;
 import android.app.admin.DevicePolicyManager;
 import android.content.ComponentName;
 import android.content.Context;
+import android.content.DialogInterface;
 import android.os.Process;
 import android.os.UserHandle;
 import android.view.LayoutInflater;
@@ -30,6 +32,7 @@ import android.view.ViewGroup;
 import android.widget.ImageView;
 import android.widget.TextView;
 
+import androidx.annotation.NonNull;
 import androidx.annotation.VisibleForTesting;
 import androidx.appcompat.app.AlertDialog;
 
@@ -62,11 +65,18 @@ public final class ActionDisabledByAdminDialogHelper {
     public ActionDisabledByAdminDialogHelper(Activity activity, String restriction) {
         mActivity = activity;
         mDialogView = (ViewGroup) LayoutInflater.from(mActivity).inflate(
-                R.layout.admin_support_details_dialog, null);
+                R.layout.support_details_dialog, null);
         mActionDisabledByAdminController = ActionDisabledByAdminControllerFactory
                 .createInstance(mActivity, restriction,
                         new DeviceAdminStringProviderImpl(mActivity),
                         UserHandle.SYSTEM);
+        DevicePolicyManager devicePolicyManager =
+                mActivity.getSystemService(DevicePolicyManager.class);
+
+        TextView title = mDialogView.findViewById(R.id.admin_support_dialog_title);
+        title.setText(devicePolicyManager.getResources().getString(DISABLED_BY_IT_ADMIN_TITLE,
+                () -> mActivity.getString(R.string.disabled_by_policy_title)));
+
     }
 
     private @UserIdInt int getEnforcementAdminUserId(@NonNull EnforcedAdmin admin) {
@@ -79,10 +89,11 @@ public final class ActionDisabledByAdminDialogHelper {
 
     public AlertDialog.Builder prepareDialogBuilder(String restriction,
             EnforcedAdmin enforcedAdmin) {
+        DialogInterface.OnClickListener listener = mActionDisabledByAdminController
+                .getPositiveButtonListener(mActivity, enforcedAdmin);
         AlertDialog.Builder builder = new AlertDialog.Builder(mActivity)
-                .setPositiveButton(R.string.okay,
-                        mActionDisabledByAdminController
-                                .getPositiveButtonListener(mActivity, enforcedAdmin))
+                .setPositiveButton(listener == null
+                        ? R.string.suggestion_button_close : R.string.okay, listener)
                 .setView(mDialogView);
         prepareDialogBuilder(builder, restriction, enforcedAdmin);
         return builder;

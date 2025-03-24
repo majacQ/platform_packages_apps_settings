@@ -26,6 +26,7 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.net.Uri;
 import android.provider.SettingsSlicesContract;
+import android.util.Log;
 
 import androidx.core.graphics.drawable.IconCompat;
 import androidx.slice.Slice;
@@ -36,9 +37,15 @@ import androidx.slice.builders.SliceAction;
 import com.android.settings.R;
 import com.android.settings.SubSettings;
 import com.android.settings.connecteddevice.BluetoothDashboardFragment;
+import com.android.settings.network.SatelliteRepository;
 import com.android.settings.slices.CustomSliceRegistry;
 import com.android.settings.slices.SliceBroadcastReceiver;
 import com.android.settings.slices.SliceBuilderUtils;
+
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 /**
  * Utility class to build a Bluetooth Slice, and handle all associated actions.
@@ -80,16 +87,32 @@ public class BluetoothSliceBuilder {
         final PendingIntent primaryAction = getPrimaryAction(context);
         final SliceAction primarySliceAction = SliceAction.createDeeplink(primaryAction, icon,
                 ListBuilder.ICON_IMAGE, title);
-        final SliceAction toggleSliceAction = SliceAction.createToggle(toggleAction,
-                null /* actionTitle */, isBluetoothEnabled);
 
+        RowBuilder rowBuilder = new RowBuilder();
+        rowBuilder.setTitle(title);
+        rowBuilder.setPrimaryAction(primarySliceAction);
+        if (!isSatelliteOn(context)) {
+            final SliceAction toggleSliceAction = SliceAction.createToggle(toggleAction,
+                    null /* actionTitle */, isBluetoothEnabled);
+            rowBuilder.addEndItem(toggleSliceAction);
+        }
         return new ListBuilder(context, CustomSliceRegistry.BLUETOOTH_URI, ListBuilder.INFINITY)
                 .setAccentColor(color)
-                .addRow(new RowBuilder()
-                        .setTitle(title)
-                        .addEndItem(toggleSliceAction)
-                        .setPrimaryAction(primarySliceAction))
+                .addRow(rowBuilder)
                 .build();
+    }
+
+    private static boolean isSatelliteOn(Context context) {
+        boolean result = false;
+        SatelliteRepository satelliteRepository = new SatelliteRepository(context);
+        try {
+            result = satelliteRepository.requestIsSessionStarted(
+                    Executors.newSingleThreadExecutor()).get(3000, TimeUnit.MILLISECONDS);
+        } catch (InterruptedException | ExecutionException | TimeoutException e) {
+            Log.e(TAG, "Error to get satellite status : " + e);
+        }
+
+        return result;
     }
 
     public static Intent getIntent(Context context) {
@@ -98,7 +121,8 @@ public class BluetoothSliceBuilder {
                 SettingsSlicesContract.KEY_BLUETOOTH).build();
         return SliceBuilderUtils.buildSearchResultPageIntent(context,
                 BluetoothDashboardFragment.class.getName(), null /* key */, screenTitle,
-                SettingsEnums.SETTINGS_CONNECTED_DEVICE_CATEGORY)
+                SettingsEnums.SETTINGS_CONNECTED_DEVICE_CATEGORY,
+                R.string.menu_key_connected_devices)
                 .setClassName(context.getPackageName(), SubSettings.class.getName())
                 .setData(contentUri);
     }
@@ -123,7 +147,8 @@ public class BluetoothSliceBuilder {
 
     private static boolean isBluetoothEnabled() {
         final BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
-        return adapter.isEnabled();
+        return adapter.getState() == BluetoothAdapter.STATE_ON
+                || adapter.getState() == BluetoothAdapter.STATE_TURNING_ON;
     }
 
     private static PendingIntent getPrimaryAction(Context context) {

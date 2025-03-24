@@ -16,18 +16,25 @@
 
 package com.android.settings.password;
 
+import static android.app.admin.DevicePolicyResources.Strings.Settings.FORGOT_PASSWORD_TEXT;
+import static android.app.admin.DevicePolicyResources.Strings.Settings.FORGOT_PASSWORD_TITLE;
+
 import android.app.Activity;
+import android.app.admin.DevicePolicyManager;
 import android.content.Intent;
 import android.os.Bundle;
 import android.os.UserHandle;
 import android.os.UserManager;
 import android.util.Log;
+import android.widget.TextView;
 
 import com.android.settings.R;
 
 import com.google.android.setupcompat.template.FooterBarMixin;
 import com.google.android.setupcompat.template.FooterButton;
 import com.google.android.setupdesign.GlifLayout;
+import com.google.android.setupdesign.util.ContentStyler;
+import com.google.android.setupdesign.util.ThemeHelper;
 
 /**
  * An activity that asks the user to contact their admin to get assistance with forgotten password.
@@ -43,7 +50,13 @@ public class ForgotPasswordActivity extends Activity {
             finish();
             return;
         }
+        ThemeHelper.trySetDynamicColor(this);
         setContentView(R.layout.forgot_password_activity);
+
+        DevicePolicyManager devicePolicyManager = getSystemService(DevicePolicyManager.class);
+        TextView forgotPasswordText = (TextView) findViewById(R.id.forgot_password_text);
+        forgotPasswordText.setText(devicePolicyManager.getResources().getString(
+                FORGOT_PASSWORD_TEXT, () -> getString(R.string.forgot_password_text)));
 
         final GlifLayout layout = findViewById(R.id.setup_wizard_layout);
         layout.getMixin(FooterBarMixin.class).setPrimaryButton(
@@ -51,9 +64,17 @@ public class ForgotPasswordActivity extends Activity {
                         .setText(android.R.string.ok)
                         .setListener(v -> finish())
                         .setButtonType(FooterButton.ButtonType.DONE)
-                        .setTheme(R.style.SudGlifButton_Primary)
+                        .setTheme(com.google.android.setupdesign.R.style.SudGlifButton_Primary)
                         .build()
         );
+
+        if (ThemeHelper.shouldApplyMaterialYouStyle(this)) {
+            ContentStyler.applyBodyPartnerCustomizationStyle(
+                    layout.findViewById(R.id.forgot_password_text));
+        }
+
+        layout.setHeaderText(devicePolicyManager.getResources().getString(
+                FORGOT_PASSWORD_TITLE, () -> getString(R.string.forgot_password_title)));
 
         UserManager.get(this).requestQuietModeEnabled(
                 false, UserHandle.of(userId), UserManager.QUIET_MODE_DISABLE_DONT_ASK_CREDENTIAL);

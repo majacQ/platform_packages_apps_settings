@@ -34,7 +34,7 @@ import android.security.Credentials;
 import android.security.IKeyChainService;
 import android.security.KeyChain;
 import android.security.KeyChain.KeyChainConnection;
-import android.security.KeyStore;
+import android.security.keystore.KeyProperties;
 import android.text.TextUtils;
 import android.util.Log;
 import android.widget.Toast;
@@ -86,7 +86,7 @@ public final class CredentialStorage extends FragmentActivity {
         final String action = intent.getAction();
         final UserManager userManager = (UserManager) getSystemService(Context.USER_SERVICE);
         if (!userManager.hasUserRestriction(UserManager.DISALLOW_CONFIG_CREDENTIALS)) {
-            if (ACTION_RESET.equals(action)) {
+            if (ACTION_RESET.equals(action) && checkCallerIsSelf()) {
                 new ResetDialog();
             } else {
                 if (ACTION_INSTALL.equals(action) && checkCallerIsCertInstallerOrSelfInProfile()) {
@@ -126,23 +126,14 @@ public final class CredentialStorage extends FragmentActivity {
         final Bundle bundle = mInstallBundle;
         mInstallBundle = null;
 
-        final int uid = bundle.getInt(Credentials.EXTRA_INSTALL_AS_UID, KeyStore.UID_SELF);
+        final int uid = bundle.getInt(Credentials.EXTRA_INSTALL_AS_UID, KeyProperties.UID_SELF);
 
-        if (uid != KeyStore.UID_SELF && !UserHandle.isSameUser(uid, Process.myUid())) {
-            final int dstUserId = UserHandle.getUserId(uid);
-
-            // Restrict install target to the wifi uid.
-            if (uid != Process.WIFI_UID) {
+        if (uid != KeyProperties.UID_SELF && uid != Process.WIFI_UID) {
+            if (!UserHandle.isSameUser(uid, Process.myUid())) {
                 Log.e(TAG, "Failed to install credentials as uid " + uid + ": cross-user installs"
                         + " may only target wifi uids");
                 return true;
             }
-
-            final Intent installIntent = new Intent(ACTION_INSTALL)
-                    .setFlags(Intent.FLAG_ACTIVITY_FORWARD_RESULT)
-                    .putExtras(bundle);
-            startActivityAsUser(installIntent, new UserHandle(dstUserId));
-            return true;
         }
 
         String alias = bundle.getString(Credentials.EXTRA_USER_KEY_ALIAS, null);
@@ -279,7 +270,7 @@ public final class CredentialStorage extends FragmentActivity {
 
                 // If this is not a WiFi key, mark  it as user-selectable, so that it can be
                 // selected by users from the Certificate Selection prompt.
-                if (mUid == Process.SYSTEM_UID || mUid == KeyStore.UID_SELF) {
+                if (mUid == Process.SYSTEM_UID || mUid == KeyProperties.UID_SELF) {
                     service.setUserSelectable(mAlias, true);
                 }
 
@@ -316,6 +307,19 @@ public final class CredentialStorage extends FragmentActivity {
         setResult(RESULT_OK);
 
         finish();
+    }
+
+    /**
+     * Check that the caller is Settings.
+     */
+    private boolean checkCallerIsSelf() {
+        try {
+            return Process.myUid() == android.app.ActivityManager.getService()
+                    .getLaunchedFromUid(getActivityToken());
+        } catch (RemoteException re) {
+            // Error talking to ActivityManager, just give up
+            return false;
+        }
     }
 
     /**

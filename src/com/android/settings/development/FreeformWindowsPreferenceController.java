@@ -16,19 +16,23 @@
 
 package com.android.settings.development;
 
+import static android.content.pm.PackageManager.FEATURE_FREEFORM_WINDOW_MANAGEMENT;
+
 import android.content.Context;
-import android.os.Build;
 import android.provider.Settings;
 
+import androidx.annotation.Nullable;
 import androidx.annotation.VisibleForTesting;
 import androidx.preference.Preference;
-import androidx.preference.SwitchPreference;
+import androidx.preference.TwoStatePreference;
 
+import com.android.settings.R;
 import com.android.settings.core.PreferenceControllerMixin;
 import com.android.settingslib.development.DeveloperOptionsPreferenceController;
 
 public class FreeformWindowsPreferenceController extends DeveloperOptionsPreferenceController
-        implements Preference.OnPreferenceChangeListener, PreferenceControllerMixin {
+        implements Preference.OnPreferenceChangeListener, PreferenceControllerMixin,
+        RebootConfirmationDialogHost {
 
     private static final String ENABLE_FREEFORM_SUPPORT_KEY = "enable_freeform_support";
 
@@ -37,8 +41,20 @@ public class FreeformWindowsPreferenceController extends DeveloperOptionsPrefere
     @VisibleForTesting
     static final int SETTING_VALUE_ON = 1;
 
-    public FreeformWindowsPreferenceController(Context context) {
+    @Nullable
+    private final DevelopmentSettingsDashboardFragment mFragment;
+
+    public FreeformWindowsPreferenceController(
+            Context context, @Nullable DevelopmentSettingsDashboardFragment fragment) {
         super(context);
+        mFragment = fragment;
+    }
+
+    @Override
+    public boolean isAvailable() {
+        // When devices have the system feature FEATURE_FREEFORM_WINDOW_MANAGEMENT, freeform
+        // mode is enabled automatically, and this toggle is not needed.
+        return !mContext.getPackageManager().hasSystemFeature(FEATURE_FREEFORM_WINDOW_MANAGEMENT);
     }
 
     @Override
@@ -52,6 +68,10 @@ public class FreeformWindowsPreferenceController extends DeveloperOptionsPrefere
         Settings.Global.putInt(mContext.getContentResolver(),
                 Settings.Global.DEVELOPMENT_ENABLE_FREEFORM_WINDOWS_SUPPORT,
                 isEnabled ? SETTING_VALUE_ON : SETTING_VALUE_OFF);
+        if (isEnabled) {
+            RebootConfirmationDialogFragment.show(
+                    mFragment, R.string.reboot_dialog_enable_freeform_support, this);
+        }
         return true;
     }
 
@@ -59,7 +79,7 @@ public class FreeformWindowsPreferenceController extends DeveloperOptionsPrefere
     public void updateState(Preference preference) {
         final int mode = Settings.Global.getInt(mContext.getContentResolver(),
                 Settings.Global.DEVELOPMENT_ENABLE_FREEFORM_WINDOWS_SUPPORT, SETTING_VALUE_OFF);
-        ((SwitchPreference) mPreference).setChecked(mode != SETTING_VALUE_OFF);
+        ((TwoStatePreference) mPreference).setChecked(mode != SETTING_VALUE_OFF);
     }
 
     @Override
@@ -67,11 +87,6 @@ public class FreeformWindowsPreferenceController extends DeveloperOptionsPrefere
         super.onDeveloperOptionsSwitchDisabled();
         Settings.Global.putInt(mContext.getContentResolver(),
                 Settings.Global.DEVELOPMENT_ENABLE_FREEFORM_WINDOWS_SUPPORT, SETTING_VALUE_OFF);
-        ((SwitchPreference) mPreference).setChecked(false);
-    }
-
-    @VisibleForTesting
-    String getBuildType() {
-        return Build.TYPE;
+        ((TwoStatePreference) mPreference).setChecked(false);
     }
 }

@@ -35,8 +35,8 @@ public class EnterpriseDisclosurePreferenceController extends BasePreferenceCont
     public EnterpriseDisclosurePreferenceController(Context context, String key) {
         // Preference key doesn't matter as we are creating the preference in code.
         super(context, key);
-        mFeatureProvider = FeatureFactory.getFactory(mContext)
-                .getEnterprisePrivacyFeatureProvider(mContext);
+        mFeatureProvider = FeatureFactory.getFeatureFactory()
+                .getEnterprisePrivacyFeatureProvider();
     }
 
     @Override
@@ -66,11 +66,12 @@ public class EnterpriseDisclosurePreferenceController extends BasePreferenceCont
         final FooterPreference footerPreference = screen.findPreference(getPreferenceKey());
         footerPreference.setTitle(disclosure);
         footerPreference.setLearnMoreAction(view -> {
-            mContext.startActivity(new Intent(Settings.ACTION_ENTERPRISE_PRIVACY_SETTINGS));
+            mContext.startActivity(new Intent(Settings.ACTION_ENTERPRISE_PRIVACY_SETTINGS)
+                    .setPackage(mContext.getPackageName()));
         });
-        final String learnMoreContentDescription = mContext.getString(
+        final String learnMoreText = mContext.getString(
                 R.string.footer_learn_more_content_description, getLabelName());
-        footerPreference.setLearnMoreContentDescription(learnMoreContentDescription);
+        footerPreference.setLearnMoreText(learnMoreText);
     }
 
     private String getLabelName() {

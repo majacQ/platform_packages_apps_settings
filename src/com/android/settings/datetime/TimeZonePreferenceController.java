@@ -16,50 +16,50 @@
 
 package com.android.settings.datetime;
 
+import static android.app.time.Capabilities.CAPABILITY_POSSESSED;
+
+import android.app.time.TimeManager;
+import android.app.time.TimeZoneCapabilities;
 import android.content.Context;
 
 import androidx.annotation.VisibleForTesting;
 import androidx.preference.Preference;
 
-import com.android.settings.core.PreferenceControllerMixin;
+import com.android.settings.core.BasePreferenceController;
 import com.android.settingslib.RestrictedPreference;
-import com.android.settingslib.core.AbstractPreferenceController;
 import com.android.settingslib.datetime.ZoneGetter;
 
 import java.util.Calendar;
 
-public class TimeZonePreferenceController extends AbstractPreferenceController
-        implements PreferenceControllerMixin {
+public class TimeZonePreferenceController extends BasePreferenceController {
 
-    private static final String KEY_TIMEZONE = "timezone";
+    private final TimeManager mTimeManager;
 
-    private final AutoTimeZonePreferenceController mAutoTimeZonePreferenceController;
+    public TimeZonePreferenceController(Context context, String preferenceKey) {
+        super(context, preferenceKey);
+        mTimeManager = context.getSystemService(TimeManager.class);
+    }
 
-    public TimeZonePreferenceController(Context context,
-            AutoTimeZonePreferenceController autoTimeZonePreferenceController) {
-        super(context);
-        mAutoTimeZonePreferenceController = autoTimeZonePreferenceController;
+    @Override
+    public CharSequence getSummary() {
+        return getTimeZoneOffsetAndName();
+    }
+
+    @Override
+    public int getAvailabilityStatus() {
+        return shouldEnableManualTimeZoneSelection() ? AVAILABLE : DISABLED_DEPENDENT_SETTING;
     }
 
     @Override
     public void updateState(Preference preference) {
-        if (!(preference instanceof RestrictedPreference)) {
+        super.updateState(preference);
+
+        if (preference instanceof RestrictedPreference
+                && ((RestrictedPreference) preference).isDisabledByAdmin()) {
             return;
         }
-        preference.setSummary(getTimeZoneOffsetAndName());
-        if( !((RestrictedPreference) preference).isDisabledByAdmin()) {
-            preference.setEnabled(!mAutoTimeZonePreferenceController.isEnabled());
-        }
-    }
 
-    @Override
-    public boolean isAvailable() {
-        return true;
-    }
-
-    @Override
-    public String getPreferenceKey() {
-        return KEY_TIMEZONE;
+        preference.setEnabled(shouldEnableManualTimeZoneSelection());
     }
 
     @VisibleForTesting
@@ -67,5 +67,13 @@ public class TimeZonePreferenceController extends AbstractPreferenceController
         final Calendar now = Calendar.getInstance();
         return ZoneGetter.getTimeZoneOffsetAndName(mContext,
                 now.getTimeZone(), now.getTime());
+    }
+
+    private boolean shouldEnableManualTimeZoneSelection() {
+        TimeZoneCapabilities timeZoneCapabilities =
+                mTimeManager.getTimeZoneCapabilitiesAndConfig().getCapabilities();
+        int suggestManualTimeZoneCapability =
+                timeZoneCapabilities.getSetManualTimeZoneCapability();
+        return suggestManualTimeZoneCapability == CAPABILITY_POSSESSED;
     }
 }

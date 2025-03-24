@@ -26,7 +26,7 @@
         android:layout="@layout/settings_entity_header"
         settings:controller="com.android.settings.applications.specialaccess.notificationaccess.HeaderPreferenceController"/>
 
-    <com.android.settings.widget.FilterTouchesSwitchPreference
+    <com.android.settingslib.RestrictedSwitchPreference
         android:key="notification_access_switch"
         android:title="@string/notification_access_detail_switch"
         settings:controller="com.android.settings.applications.specialaccess.notificationaccess.ApprovalPreferenceController"/>
@@ -63,6 +63,12 @@
         android:fragment="com.android.settings.applications.specialaccess.notificationaccess.BridgedAppsSettings"
         settings:searchable="false"
         settings:controller="com.android.settings.applications.specialaccess.notificationaccess.BridgedAppsLinkPreferenceController" />
+
+    <Preference
+        android:key="more_settings"
+        android:title="@string/notif_listener_more_settings"
+        android:summary="@string/notif_listener_more_settings_desc"
+        settings:controller="com.android.settings.applications.specialaccess.notificationaccess.MoreSettingsPreferenceController" />
 
     <com.android.settingslib.widget.FooterPreference
         android:key="notif_listener_not_migrated"

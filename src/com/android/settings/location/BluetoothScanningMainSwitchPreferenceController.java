@@ -16,26 +16,29 @@
 package com.android.settings.location;
 
 import android.content.Context;
+import android.os.UserManager;
 import android.provider.Settings;
-import android.widget.Switch;
+import android.widget.CompoundButton;
+import android.widget.CompoundButton.OnCheckedChangeListener;
 
 import androidx.preference.PreferenceScreen;
 
 import com.android.settings.R;
 import com.android.settings.core.TogglePreferenceController;
 import com.android.settingslib.widget.MainSwitchPreference;
-import com.android.settingslib.widget.OnMainSwitchChangeListener;
 
 /**
  * Preference controller for Bluetooth scanning main switch.
  */
 public class BluetoothScanningMainSwitchPreferenceController extends TogglePreferenceController
-        implements OnMainSwitchChangeListener {
+        implements OnCheckedChangeListener {
 
     private static final String KEY_BLUETOOTH_SCANNING_SWITCH = "bluetooth_always_scanning_switch";
+    private final UserManager mUserManager;
 
     public BluetoothScanningMainSwitchPreferenceController(Context context) {
         super(context, KEY_BLUETOOTH_SCANNING_SWITCH);
+        mUserManager = UserManager.get(context);
     }
 
     @Override
@@ -49,7 +52,9 @@ public class BluetoothScanningMainSwitchPreferenceController extends TogglePrefe
     @Override
     public int getAvailabilityStatus() {
         return mContext.getResources().getBoolean(R.bool.config_show_location_scanning)
-                ? AVAILABLE
+                ? (mUserManager.hasUserRestriction(UserManager.DISALLOW_CONFIG_LOCATION)
+                        ? DISABLED_DEPENDENT_SETTING
+                        : AVAILABLE)
                 : UNSUPPORTED_ON_DEVICE;
     }
 
@@ -68,7 +73,12 @@ public class BluetoothScanningMainSwitchPreferenceController extends TogglePrefe
     }
 
     @Override
-    public void onSwitchChanged(Switch switchView, boolean isChecked) {
+    public int getSliceHighlightMenuRes() {
+        return R.string.menu_key_location;
+    }
+
+    @Override
+    public void onCheckedChanged(CompoundButton buttonView, boolean isChecked) {
         if (isChecked != isChecked()) {
             setChecked(isChecked);
         }

@@ -25,6 +25,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import android.content.Context;
+import android.content.Intent;
 import android.os.Build;
 import android.os.UserManager;
 
@@ -33,12 +34,14 @@ import androidx.preference.Preference;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;
 import org.robolectric.util.ReflectionHelpers;
 
+// LINT.IfChange
 @RunWith(RobolectricTestRunner.class)
 public class FirmwareVersionDetailPreferenceControllerTest {
 
@@ -63,7 +66,7 @@ public class FirmwareVersionDetailPreferenceControllerTest {
 
     @Test
     public void getSummary_shouldGetBuildVersion() {
-        assertThat(mController.getSummary()).isEqualTo(Build.VERSION.RELEASE_OR_CODENAME);
+        assertThat(mController.getSummary()).isEqualTo(Build.VERSION.RELEASE_OR_PREVIEW_DISPLAY);
     }
 
     @Test
@@ -85,7 +88,13 @@ public class FirmwareVersionDetailPreferenceControllerTest {
 
         mController.handlePreferenceTreeClick(mPreference);
 
-        verify(mContext).startActivity(any());
+        final ArgumentCaptor<Intent> captor = ArgumentCaptor.forClass(Intent.class);
+        verify(mContext).startActivity(captor.capture());
+        assertThat(captor.getValue().getAction()).isEqualTo(Intent.ACTION_MAIN);
+        assertThat(captor.getValue().getComponent().getPackageName()).isEqualTo("android");
+        assertThat(captor.getValue().getComponent().getClassName()).isEqualTo(
+                com.android.internal.app.PlatLogoActivity.class.getName());
+        assertThat(captor.getValue().getFlags() & Intent.FLAG_ACTIVITY_NEW_TASK).isGreaterThan(0);
     }
 
     @Test
@@ -104,3 +113,4 @@ public class FirmwareVersionDetailPreferenceControllerTest {
         }
     }
 }
+// LINT.ThenChange(FirmwareVersionDetailPreferenceTest.kt)

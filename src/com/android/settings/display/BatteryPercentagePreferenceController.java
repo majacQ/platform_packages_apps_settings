@@ -23,7 +23,7 @@ import android.provider.Settings;
 
 import androidx.preference.Preference;
 import androidx.preference.PreferenceScreen;
-import androidx.preference.SwitchPreference;
+import androidx.preference.TwoStatePreference;
 
 import com.android.internal.R;
 import com.android.settings.Utils;
@@ -35,6 +35,7 @@ import com.android.settings.overlay.FeatureFactory;
  * A controller to manage the switch for showing battery percentage in the status bar.
  */
 
+// LINT.IfChange
 public class BatteryPercentagePreferenceController extends BasePreferenceController implements
         PreferenceControllerMixin, Preference.OnPreferenceChangeListener {
 
@@ -67,9 +68,11 @@ public class BatteryPercentagePreferenceController extends BasePreferenceControl
     @Override
     public void updateState(Preference preference) {
         int setting = Settings.System.getInt(mContext.getContentResolver(),
-                SHOW_BATTERY_PERCENT, 0);
+                SHOW_BATTERY_PERCENT,
+                mContext.getResources().getBoolean(
+                        R.bool.config_defaultBatteryPercentageSetting) ? 1 : 0);
 
-        ((SwitchPreference) preference).setChecked(setting == 1);
+        ((TwoStatePreference) preference).setChecked(setting == 1);
     }
 
     @Override
@@ -77,8 +80,9 @@ public class BatteryPercentagePreferenceController extends BasePreferenceControl
         boolean showPercentage = (Boolean) newValue;
         Settings.System.putInt(mContext.getContentResolver(), SHOW_BATTERY_PERCENT,
                 showPercentage ? 1 : 0);
-        FeatureFactory.getFactory(mContext).getMetricsFeatureProvider()
+        FeatureFactory.getFeatureFactory().getMetricsFeatureProvider()
                 .action(mContext, SettingsEnums.OPEN_BATTERY_PERCENTAGE, showPercentage);
         return true;
     }
 }
+// LINT.ThenChange(BatteryPercentageSwitchPreference.kt)

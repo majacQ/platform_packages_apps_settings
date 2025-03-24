@@ -29,7 +29,6 @@ import com.android.settings.R;
 import com.android.settings.Settings;
 import com.android.settings.biometrics.fingerprint.FingerprintEnrollSuggestionActivity;
 import com.android.settings.biometrics.fingerprint.FingerprintSuggestionActivity;
-import com.android.settings.notification.zen.ZenSuggestionActivity;
 import com.android.settings.wallpaper.WallpaperSuggestionActivity;
 import com.android.settings.wifi.calling.WifiCallingSuggestionActivity;
 
@@ -81,14 +80,6 @@ public class SettingsSuggestionsTest {
                 R.string.night_display_suggestion_summary);
     }
 
-    @Test
-    public void zenSuggestion_isValid() {
-        assertSuggestionEquals(
-                ZenSuggestionActivity.class.getName(),
-                R.string.zen_suggestion_title,
-                R.string.zen_suggestion_summary);
-    }
-
     private void assertSuggestionEquals(String activityName, @StringRes int titleRes,
             @StringRes int summaryRes) {
 
@@ -97,7 +88,8 @@ public class SettingsSuggestionsTest {
         final ComponentName componentName = new ComponentName(context, activityName);
         final ActivityInfo info;
         try {
-            info = pm.getActivityInfo(componentName, PackageManager.GET_META_DATA);
+            info = pm.getActivityInfo(componentName, PackageManager.GET_META_DATA
+                    | PackageManager.MATCH_DISABLED_COMPONENTS);
         } catch (NameNotFoundException e) {
             throw new RuntimeException(e);
         }

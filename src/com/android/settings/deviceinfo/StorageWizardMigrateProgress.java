@@ -27,9 +27,11 @@ import android.os.Handler;
 import android.os.storage.DiskInfo;
 import android.util.Log;
 import android.view.View;
+import android.view.WindowManager;
 import android.widget.Toast;
 
 import com.android.settings.R;
+import com.android.settings.Utils;
 
 public class StorageWizardMigrateProgress extends StorageWizardBase {
     private static final String TAG = "StorageWizardMigrateProgress";
@@ -46,7 +48,16 @@ public class StorageWizardMigrateProgress extends StorageWizardBase {
             return;
         }
         setContentView(R.layout.storage_wizard_progress);
+        
+        // hide the navigation bar for this activity only. So that user can not press back button accidentally.
+        View decorView = getWindow().getDecorView();    
+        int uiOptions = View.SYSTEM_UI_FLAG_HIDE_NAVIGATION;
+        decorView.setSystemUiVisibility(uiOptions);
 
+        //disable touch in activity so user can not make the hidden navigation bar visible.
+        getWindow().setFlags(WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE,
+                     WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE);         
+      
         mMoveId = getIntent().getIntExtra(EXTRA_MOVE_ID, -1);
 
         setIcon(R.drawable.ic_swap_horiz);
@@ -72,6 +83,7 @@ public class StorageWizardMigrateProgress extends StorageWizardBase {
                         // Kinda lame, but tear down that shiny finished
                         // notification, since user is still in wizard flow
                         final Intent finishIntent = new Intent(ACTION_FINISH_WIZARD);
+                        finishIntent.setPackage(Utils.SYSTEMUI_PACKAGE_NAME);
                         finishIntent.addFlags(Intent.FLAG_RECEIVER_REGISTERED_ONLY);
                         sendBroadcast(finishIntent);
 

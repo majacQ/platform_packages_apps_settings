@@ -18,10 +18,9 @@ package com.android.settings.biometrics.face;
 
 import android.app.Activity;
 import android.app.settings.SettingsEnums;
+import android.content.Intent;
 import android.hardware.face.FaceManager;
-import android.os.UserHandle;
 
-import com.android.settings.Utils;
 import com.android.settings.biometrics.BiometricEnrollSidecar;
 
 import java.util.Arrays;
@@ -33,23 +32,26 @@ public class FaceEnrollSidecar extends BiometricEnrollSidecar {
 
     private final int[] mDisabledFeatures;
 
-    private FaceManager mFaceManager;
+    private FaceUpdater mFaceUpdater;
 
-    public FaceEnrollSidecar(int[] disabledFeatures) {
+    private Intent mIntent;
+
+    public FaceEnrollSidecar(int[] disabledFeatures, Intent intent) {
         mDisabledFeatures = Arrays.copyOf(disabledFeatures, disabledFeatures.length);
+        mIntent = intent;
     }
 
     @Override
     public void onAttach(Activity activity) {
         super.onAttach(activity);
-        mFaceManager = Utils.getFaceManagerOrNull(activity);
+        mFaceUpdater = new FaceUpdater(activity);
     }
 
     @Override
     public void startEnrollment() {
         super.startEnrollment();
-        mFaceManager.enroll(mUserId, mToken, mEnrollmentCancel,
-                mEnrollmentCallback, mDisabledFeatures);
+        mFaceUpdater.enroll(mUserId, mToken, mEnrollmentCancel,
+                mEnrollmentCallback, mDisabledFeatures, mIntent);
     }
 
     private FaceManager.EnrollmentCallback mEnrollmentCallback

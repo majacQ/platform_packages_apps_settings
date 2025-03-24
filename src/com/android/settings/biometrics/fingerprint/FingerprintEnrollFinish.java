@@ -21,21 +21,27 @@ import android.content.ComponentName;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.hardware.fingerprint.FingerprintManager;
+import android.hardware.fingerprint.FingerprintSensorPropertiesInternal;
 import android.os.Bundle;
+import android.text.TextUtils;
 import android.util.Log;
 import android.view.View;
+import android.view.ViewGroup;
 
 import androidx.annotation.VisibleForTesting;
 
 import com.android.settings.R;
 import com.android.settings.Utils;
 import com.android.settings.biometrics.BiometricEnrollBase;
-import com.android.settings.password.ChooseLockSettingsHelper;
+import com.android.settings.biometrics.BiometricUtils;
+import com.android.settings.biometrics.fingerprint.feature.SfpsRestToUnlockFeature;
+import com.android.settings.overlay.FeatureFactory;
 
 import com.google.android.setupcompat.template.FooterBarMixin;
 import com.google.android.setupcompat.template.FooterButton;
 import com.google.android.setupcompat.util.WizardManagerHelper;
 
+import java.util.List;
 /**
  * Activity which concludes fingerprint enrollment.
  */
@@ -45,24 +51,50 @@ public class FingerprintEnrollFinish extends BiometricEnrollBase {
     private static final String ACTION_FINGERPRINT_SETTINGS =
             "android.settings.FINGERPRINT_SETTINGS";
     @VisibleForTesting
-    static final int REQUEST_ADD_ANOTHER = 1;
-    @VisibleForTesting
-    static final String FINGERPRINT_SUGGESTION_ACTIVITY =
+    public static final String FINGERPRINT_SUGGESTION_ACTIVITY =
             "com.android.settings.SetupFingerprintSuggestionActivity";
+
+    private FingerprintManager mFingerprintManager;
+
+    private boolean mCanAssumeSfps;
+
+    private boolean mIsAddAnotherOrFinish;
+
+    private SfpsRestToUnlockFeature mSfpsRestToUnlockFeature;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        setContentView(R.layout.fingerprint_enroll_finish);
+        mFingerprintManager = getSystemService(FingerprintManager.class);
+        final List<FingerprintSensorPropertiesInternal> props =
+                mFingerprintManager.getSensorPropertiesInternal();
+        mCanAssumeSfps = props != null && props.size() == 1 && props.get(0).isAnySidefpsType();
+        if (mCanAssumeSfps) {
+            mSfpsRestToUnlockFeature = FeatureFactory.getFeatureFactory()
+                    .getFingerprintFeatureProvider().getSfpsRestToUnlockFeature(this);
+            setContentView(R.layout.sfps_enroll_finish);
+            setUpRestToUnlockLayout();
+        } else {
+            setContentView(R.layout.fingerprint_enroll_finish);
+        }
         setHeaderText(R.string.security_settings_fingerprint_enroll_finish_title);
-        setDescriptionText(R.string.security_settings_fingerprint_enroll_finish_message);
+        setDescriptionText(Utils.isPrivateProfile(mUserId, getApplicationContext())
+                ? R.string.private_space_fingerprint_enroll_finish_message
+                : R.string.security_settings_fingerprint_enroll_finish_v2_message);
+
+        final String sfpsDescription = mSfpsRestToUnlockFeature != null
+                ? mSfpsRestToUnlockFeature.getDescriptionForSfps(this)
+                : null;
+        if (mCanAssumeSfps && !TextUtils.isEmpty(sfpsDescription)) {
+            setDescriptionForSfps(sfpsDescription);
+        }
 
         mFooterBarMixin = getLayout().getMixin(FooterBarMixin.class);
         mFooterBarMixin.setSecondaryButton(
                 new FooterButton.Builder(this)
                         .setText(R.string.fingerprint_enroll_button_add)
                         .setButtonType(FooterButton.ButtonType.SKIP)
-                        .setTheme(R.style.SudGlifButton_Secondary)
+                        .setTheme(com.google.android.setupdesign.R.style.SudGlifButton_Secondary)
                         .build()
         );
 
@@ -71,31 +103,53 @@ public class FingerprintEnrollFinish extends BiometricEnrollBase {
                         .setText(R.string.security_settings_fingerprint_enroll_done)
                         .setListener(this::onNextButtonClick)
                         .setButtonType(FooterButton.ButtonType.NEXT)
-                        .setTheme(R.style.SudGlifButton_Primary)
+                        .setTheme(com.google.android.setupdesign.R.style.SudGlifButton_Primary)
                         .build()
         );
     }
 
+    private void setDescriptionForSfps(String sfpsDescription) {
+        final FingerprintManager fpm = Utils.getFingerprintManagerOrNull(this);
+        if (fpm != null) {
+            final List<FingerprintSensorPropertiesInternal> props =
+                    fpm.getSensorPropertiesInternal();
+            final int maxEnrollments = props.get(0).maxEnrollmentsPerUser;
+            final int enrolled = fpm.getEnrolledFingerprints(mUserId).size();
+            if (enrolled < maxEnrollments) {
+                setDescriptionText(sfpsDescription);
+            }
+        }
+    }
+
+    private void setUpRestToUnlockLayout() {
+        final ViewGroup contentFrame = findViewById(R.id.sfps_enrollment_finish_content_frame);
+        final View restToUnlockLayout = mSfpsRestToUnlockFeature.getRestToUnlockLayout(this);
+        if (restToUnlockLayout == null) return;
+        contentFrame.removeAllViews();
+        contentFrame.addView(restToUnlockLayout);
+    }
+
     @Override
     public void onBackPressed() {
-        super.onBackPressed();
-
         updateFingerprintSuggestionEnableState();
+        Intent intent = getIntent().putExtra(EXTRA_FINISHED_ENROLL_FINGERPRINT, true);
+        setResult(RESULT_CANCELED, intent);
+        finish();
     }
 
     @Override
     protected void onResume() {
         super.onResume();
-
         FooterButton addButton = mFooterBarMixin.getSecondaryButton();
 
         final FingerprintManager fpm = Utils.getFingerprintManagerOrNull(this);
         boolean hideAddAnother = false;
         if (fpm != null) {
+            final List<FingerprintSensorPropertiesInternal> props =
+                    fpm.getSensorPropertiesInternal();
+            int maxEnrollments = props.get(0).maxEnrollmentsPerUser;
             int enrolled = fpm.getEnrolledFingerprints(mUserId).size();
-            int max = getResources().getInteger(
-                    com.android.internal.R.integer.config_fingerprintMaxTemplatesPerUser);
-            hideAddAnother = enrolled >= max;
+            hideAddAnother = enrolled >= maxEnrollments;
         }
         if (hideAddAnother) {
             // Don't show "Add" button if too many fingerprints already added
@@ -106,14 +160,25 @@ public class FingerprintEnrollFinish extends BiometricEnrollBase {
     }
 
     @Override
+    protected void onStart() {
+        super.onStart();
+
+        // Reset it to false every time activity back to fg because this flag is stateless between
+        // different life cycle.
+        mIsAddAnotherOrFinish = false;
+    }
+
+    @Override
     protected void onNextButtonClick(View view) {
         updateFingerprintSuggestionEnableState();
-        setResult(RESULT_FINISHED);
+        finishAndToNext(RESULT_FINISHED);
+    }
+
+    private void finishAndToNext(int resultCode) {
+        mIsAddAnotherOrFinish = true;
+        setResult(resultCode);
         if (WizardManagerHelper.isAnySetupWizard(getIntent())) {
             postEnroll();
-        } else if (mFromSettingsSummary) {
-            // Only launch fingerprint settings if enrollment was triggered through settings summary
-            launchFingerprintSettings();
         }
         finish();
     }
@@ -145,27 +210,25 @@ public class FingerprintEnrollFinish extends BiometricEnrollBase {
         }
     }
 
-    private void launchFingerprintSettings() {
-        final Intent intent = new Intent(ACTION_FINGERPRINT_SETTINGS);
-        intent.setPackage(Utils.SETTINGS_PACKAGE_NAME);
-        intent.putExtra(ChooseLockSettingsHelper.EXTRA_KEY_CHALLENGE_TOKEN, mToken);
-        intent.setFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
-        intent.putExtra(Intent.EXTRA_USER_ID, mUserId);
-        intent.putExtra(BiometricEnrollBase.EXTRA_KEY_CHALLENGE, mChallenge);
-        startActivity(intent);
-        overridePendingTransition(R.anim.sud_slide_back_in, R.anim.sud_slide_back_out);
+    private void onAddAnotherButtonClick(View view) {
+        mIsAddAnotherOrFinish = true;
+        startActivityForResult(getFingerprintEnrollingIntent(), BiometricUtils.REQUEST_ADD_ANOTHER);
     }
 
-    private void onAddAnotherButtonClick(View view) {
-        startActivityForResult(getFingerprintEnrollingIntent(), REQUEST_ADD_ANOTHER);
+    @Override
+    protected boolean shouldFinishWhenBackgrounded() {
+        return !mIsAddAnotherOrFinish && super.shouldFinishWhenBackgrounded();
     }
 
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         updateFingerprintSuggestionEnableState();
-        if (requestCode == REQUEST_ADD_ANOTHER && resultCode != RESULT_CANCELED) {
-            setResult(resultCode, data);
-            finish();
+        if (requestCode == BiometricUtils.REQUEST_ADD_ANOTHER && resultCode == RESULT_TIMEOUT) {
+            finishAndToNext(resultCode);
+        } else if (requestCode == BiometricUtils.REQUEST_ADD_ANOTHER
+                && resultCode != RESULT_CANCELED) {
+            // If user cancel during "Add another", just use similar flow on "Next" button
+            finishAndToNext(RESULT_FINISHED);
         } else {
             super.onActivityResult(requestCode, resultCode, data);
         }

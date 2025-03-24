@@ -17,9 +17,8 @@
 package com.android.settings.deviceinfo.simstatus;
 
 import static com.android.settings.deviceinfo.simstatus.SimStatusDialogController.CELL_DATA_NETWORK_TYPE_VALUE_ID;
+import static com.android.settings.deviceinfo.simstatus.SimStatusDialogController.CELLULAR_NETWORK_STATE;
 import static com.android.settings.deviceinfo.simstatus.SimStatusDialogController.CELL_VOICE_NETWORK_TYPE_VALUE_ID;
-import static com.android.settings.deviceinfo.simstatus.SimStatusDialogController.EID_INFO_LABEL_ID;
-import static com.android.settings.deviceinfo.simstatus.SimStatusDialogController.EID_INFO_VALUE_ID;
 import static com.android.settings.deviceinfo.simstatus.SimStatusDialogController.ICCID_INFO_LABEL_ID;
 import static com.android.settings.deviceinfo.simstatus.SimStatusDialogController.ICCID_INFO_VALUE_ID;
 import static com.android.settings.deviceinfo.simstatus.SimStatusDialogController.IMS_REGISTRATION_STATE_LABEL_ID;
@@ -30,31 +29,25 @@ import static com.android.settings.deviceinfo.simstatus.SimStatusDialogControlle
 import static com.android.settings.deviceinfo.simstatus.SimStatusDialogController.OPERATOR_INFO_VALUE_ID;
 import static com.android.settings.deviceinfo.simstatus.SimStatusDialogController.ROAMING_INFO_VALUE_ID;
 import static com.android.settings.deviceinfo.simstatus.SimStatusDialogController.SERVICE_STATE_VALUE_ID;
-import static com.android.settings.deviceinfo.simstatus.SimStatusDialogController.SIGNAL_STRENGTH_LABEL_ID;
-import static com.android.settings.deviceinfo.simstatus.SimStatusDialogController.SIGNAL_STRENGTH_VALUE_ID;
 
+import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.doReturn;
-import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.spy;
-import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import android.content.Context;
 import android.os.PersistableBundle;
 import android.telephony.CarrierConfigManager;
-import android.telephony.CellSignalStrength;
 import android.telephony.ServiceState;
-import android.telephony.SignalStrength;
 import android.telephony.SubscriptionInfo;
 import android.telephony.SubscriptionManager;
+import android.telephony.TelephonyCallback;
 import android.telephony.TelephonyManager;
 import android.telephony.UiccCardInfo;
-import android.telephony.UiccPortInfo;
 import android.telephony.euicc.EuiccManager;
 
 import androidx.lifecycle.LifecycleOwner;
@@ -62,7 +55,6 @@ import androidx.test.annotation.UiThreadTest;
 import androidx.test.core.app.ApplicationProvider;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 
-import com.android.settings.R;
 import com.android.settings.testutils.ResourcesUtils;
 import com.android.settingslib.core.lifecycle.Lifecycle;
 
@@ -74,29 +66,26 @@ import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.Executor;
 
 @RunWith(AndroidJUnit4.class)
 public class SimStatusDialogControllerTest {
 
     @Mock
     private SimStatusDialogFragment mDialog;
+    @Mock
     private TelephonyManager mTelephonyManager;
+    @Mock
+    private TelephonyManager mTelephonyManagerForSub1;
+    @Mock
+    private TelephonyManager mTelephonyManagerForSub2;
     @Mock
     private SubscriptionInfo mSubscriptionInfo;
     @Mock
     private ServiceState mServiceState;
-    @Mock
-    private SignalStrength mSignalStrength;
-    @Mock
-    private CellSignalStrength mCellSignalStrengthCdma;
-    @Mock
-    private CellSignalStrength mCellSignalStrengthLte;
-    @Mock
-    private CellSignalStrength mCellSignalStrengthWcdma;
     @Mock
     private CarrierConfigManager mCarrierConfigManager;
     private PersistableBundle mPersistableBundle;
@@ -109,11 +98,13 @@ public class SimStatusDialogControllerTest {
     @Mock
     private LifecycleOwner mLifecycleOwner;
     private Lifecycle mLifecycle;
-
-    private static final String TEST_EID_FROM_CARD = "11111111111111111111111111111111";
-    private static final String TEST_EID_FROM_MANAGER = "22222222222222222222222222222222";
+    private AtomicBoolean mEuiccEnabled;
+    private AtomicInteger mUpdatePhoneNumberCount;
 
     private static final int MAX_PHONE_COUNT_DUAL_SIM = 2;
+
+    private static final int TEST_SUB_ID_1 = 1;
+    private static final int TEST_SUB_ID_2 = 2;
 
     @Before
     @UiThreadTest
@@ -127,6 +118,7 @@ public class SimStatusDialogControllerTest {
         mSubscriptionManager = spy(mContext.getSystemService(SubscriptionManager.class));
         doReturn(mSubscriptionInfo).when(mSubscriptionManager)
                 .getActiveSubscriptionInfoForSimSlotIndex(anyInt());
+        doReturn(TEST_SUB_ID_1).when(mSubscriptionInfo).getSubscriptionId();
 
         when(mContext.getSystemService(TelephonyManager.class)).thenReturn(mTelephonyManager);
         when(mContext.getSystemService(CarrierConfigManager.class)).thenReturn(
@@ -134,21 +126,27 @@ public class SimStatusDialogControllerTest {
         when(mContext.getSystemService(EuiccManager.class)).thenReturn(mEuiccManager);
         when(mContext.getSystemService(SubscriptionManager.class)).thenReturn(mSubscriptionManager);
 
-        doReturn(mTelephonyManager).when(mTelephonyManager).createForSubscriptionId(
-                anyInt());
+        doReturn(mTelephonyManagerForSub1).when(mTelephonyManager).createForSubscriptionId(
+                TEST_SUB_ID_1);
+        doReturn(mTelephonyManagerForSub2).when(mTelephonyManager).createForSubscriptionId(
+                TEST_SUB_ID_2);
         doReturn(2).when(mTelephonyManager).getCardIdForDefaultEuicc();
         doReturn(TelephonyManager.NETWORK_TYPE_LTE).when(mTelephonyManager).getDataNetworkType();
 
-        mController = spy(new SimStatusDialogController(mDialog, mLifecycle, 0 /* phone id */));
-        // CellSignalStrength setup
-        doReturn(0).when(mCellSignalStrengthCdma).getDbm();
-        doReturn(0).when(mCellSignalStrengthCdma).getAsuLevel();
-        doReturn(0).when(mCellSignalStrengthLte).getDbm();
-        doReturn(0).when(mCellSignalStrengthLte).getAsuLevel();
-        doReturn(0).when(mCellSignalStrengthWcdma).getDbm();
-        doReturn(0).when(mCellSignalStrengthWcdma).getAsuLevel();
+        mUpdatePhoneNumberCount = new AtomicInteger();
+        mEuiccEnabled = new AtomicBoolean(false);
+        mController = new SimStatusDialogController(mDialog, mLifecycle, 0 /* phone id */) {
+            @Override
+            public TelephonyManager getTelephonyManager() {
+                return mTelephonyManager;
+            }
 
-        doReturn(null).when(mSignalStrength).getCellSignalStrengths();
+            @Override
+            public void updatePhoneNumber() {
+                super.updatePhoneNumber();
+                mUpdatePhoneNumberCount.incrementAndGet();
+            }
+        };
         doReturn(mSubscriptionInfo).when(mSubscriptionManager).getActiveSubscriptionInfo(anyInt());
 
         when(mTelephonyManager.getActiveModemCount()).thenReturn(MAX_PHONE_COUNT_SINGLE_SIM);
@@ -157,16 +155,13 @@ public class SimStatusDialogControllerTest {
                 .getLogicalToPhysicalSlotMapping();
 
         when(mEuiccManager.isEnabled()).thenReturn(false);
-        when(mEuiccManager.getEid()).thenReturn("");
+        mEuiccEnabled.set(false);
         when(mEuiccManager.createForCardId(anyInt())).thenReturn(mEuiccManager);
 
         mPersistableBundle = new PersistableBundle();
         when(mCarrierConfigManager.getConfigForSubId(anyInt())).thenReturn(mPersistableBundle);
 
-        mPersistableBundle.putBoolean(
-                CarrierConfigManager.KEY_SHOW_SIGNAL_STRENGTH_IN_SIM_STATUS_BOOL, true);
         doReturn(mServiceState).when(mTelephonyManager).getServiceState();
-        doReturn(mSignalStrength).when(mTelephonyManager).getSignalStrength();
     }
 
     @Test
@@ -183,7 +178,7 @@ public class SimStatusDialogControllerTest {
     public void initialize_shouldUpdatePhoneNumber() {
         mController.initialize();
 
-        verify(mController).updatePhoneNumber();
+        assertTrue(mUpdatePhoneNumberCount.get() > 0);
     }
 
     @Test
@@ -208,7 +203,8 @@ public class SimStatusDialogControllerTest {
     }
 
     @Test
-    public void initialize_updateServiceStateWithPowerOff_shouldUpdateTextAndResetSignalStrength() {
+    @Ignore("b/337417520")
+    public void initialize_updateServiceStateWithPowerOff_shouldUpdateText() {
         when(mServiceState.getState()).thenReturn(ServiceState.STATE_POWER_OFF);
 
         mController.initialize();
@@ -216,11 +212,11 @@ public class SimStatusDialogControllerTest {
         final String offServiceText = ResourcesUtils.getResourcesString(
                 mContext, "radioInfo_service_off");
         verify(mDialog).setText(SERVICE_STATE_VALUE_ID, offServiceText);
-        verify(mDialog).setText(SIGNAL_STRENGTH_VALUE_ID, "0");
     }
 
     @Test
-    public void initialize_updateVoiceDataOutOfService_shouldUpdateSettingAndResetSignalStrength() {
+    @Ignore("b/337417520")
+    public void initialize_updateVoiceDataOutOfService_shouldUpdateSetting() {
         when(mServiceState.getState()).thenReturn(ServiceState.STATE_OUT_OF_SERVICE);
         when(mServiceState.getDataRegistrationState()).thenReturn(
                 ServiceState.STATE_OUT_OF_SERVICE);
@@ -230,7 +226,6 @@ public class SimStatusDialogControllerTest {
         final String offServiceText = ResourcesUtils.getResourcesString(
                 mContext, "radioInfo_service_out");
         verify(mDialog).setText(SERVICE_STATE_VALUE_ID, offServiceText);
-        verify(mDialog).setText(SIGNAL_STRENGTH_VALUE_ID, "0");
     }
 
     @Test
@@ -243,52 +238,6 @@ public class SimStatusDialogControllerTest {
         final String inServiceText = ResourcesUtils.getResourcesString(
                 mContext, "radioInfo_service_in");
         verify(mDialog).setText(SERVICE_STATE_VALUE_ID, inServiceText);
-    }
-
-    @Test
-    public void initialize_updateSignalStrengthWithLte50Wcdma40_shouldUpdateSignalStrengthTo50() {
-        final int lteDbm = 50;
-        final int lteAsu = 50;
-        final int wcdmaDbm = 40;
-        final int wcdmaAsu = 40;
-        setupCellSignalStrength_lteWcdma(lteDbm, lteAsu, wcdmaDbm, wcdmaAsu);
-
-        mController.initialize();
-
-        final String signalStrengthString = ResourcesUtils.getResourcesString(
-                mContext, "sim_signal_strength", lteDbm, lteAsu);
-        verify(mDialog, times(2)).setText(SIGNAL_STRENGTH_VALUE_ID, signalStrengthString);
-    }
-
-    @Test
-    public void initialize_updateSignalStrengthWithLte50Cdma30_shouldUpdateSignalStrengthTo50() {
-        final int lteDbm = 50;
-        final int lteAsu = 50;
-        final int cdmaDbm = 30;
-        final int cdmaAsu = 30;
-        setupCellSignalStrength_lteCdma(lteDbm, lteAsu, cdmaDbm, cdmaAsu);
-
-        mController.initialize();
-
-        final String signalStrengthString = ResourcesUtils.getResourcesString(
-                mContext, "sim_signal_strength", lteDbm, lteAsu);
-        verify(mDialog, times(2)).setText(SIGNAL_STRENGTH_VALUE_ID, signalStrengthString);
-    }
-
-    @Test
-    public void initialize_updateVoiceOutOfServiceDataInService_shouldUpdateSignalStrengthTo50() {
-        when(mServiceState.getState()).thenReturn(ServiceState.STATE_OUT_OF_SERVICE);
-        when(mServiceState.getDataRegistrationState()).thenReturn(ServiceState.STATE_IN_SERVICE);
-
-        final int lteDbm = 50;
-        final int lteAsu = 50;
-        setupCellSignalStrength_lteOnly(lteDbm, lteAsu);
-
-        mController.initialize();
-
-        final String signalStrengthString = ResourcesUtils.getResourcesString(
-                mContext, "sim_signal_strength", lteDbm, lteAsu);
-        verify(mDialog, times(2)).setText(SIGNAL_STRENGTH_VALUE_ID, signalStrengthString);
     }
 
     @Test
@@ -347,24 +296,12 @@ public class SimStatusDialogControllerTest {
     }
 
     @Test
-    public void initialize_doNotShowSignalStrength_shouldRemoveSignalStrengthSetting() {
-        mPersistableBundle.putBoolean(
-                CarrierConfigManager.KEY_SHOW_SIGNAL_STRENGTH_IN_SIM_STATUS_BOOL, false);
-
-        mController.initialize();
-
-        verify(mDialog, times(2)).removeSettingFromScreen(SIGNAL_STRENGTH_LABEL_ID);
-        verify(mDialog, times(2)).removeSettingFromScreen(SIGNAL_STRENGTH_VALUE_ID);
-    }
-
-    @Test
     public void initialize_showSignalStrengthAndIccId_shouldShowSignalStrengthAndIccIdSetting() {
         // getConfigForSubId is nullable, so make sure the default behavior is correct
         when(mCarrierConfigManager.getConfigForSubId(anyInt())).thenReturn(null);
 
         mController.initialize();
 
-        verify(mDialog, times(2)).setText(eq(SIGNAL_STRENGTH_VALUE_ID), any());
         verify(mDialog).removeSettingFromScreen(ICCID_INFO_LABEL_ID);
         verify(mDialog).removeSettingFromScreen(ICCID_INFO_VALUE_ID);
     }
@@ -381,487 +318,82 @@ public class SimStatusDialogControllerTest {
     }
 
     @Test
-    public void initialize_updateEid_shouldNotSetEid() {
-        when(mTelephonyManager.getActiveModemCount()).thenReturn(MAX_PHONE_COUNT_DUAL_SIM);
-
-        ArrayList<UiccCardInfo> uiccCardInfos = new ArrayList<>();
-        UiccCardInfo uiccCardInfo1 = new UiccCardInfo(
-                false,                                  // isEuicc
-                0,                                      // cardId
-                null,                                   // eid
-                0,                                      // slotIndex
-                true,                                   // isRemovable
-                false,            // isMultipleEnabledProfileSupported
-                Collections.singletonList(
-                        new UiccPortInfo(
-                                "123451234567890",     // iccId
-                                0,                   // portIdx
-                                0,              // logicalSlotIdx
-                                true               // isActive
-                        )
-                ));
-        uiccCardInfos.add(uiccCardInfo1);
-        UiccCardInfo uiccCardInfo2 = new UiccCardInfo(
-                true,                                   // isEuicc
-                1,                                      // cardId
-                null,                                   // eid (unavailable)
-                1,                                      // slotIndex
-                false,                             // isRemovable
-                false,
-                Collections.singletonList(
-                        new UiccPortInfo(
-                                null,                  // iccId
-                                1,                   // portIdx
-                                1,              // logicalSlotIdx
-                                true               // isActive
-                        )
-                )
-        );
-        uiccCardInfos.add(uiccCardInfo2);
-        when(mTelephonyManager.getUiccCardsInfo()).thenReturn(uiccCardInfos);
-
-        Map<Integer, Integer> slotMapping = new HashMap<>();
-        slotMapping.put(0, 1);
-        slotMapping.put(1, 0);
-        when(mTelephonyManager.getLogicalToPhysicalSlotMapping()).thenReturn(slotMapping);
-
-        when(mEuiccManager.isEnabled()).thenReturn(true);
-        when(mEuiccManager.getEid()).thenReturn(null);
-
-        doNothing().when(mController).requestForUpdateEid();
-        mController.updateEid(mController.getEid(0));
-        mController.initialize();
-
-        // Keep 'Not available' if neither the card nor the associated manager can provide EID.
-        verify(mDialog, never()).setText(eq(EID_INFO_VALUE_ID), any());
-        verify(mDialog, never()).removeSettingFromScreen(eq(EID_INFO_VALUE_ID));
-    }
-
-    @Test
-    public void initialize_updateEid_shouldSetEidFromCard() {
-        when(mTelephonyManager.getActiveModemCount()).thenReturn(MAX_PHONE_COUNT_DUAL_SIM);
-
-        ArrayList<UiccCardInfo> uiccCardInfos = new ArrayList<>();
-        UiccCardInfo uiccCardInfo1 = new UiccCardInfo(
-                true,                                   // isEuicc
-                0,                                      // cardId
-                TEST_EID_FROM_CARD,                     // eid
-                0,                                      // slotIndex
-                false,                                 // isRemovable
-                false,
-                Collections.singletonList(new UiccPortInfo(
-                        null,                                 // iccId
-                        0,                                  // portIdx
-                        0,                             // logicalSlotIdx
-                        true                              // isActive
-                )));
-        uiccCardInfos.add(uiccCardInfo1);
-        UiccCardInfo uiccCardInfo2 = new UiccCardInfo(
-                false,                                  // isEuicc
-                1,                                      // cardId
-                null,                                   // eid
-                1,                                      // slotIndex
-                true,                             // isRemovable
-                false,           // isMultipleEnabledProfileSupported
-                Collections.singletonList(
-                        new UiccPortInfo(
-                                "123451234567890",      // iccId
-                                1,                    // portIdx
-                                1,               // logicalSlotIdx
-                                true                // isActive
-                        )
-                ));
-        uiccCardInfos.add(uiccCardInfo2);
-        when(mTelephonyManager.getUiccCardsInfo()).thenReturn(uiccCardInfos);
-
-        Map<Integer, Integer> slotMapping = new HashMap<>();
-        slotMapping.put(0, 0);
-        slotMapping.put(1, 1);
-        when(mTelephonyManager.getLogicalToPhysicalSlotMapping()).thenReturn(slotMapping);
-
-        when(mEuiccManager.isEnabled()).thenReturn(true);
-        when(mEuiccManager.getEid()).thenReturn(TEST_EID_FROM_MANAGER);
-        when(mEuiccManager.createForCardId(0)).thenReturn(mEuiccManager);
-
-        doNothing().when(mController).requestForUpdateEid();
-        mController.updateEid(mController.getEid(0));
-        mController.initialize();
-
-        // Set EID retrieved from the card.
-        verify(mDialog).setText(EID_INFO_VALUE_ID, TEST_EID_FROM_CARD);
-        verify(mDialog, never()).removeSettingFromScreen(eq(EID_INFO_VALUE_ID));
-    }
-
-    @Test
-    public void initialize_updateEid_shouldSetEidFromManager() {
-        when(mTelephonyManager.getActiveModemCount()).thenReturn(MAX_PHONE_COUNT_DUAL_SIM);
-
-        ArrayList<UiccCardInfo> uiccCardInfos = new ArrayList<>();
-        UiccCardInfo uiccCardInfo1 = new UiccCardInfo(
-                false,                                  // isEuicc
-                0,                                      // cardId
-                null,                                   // eid
-                0,                                      // slotIndex
-                true,                             // isRemovable
-                false,             // isMultipleEnabledProfileSupported
-                Collections.singletonList(
-                        new UiccPortInfo(
-                                "123451234567890",       // iccId
-                                1,                     // portIdx
-                                1,                // logicalSlotIdx
-                                true                 // isActive
-                        )
-                ));
-        uiccCardInfos.add(uiccCardInfo1);
-        UiccCardInfo uiccCardInfo2 = new UiccCardInfo(
-                true,                                   // isEuicc
-                1,                                      // cardId
-                null,                                   // eid (unavailable)
-                1,                                      // slotIndex
-                false,                                 // isRemovable
-                false,             // isMultipleEnabledProfileSupported
-                Collections.singletonList(
-                        new UiccPortInfo(
-                                null,                   // iccId
-                                1,                    // portIdx
-                                1,               // logicalSlotIdx
-                                true                // isActive
-                        )
-                )
-        );
-        uiccCardInfos.add(uiccCardInfo2);
-        when(mTelephonyManager.getUiccCardsInfo()).thenReturn(uiccCardInfos);
-
-        Map<Integer, Integer> slotMapping = new HashMap<>();
-        slotMapping.put(0, 1);
-        slotMapping.put(1, 0);
-        when(mTelephonyManager.getLogicalToPhysicalSlotMapping()).thenReturn(slotMapping);
-
-        when(mEuiccManager.isEnabled()).thenReturn(true);
-        when(mEuiccManager.getEid()).thenReturn(TEST_EID_FROM_MANAGER);
-        when(mEuiccManager.createForCardId(0)).thenThrow(
-                new RuntimeException("Unexpected card ID was specified"));
-        when(mEuiccManager.createForCardId(1)).thenReturn(mEuiccManager);
-
-        doNothing().when(mController).requestForUpdateEid();
-        mController.updateEid(mController.getEid(0));
-        mController.initialize();
-
-        // Set EID retrieved from the manager associated with the card which cannot provide EID.
-        verify(mDialog).setText(EID_INFO_VALUE_ID, TEST_EID_FROM_MANAGER);
-        verify(mDialog, never()).removeSettingFromScreen(eq(EID_INFO_VALUE_ID));
-    }
-
-    @Test
-    public void initialize_updateEid_shouldRemoveEid() {
-        when(mTelephonyManager.getActiveModemCount()).thenReturn(MAX_PHONE_COUNT_DUAL_SIM);
-
-        ArrayList<UiccCardInfo> uiccCardInfos = new ArrayList<>();
-        UiccCardInfo uiccCardInfo1 = new UiccCardInfo(
-                false,                                  // isEuicc
-                0,                                      // cardId
-                null,                                   // eid
-                0,                                      // slotIndex
-                true,                                  // isRemovable
-                false,              // isMultipleEnabledProfileSupported
-                Collections.singletonList(
-                        new UiccPortInfo(
-                                "123451234567890",        // iccId
-                                0,                      // portIdx
-                                0,                 // logicalSlotIdx
-                                true                  // isActive
-                        )
-                ));
-        uiccCardInfos.add(uiccCardInfo1);
-        UiccCardInfo uiccCardInfo2 = new UiccCardInfo(
-                true,                                   // isEuicc
-                1,                                      // cardId
-                TEST_EID_FROM_CARD,                     // eid
-                1,                                      // slotIndex
-                false,                                 // isRemovable
-                false,            // isMultipleEnabledProfileSupported
-                Collections.singletonList(
-                        new UiccPortInfo(
-                                null,                  // iccId
-                                1,                   // portIdx
-                                1,              // logicalSlotIdx
-                                true               // isActive
-                        )
-                ));
-        uiccCardInfos.add(uiccCardInfo2);
-        when(mTelephonyManager.getUiccCardsInfo()).thenReturn(uiccCardInfos);
-
-        Map<Integer, Integer> slotMapping = new HashMap<>();
-        slotMapping.put(0, 0);
-        slotMapping.put(1, 1);
-        when(mTelephonyManager.getLogicalToPhysicalSlotMapping()).thenReturn(slotMapping);
-
-        when(mEuiccManager.isEnabled()).thenReturn(true);
-        when(mEuiccManager.getEid()).thenReturn(TEST_EID_FROM_MANAGER);
-
-        doNothing().when(mController).requestForUpdateEid();
-        mController.updateEid(mController.getEid(0));
-        mController.initialize();
-
-        // Remove EID if the card is not eUICC.
-        verify(mDialog, never()).setText(eq(EID_INFO_VALUE_ID), any());
-        verify(mDialog).removeSettingFromScreen(eq(EID_INFO_LABEL_ID));
-        verify(mDialog).removeSettingFromScreen(eq(EID_INFO_VALUE_ID));
-    }
-
-    @Test
-    public void initialize_updateEid_shouldNotSetEidInSingleSimMode() {
-        when(mTelephonyManager.getActiveModemCount()).thenReturn(MAX_PHONE_COUNT_SINGLE_SIM);
-
-        ArrayList<UiccCardInfo> uiccCardInfos = new ArrayList<>();
-        UiccCardInfo uiccCardInfo = new UiccCardInfo(
-                true,                                   // isEuicc
-                0,                                      // cardId
-                TEST_EID_FROM_CARD,                     // eid (not used)
-                0,                                      // slotIndex
-                false,                                 // isRemovable
-                false,            // isMultipleEnabledProfileSupported
-                Collections.singletonList(
-                        new UiccPortInfo(
-                                null,                  // iccId
-                                0,                   // portIdx
-                                0,              // logicalSlotIdx
-                                true               // isActive
-                        )
-                ));
-        uiccCardInfos.add(uiccCardInfo);
-        when(mTelephonyManager.getUiccCardsInfo()).thenReturn(uiccCardInfos);
-
-        Map<Integer, Integer> slotMapping = new HashMap<>();
-        slotMapping.put(0, 0);
-        when(mTelephonyManager.getLogicalToPhysicalSlotMapping()).thenReturn(slotMapping);
-
-        when(mEuiccManager.isEnabled()).thenReturn(true);
-        when(mEuiccManager.getEid()).thenReturn(null);
-
-        doNothing().when(mController).requestForUpdateEid();
-        mController.updateEid(mController.getEid(0));
-        mController.initialize();
-
-        // Keep 'Not available' if the default eUICC manager cannot provide EID in Single SIM mode.
-        verify(mDialog, never()).setText(eq(EID_INFO_VALUE_ID), any());
-        verify(mDialog, never()).removeSettingFromScreen(eq(EID_INFO_VALUE_ID));
-    }
-
-    @Test
-    public void initialize_updateEid_shouldSetEidInSingleSimModeWithEnabledEuicc() {
-        when(mTelephonyManager.getActiveModemCount()).thenReturn(MAX_PHONE_COUNT_SINGLE_SIM);
-
-        ArrayList<UiccCardInfo> uiccCardInfos = new ArrayList<>();
-        UiccCardInfo uiccCardInfo = new UiccCardInfo(
-                true,                                   // isEuicc (eUICC slot is selected)
-                0,                                      // cardId
-                TEST_EID_FROM_CARD,                     // eid (not used)
-                0,                                      // slotIndex
-                false,                                 // isRemovable
-                false,               // isMultipleEnabledProfileSupported
-                Collections.singletonList(
-                        new UiccPortInfo(
-                                null,                // iccId
-                                0,                 // portIdx
-                                0,            // logicalSlotIdx
-                                true             // isActive
-                        )
-                )
-        );
-        uiccCardInfos.add(uiccCardInfo);
-        when(mTelephonyManager.getUiccCardsInfo()).thenReturn(uiccCardInfos);
-
-        Map<Integer, Integer> slotMapping = new HashMap<>();
-        slotMapping.put(0, 0);
-        when(mTelephonyManager.getLogicalToPhysicalSlotMapping()).thenReturn(slotMapping);
-
-        when(mEuiccManager.isEnabled()).thenReturn(true);
-        when(mEuiccManager.getEid()).thenReturn(TEST_EID_FROM_MANAGER);
-        when(mEuiccManager.createForCardId(anyInt())).thenThrow(
-                new RuntimeException("EID shall be retrieved from the default eUICC manager"));
-
-        doNothing().when(mController).requestForUpdateEid();
-        mController.updateEid(mController.getEid(0));
-        mController.initialize();
-
-        // Set EID retrieved from the default eUICC manager in Single SIM mode.
-        verify(mDialog).setText(EID_INFO_VALUE_ID, TEST_EID_FROM_MANAGER);
-        verify(mDialog, never()).removeSettingFromScreen(eq(EID_INFO_VALUE_ID));
-    }
-
-    @Test
-    public void initialize_updateEid_shouldSetEidInSingleSimModeWithDisabledEuicc() {
-        when(mTelephonyManager.getActiveModemCount()).thenReturn(MAX_PHONE_COUNT_SINGLE_SIM);
-
-        ArrayList<UiccCardInfo> uiccCardInfos = new ArrayList<>();
-        UiccCardInfo uiccCardInfo = new UiccCardInfo(
-                false,                                  // isEuicc (eUICC slot is not selected)
-                0,                                      // cardId
-                null,                                   // eid
-                0,                                      // slotIndex
-                true,                                  // isRemovable
-                false,            // isMultipleEnabledProfileSupported
-                Collections.singletonList(
-                        new UiccPortInfo(
-                                "123451234567890",        // iccId
-                                0,                      // portIdx
-                                0,                 // logicalSlotIdx
-                                true                  // isActive
-
-                        )
-                ));
-        uiccCardInfos.add(uiccCardInfo);
-        when(mTelephonyManager.getUiccCardsInfo()).thenReturn(uiccCardInfos);
-
-        Map<Integer, Integer> slotMapping = new HashMap<>();
-        slotMapping.put(0, 0);
-        when(mTelephonyManager.getLogicalToPhysicalSlotMapping()).thenReturn(slotMapping);
-
-        when(mEuiccManager.isEnabled()).thenReturn(true);
-        when(mEuiccManager.getEid()).thenReturn(TEST_EID_FROM_MANAGER);
-        when(mEuiccManager.createForCardId(anyInt())).thenThrow(
-                new RuntimeException("EID shall be retrieved from the default eUICC manager"));
-
-        doNothing().when(mController).requestForUpdateEid();
-        mController.updateEid(mController.getEid(0));
-        mController.initialize();
-
-        // Set EID retrieved from the default eUICC manager in Single SIM mode.
-        verify(mDialog).setText(EID_INFO_VALUE_ID, TEST_EID_FROM_MANAGER);
-        verify(mDialog, never()).removeSettingFromScreen(eq(EID_INFO_VALUE_ID));
-    }
-
-    @Test
-    public void initialize_updateEid_shouldRemoveEidInSingleSimMode() {
-        when(mTelephonyManager.getActiveModemCount()).thenReturn(MAX_PHONE_COUNT_SINGLE_SIM);
-
-        ArrayList<UiccCardInfo> uiccCardInfos = new ArrayList<>();
-        UiccCardInfo uiccCardInfo = new UiccCardInfo(
-                false,                                  // isEuicc
-                0,                                      // cardId
-                null,                                   // eid
-                0,                                      // slotIndex
-                true,                                  // isRemovable
-                false,           //isMultipleEnabledProfileSupported
-                Collections.singletonList(
-                        new UiccPortInfo(
-                                "123451234567890",      // iccId
-                                0,                    // portIdx
-                                0,               // logicalSlotIdx
-                                true                // isActive
-                        )
-                ));
-        uiccCardInfos.add(uiccCardInfo);
-        when(mTelephonyManager.getUiccCardsInfo()).thenReturn(uiccCardInfos);
-
-        Map<Integer, Integer> slotMapping = new HashMap<>();
-        slotMapping.put(0, 0);
-        when(mTelephonyManager.getLogicalToPhysicalSlotMapping()).thenReturn(slotMapping);
-
-        when(mEuiccManager.isEnabled()).thenReturn(false);
-        when(mEuiccManager.getEid()).thenReturn(null);
-
-        doNothing().when(mController).requestForUpdateEid();
-        mController.updateEid(mController.getEid(0));
-        mController.initialize();
-
-        // Remove EID if the default eUICC manager indicates that eSIM is not enabled.
-        verify(mDialog, never()).setText(eq(EID_INFO_VALUE_ID), any());
-        verify(mDialog).removeSettingFromScreen(eq(EID_INFO_LABEL_ID));
-        verify(mDialog).removeSettingFromScreen(eq(EID_INFO_VALUE_ID));
-    }
-
-    @Test
     @Ignore
     public void initialize_imsRegistered_shouldSetImsRegistrationStateSummaryToRegisterd() {
-        mPersistableBundle.putBoolean(
-                CarrierConfigManager.KEY_SHOW_IMS_REGISTRATION_STATUS_BOOL, true);
         when(mTelephonyManager.isImsRegistered(anyInt())).thenReturn(true);
 
         mController.initialize();
 
         verify(mDialog).setText(IMS_REGISTRATION_STATE_VALUE_ID,
-                mContext.getString(R.string.ims_reg_status_registered));
+                mContext.getString(com.android.settingslib.R.string.ims_reg_status_registered));
     }
 
     @Test
     @Ignore
     public void initialize_imsNotRegistered_shouldSetImsRegistrationStateSummaryToNotRegisterd() {
-        mPersistableBundle.putBoolean(
-                CarrierConfigManager.KEY_SHOW_IMS_REGISTRATION_STATUS_BOOL, true);
         when(mTelephonyManager.isImsRegistered(anyInt())).thenReturn(false);
 
         mController.initialize();
 
         verify(mDialog).setText(IMS_REGISTRATION_STATE_VALUE_ID,
-                mContext.getString(R.string.ims_reg_status_not_registered));
+                mContext.getString(com.android.settingslib.R.string.ims_reg_status_not_registered));
     }
 
     @Test
-    @Ignore
-    public void initialize_showImsRegistration_shouldNotRemoveImsRegistrationStateSetting() {
-        mPersistableBundle.putBoolean(
-                CarrierConfigManager.KEY_SHOW_IMS_REGISTRATION_STATUS_BOOL, true);
-
+    @Ignore("b/337417520")
+    public void initialize_showImsRegistration_shouldShowImsRegistrationStateSetting() {
         mController.initialize();
 
-        verify(mDialog, never()).removeSettingFromScreen(IMS_REGISTRATION_STATE_VALUE_ID);
+        verify(mDialog).setSettingVisibility(IMS_REGISTRATION_STATE_VALUE_ID, true);
     }
 
     @Test
-    @Ignore
-    public void initialize_doNotShowImsRegistration_shouldRemoveImsRegistrationStateSetting() {
-        mPersistableBundle.putBoolean(
-                CarrierConfigManager.KEY_SHOW_IMS_REGISTRATION_STATUS_BOOL, false);
-
+    @Ignore("b/337417520")
+    public void initialize_doNotShowImsRegistration_shouldHideImsRegistrationStateSetting() {
         mController.initialize();
 
-        verify(mDialog).removeSettingFromScreen(IMS_REGISTRATION_STATE_LABEL_ID);
-        verify(mDialog).removeSettingFromScreen(IMS_REGISTRATION_STATE_VALUE_ID);
+        verify(mDialog).setSettingVisibility(IMS_REGISTRATION_STATE_LABEL_ID, false);
+        verify(mDialog).setSettingVisibility(IMS_REGISTRATION_STATE_VALUE_ID, false);
     }
 
     @Test
-    public void initialize_nullSignalStrength_noCrash() {
-        doReturn(null).when(mTelephonyManager).getSignalStrength();
-        // we should not crash when running the following line
-        mController.initialize();
+    public void onSubscriptionsChanged_updateSubInfoToNewSub_testTelephonyCallbackUnregRereg() {
+        // sub id changed from 1 to 2
+        SubscriptionInfo subInfo2 = mock(SubscriptionInfo.class);
+        doReturn(TEST_SUB_ID_2).when(subInfo2).getSubscriptionId();
+        doReturn(subInfo2).when(mSubscriptionManager)
+                .getActiveSubscriptionInfoForSimSlotIndex(anyInt());
+        mController.mOnSubscriptionsChangedListener.onSubscriptionsChanged();
+        verify(mTelephonyManagerForSub2).registerTelephonyCallback(any(Executor.class),
+                any(TelephonyCallback.class));
+
+        // sub id changed from 2 to 1
+        SubscriptionInfo subInfo1 = mock(SubscriptionInfo.class);
+        doReturn(TEST_SUB_ID_1).when(subInfo1).getSubscriptionId();
+        doReturn(subInfo1).when(mSubscriptionManager)
+                .getActiveSubscriptionInfoForSimSlotIndex(anyInt());
+        mController.mOnSubscriptionsChangedListener.onSubscriptionsChanged();
+        verify(mTelephonyManagerForSub2).unregisterTelephonyCallback(
+                mController.mTelephonyCallback);
+        verify(mTelephonyManagerForSub1).registerTelephonyCallback(any(Executor.class),
+                any(TelephonyCallback.class));
     }
 
-    private void setupCellSignalStrength_lteWcdma(int lteDbm, int lteAsu, int wcdmaDbm,
-            int wcdmaAsu) {
-        doReturn(lteDbm).when(mCellSignalStrengthLte).getDbm();
-        doReturn(lteAsu).when(mCellSignalStrengthLte).getAsuLevel();
-        doReturn(wcdmaDbm).when(mCellSignalStrengthWcdma).getDbm();
-        doReturn(wcdmaAsu).when(mCellSignalStrengthWcdma).getAsuLevel();
-
-        List<CellSignalStrength> cellSignalStrengthList = new ArrayList<>(2);
-        cellSignalStrengthList.add(mCellSignalStrengthLte);
-        cellSignalStrengthList.add(mCellSignalStrengthWcdma);
-
-        doReturn(cellSignalStrengthList).when(mSignalStrength).getCellSignalStrengths();
+    @Test
+    public void onSubscriptionsChanged_updateSubInfoToNull_testTelephonyCallbackUnreg() {
+        doReturn(null).when(mSubscriptionManager).getActiveSubscriptionInfoForSimSlotIndex(
+                anyInt());
+        mController.mOnSubscriptionsChangedListener.onSubscriptionsChanged();
+        verify(mTelephonyManagerForSub1).unregisterTelephonyCallback(
+                mController.mTelephonyCallback);
     }
 
-    private void setupCellSignalStrength_lteCdma(int lteDbm, int lteAsu, int cdmaDbm, int cdmaAsu) {
-        doReturn(lteDbm).when(mCellSignalStrengthLte).getDbm();
-        doReturn(lteAsu).when(mCellSignalStrengthLte).getAsuLevel();
-        doReturn(cdmaDbm).when(mCellSignalStrengthCdma).getDbm();
-        doReturn(cdmaAsu).when(mCellSignalStrengthCdma).getAsuLevel();
-
-        List<CellSignalStrength> cellSignalStrengthList = new ArrayList<>(2);
-        cellSignalStrengthList.add(mCellSignalStrengthLte);
-        cellSignalStrengthList.add(mCellSignalStrengthCdma);
-
-        doReturn(cellSignalStrengthList).when(mSignalStrength).getCellSignalStrengths();
-    }
-
-    private void setupCellSignalStrength_lteOnly(int lteDbm, int lteAsu) {
-        doReturn(lteDbm).when(mCellSignalStrengthLte).getDbm();
-        doReturn(lteAsu).when(mCellSignalStrengthLte).getAsuLevel();
-
-        List<CellSignalStrength> cellSignalStrengthList = new ArrayList<>(2);
-        cellSignalStrengthList.add(mCellSignalStrengthLte);
-
-        doReturn(cellSignalStrengthList).when(mSignalStrength).getCellSignalStrengths();
+    @Test
+    public void onSubscriptionsChanged_updateSubInfoToNull_shouldUpdateDataStatusToUnknown() {
+        doReturn(null).when(mSubscriptionManager).getActiveSubscriptionInfoForSimSlotIndex(
+                anyInt());
+        mController.mOnSubscriptionsChangedListener.onSubscriptionsChanged();
+        final String unknownText = ResourcesUtils.getResourcesString(mContext, "radioInfo_unknown");
+        verify(mDialog).setText(CELLULAR_NETWORK_STATE, unknownText);
     }
 }

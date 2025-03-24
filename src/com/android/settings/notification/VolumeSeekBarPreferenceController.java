@@ -23,6 +23,7 @@ import androidx.lifecycle.LifecycleObserver;
 import androidx.lifecycle.OnLifecycleEvent;
 import androidx.preference.PreferenceScreen;
 
+import com.android.settings.R;
 import com.android.settings.notification.VolumeSeekBarPreference.Callback;
 import com.android.settingslib.core.lifecycle.Lifecycle;
 
@@ -35,6 +36,7 @@ public abstract class VolumeSeekBarPreferenceController extends
     protected VolumeSeekBarPreference mPreference;
     protected VolumeSeekBarPreference.Callback mVolumePreferenceCallback;
     protected AudioHelper mHelper;
+    protected VolumeSeekBarPreference.Listener mVolumePreferenceListener;
 
     public VolumeSeekBarPreferenceController(Context context, String key) {
         super(context, key);
@@ -54,11 +56,16 @@ public abstract class VolumeSeekBarPreferenceController extends
     public void displayPreference(PreferenceScreen screen) {
         super.displayPreference(screen);
         if (isAvailable()) {
-            mPreference = screen.findPreference(getPreferenceKey());
-            mPreference.setCallback(mVolumePreferenceCallback);
-            mPreference.setStream(getAudioStream());
-            mPreference.setMuteIcon(getMuteIcon());
+            setupVolPreference(screen);
         }
+    }
+
+    protected void setupVolPreference(PreferenceScreen screen) {
+        mPreference = screen.findPreference(getPreferenceKey());
+        mPreference.setCallback(mVolumePreferenceCallback);
+        mPreference.setListener(mVolumePreferenceListener);
+        mPreference.setStream(getAudioStream());
+        mPreference.setMuteIcon(getMuteIcon());
     }
 
     @OnLifecycleEvent(Lifecycle.Event.ON_RESUME)
@@ -73,6 +80,11 @@ public abstract class VolumeSeekBarPreferenceController extends
         if (mPreference != null) {
             mPreference.onActivityPause();
         }
+    }
+
+    @Override
+    public int getSliceHighlightMenuRes() {
+        return R.string.menu_key_sound;
     }
 
     @Override

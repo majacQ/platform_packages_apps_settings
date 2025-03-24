@@ -24,6 +24,7 @@ import static com.android.settings.accessibility.AccessibilityUtil.getScreenWidt
 import static com.google.common.primitives.Ints.max;
 
 import android.content.Context;
+import android.content.res.ColorStateList;
 import android.graphics.Paint.FontMetrics;
 import android.graphics.drawable.GradientDrawable;
 import android.util.AttributeSet;
@@ -34,10 +35,12 @@ import android.widget.TextView;
 
 import androidx.annotation.ColorInt;
 import androidx.annotation.IntDef;
+import androidx.core.text.TextUtilsCompat;
 import androidx.preference.Preference;
 import androidx.preference.PreferenceViewHolder;
 
 import com.android.settings.R;
+import com.android.settingslib.Utils;
 
 import com.google.common.primitives.Floats;
 import com.google.common.primitives.Ints;
@@ -49,6 +52,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Locale;
 import java.util.stream.Collectors;
 
 /** Preference that easier preview by matching name to color. */
@@ -126,6 +130,8 @@ public final class PaletteListPreference extends Preference {
         final List<Integer> paletteColors = getPaletteColors(context);
         final List<String> paletteData = getPaletteData(context);
 
+        final ColorStateList textColor =
+                Utils.getColorAttr(getContext(), android.R.attr.textColorPrimary);
         final float textPadding =
                 context.getResources().getDimension(R.dimen.accessibility_layout_margin_start_end);
         final String maxLengthData =
@@ -141,6 +147,7 @@ public final class PaletteListPreference extends Preference {
         for (int i = 0; i < paletteData.size(); ++i) {
             final TextView textView = new TextView(context);
             textView.setText(paletteData.get(i));
+            textView.setTextColor(textColor);
             textView.setHeight(paletteItemHeight);
             textView.setPaddingRelative(Math.round(textPadding), 0, 0, 0);
             textView.setGravity(Gravity.CENTER_VERTICAL);
@@ -148,20 +155,36 @@ public final class PaletteListPreference extends Preference {
 
             rootView.addView(textView);
         }
+
+        updateFirstAndLastItemsBackground(context, rootView, paletteData.size());
     }
 
     private GradientDrawable createGradientDrawable(ViewGroup rootView, @ColorInt int color) {
         mGradientColors.set(Position.END, color);
 
         final GradientDrawable gradientDrawable = new GradientDrawable();
+        final Locale locale = Locale.getDefault();
         final Orientation orientation =
-                rootView.getLayoutDirection() == View.LAYOUT_DIRECTION_RTL
-                        ? Orientation.RIGHT_LEFT
-                        : Orientation.LEFT_RIGHT;
+                TextUtilsCompat.getLayoutDirectionFromLocale(locale) == View.LAYOUT_DIRECTION_RTL
+                    ? Orientation.RIGHT_LEFT
+                    : Orientation.LEFT_RIGHT;
         gradientDrawable.setOrientation(orientation);
         gradientDrawable.setColors(Ints.toArray(mGradientColors), Floats.toArray(mGradientOffsets));
 
         return gradientDrawable;
+    }
+
+    private void updateFirstAndLastItemsBackground(Context context, ViewGroup rootView, int size) {
+        final int radius =
+                context.getResources().getDimensionPixelSize(
+                        R.dimen.accessibility_illustration_view_radius);
+        final int lastIndex = size - 1;
+        final GradientDrawable firstItem =
+                (GradientDrawable) rootView.getChildAt(0).getBackground();
+        final GradientDrawable lastItem =
+                (GradientDrawable) rootView.getChildAt(lastIndex).getBackground();
+        firstItem.setCornerRadii(new float[]{radius, radius, radius, radius, 0, 0, 0, 0});
+        lastItem.setCornerRadii(new float[]{0, 0, 0, 0, radius, radius, radius, radius});
     }
 
     private List<Integer> getPaletteColors(Context context) {

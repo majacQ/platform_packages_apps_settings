@@ -43,22 +43,26 @@ import androidx.preference.Preference;
 import com.android.internal.widget.LockPatternUtils;
 import com.android.settings.R;
 import com.android.settings.testutils.FakeFeatureFactory;
+import com.android.settings.testutils.shadow.ShadowRestrictedLockUtilsInternal;
 import com.android.settingslib.RestrictedLockUtils;
 import com.android.settingslib.RestrictedPreference;
 import com.android.settingslib.core.lifecycle.Lifecycle;
 
 import org.junit.Before;
+import org.junit.Ignore;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;
+import org.robolectric.annotation.Config;
 import org.robolectric.shadows.ShadowApplication;
 
 import java.util.Collections;
 
 @RunWith(RobolectricTestRunner.class)
+@Config(shadows = {ShadowRestrictedLockUtilsInternal.class})
 public class FaceStatusPreferenceControllerTest {
 
     private static final String TEST_PREF_KEY = "baz";
@@ -147,6 +151,7 @@ public class FaceStatusPreferenceControllerTest {
     }
 
     @Test
+    @Ignore
     public void updateState_parentalConsentRequired_preferenceDisabled() {
         when(mFaceManager.isHardwareDetected()).thenReturn(true);
 

@@ -20,6 +20,7 @@ import static android.app.NotificationManager.IMPORTANCE_NONE;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.mock;
@@ -47,11 +48,15 @@ import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;
+import org.robolectric.annotation.Config;
 import org.robolectric.shadows.ShadowApplication;
 
 import java.util.ArrayList;
 
 @RunWith(RobolectricTestRunner.class)
+@Config(shadows = {
+        com.android.settings.testutils.shadow.ShadowFragment.class,
+})
 public class ConversationHeaderPreferenceControllerTest {
 
     private Context mContext;
@@ -121,6 +126,9 @@ public class ConversationHeaderPreferenceControllerTest {
         NotificationChannel channel = new NotificationChannel("cid", "cname", IMPORTANCE_NONE);
         mController.onResume(appRow, channel, null, null, null, null, null);
         assertEquals(channel.getName(), mController.getLabel());
+
+        mController.onResume(appRow, null, null, null, null, null, null);
+        assertNull(mController.getLabel());
     }
 
     @Test

@@ -20,6 +20,7 @@ import static android.content.pm.verify.domain.DomainVerificationUserState.DOMAI
 import static android.content.pm.verify.domain.DomainVerificationUserState.DOMAIN_STATE_SELECTED;
 import static android.content.pm.verify.domain.DomainVerificationUserState.DOMAIN_STATE_VERIFIED;
 
+import android.annotation.Nullable;
 import android.app.Activity;
 import android.app.settings.SettingsEnums;
 import android.appwidget.AppWidgetManager;
@@ -28,15 +29,16 @@ import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.content.pm.verify.domain.DomainVerificationManager;
 import android.content.pm.verify.domain.DomainVerificationUserState;
+import android.icu.text.MessageFormat;
 import android.net.Uri;
 import android.os.Bundle;
 import android.util.ArraySet;
 import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
-import android.widget.Switch;
 import android.widget.TextView;
 
+import androidx.annotation.NonNull;
 import androidx.annotation.VisibleForTesting;
 import androidx.appcompat.app.AlertDialog;
 import androidx.preference.Preference;
@@ -49,19 +51,22 @@ import com.android.settings.applications.ClearDefaultsPreference;
 import com.android.settings.widget.EntityHeaderController;
 import com.android.settingslib.applications.AppUtils;
 import com.android.settingslib.widget.FooterPreference;
-import com.android.settingslib.widget.MainSwitchPreference;
-import com.android.settingslib.widget.OnMainSwitchChangeListener;
+import com.android.settingslib.widget.SelectorWithWidgetPreference;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
 /** The page of the Open by default */
 public class AppLaunchSettings extends AppInfoBase implements
-        Preference.OnPreferenceChangeListener, OnMainSwitchChangeListener {
+        Preference.OnPreferenceChangeListener, SelectorWithWidgetPreference.OnClickListener {
     private static final String TAG = "AppLaunchSettings";
     // Preference keys
-    private static final String MAIN_SWITCH_PREF_KEY = "open_by_default_supported_links";
+    private static final String OPEN_IN_APP_PREF_KEY = "app_launch_open_in_app";
+    private static final String OPEN_IN_BROWSER_PREF_KEY = "app_launch_open_in_browser";
     private static final String VERIFIED_LINKS_PREF_KEY = "open_by_default_verified_links";
     private static final String ADD_LINK_PREF_KEY = "open_by_default_add_link";
     private static final String CLEAR_DEFAULTS_PREF_KEY = "app_launch_clear_defaults";
@@ -82,7 +87,10 @@ public class AppLaunchSettings extends AppInfoBase implements
     public static final String APP_PACKAGE_KEY = "app_package";
 
     private ClearDefaultsPreference mClearDefaultsPreference;
-    private MainSwitchPreference mMainSwitchPreference;
+    @Nullable
+    private SelectorWithWidgetPreference mOpenInAppSelector;
+    @Nullable
+    private SelectorWithWidgetPreference mOpenInBrowserSelector;
     private Preference mAddLinkPreference;
     private PreferenceCategory mMainPreferenceCategory;
     private PreferenceCategory mSelectedLinksPreferenceCategory;
@@ -105,6 +113,11 @@ public class AppLaunchSettings extends AppInfoBase implements
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        if (mAppEntry == null) {
+            Log.w(TAG, "onCreate: mAppEntry is null, please check the reason!!!");
+            getActivity().finish();
+            return;
+        }
         addPreferencesFromResource(R.xml.installed_app_launch_settings);
         mDomainVerificationManager = mContext.getSystemService(DomainVerificationManager.class);
         initUIComponents();
@@ -159,20 +172,20 @@ public class AppLaunchSettings extends AppInfoBase implements
     }
 
     @Override
-    public void onSwitchChanged(Switch switchView, boolean isChecked) {
-        IntentPickerUtils.logd("onSwitchChanged: isChecked=" + isChecked);
-        if (mMainSwitchPreference != null) { //mMainSwitchPreference synced with Switch
-            mMainSwitchPreference.setChecked(isChecked);
-        }
+    public void onRadioButtonClicked(@NonNull SelectorWithWidgetPreference selected) {
+        final boolean openSupportedLinks = selected.getKey().equals(OPEN_IN_APP_PREF_KEY);
+        IntentPickerUtils.logd("onRadioButtonClicked: openInApp =" + openSupportedLinks);
+        setOpenByDefaultPreference(openSupportedLinks /* openInApp */);
+
         if (mMainPreferenceCategory != null) {
-            mMainPreferenceCategory.setVisible(isChecked);
+            mMainPreferenceCategory.setVisible(openSupportedLinks);
         }
         if (mDomainVerificationManager != null) {
             try {
                 mDomainVerificationManager.setDomainVerificationLinkHandlingAllowed(mPackageName,
-                        isChecked);
+                        openSupportedLinks);
             } catch (PackageManager.NameNotFoundException e) {
-                Log.w(TAG, "onSwitchChanged: " + e.getMessage());
+                Log.w(TAG, "onRadioButtonClicked: " + e.getMessage());
             }
         }
     }
@@ -191,7 +204,6 @@ public class AppLaunchSettings extends AppInfoBase implements
         final String summary = activity.getString(R.string.app_launch_top_intro_message);
         final Preference pref = EntityHeaderController
                 .newInstance(activity, this, null /* header */)
-                .setRecyclerView(getListView(), getSettingsLifecycle())
                 .setIcon(Utils.getBadgedIcon(mContext, mPackageInfo.applicationInfo))
                 .setLabel(mPackageInfo.applicationInfo.loadLabel(mPm))
                 .setSummary(summary)  // add intro text
@@ -201,7 +213,7 @@ public class AppLaunchSettings extends AppInfoBase implements
                 .setHasAppInfoLink(true)
                 .setButtonActions(EntityHeaderController.ActionType.ACTION_NONE,
                         EntityHeaderController.ActionType.ACTION_NONE)
-                .done(activity, getPrefContext());
+                .done(getPrefContext());
         getPreferenceScreen().addPreference(pref);
     }
 
@@ -216,7 +228,8 @@ public class AppLaunchSettings extends AppInfoBase implements
     }
 
     private void initMainSwitchAndCategories() {
-        mMainSwitchPreference = (MainSwitchPreference) findPreference(MAIN_SWITCH_PREF_KEY);
+        mOpenInAppSelector = findPreference(OPEN_IN_APP_PREF_KEY);
+        mOpenInBrowserSelector = findPreference(OPEN_IN_BROWSER_PREF_KEY);
         mMainPreferenceCategory = findPreference(MAIN_PREF_CATEGORY_KEY);
         mSelectedLinksPreferenceCategory = findPreference(SELECTED_LINKS_CATEGORY_KEY);
         // Initialize the "Other Default Category" section
@@ -227,30 +240,36 @@ public class AppLaunchSettings extends AppInfoBase implements
         final DomainVerificationUserState userState =
                 IntentPickerUtils.getDomainVerificationUserState(mDomainVerificationManager,
                         mPackageName);
-        if (userState == null) {
+        if (userState == null || mOpenInAppSelector == null || mOpenInBrowserSelector == null) {
             disabledPreference();
             return false;
         }
 
         IntentPickerUtils.logd("isLinkHandlingAllowed() : " + userState.isLinkHandlingAllowed());
-        mMainSwitchPreference.updateStatus(userState.isLinkHandlingAllowed());
-        mMainSwitchPreference.addOnSwitchChangeListener(this);
+        setOpenByDefaultPreference(userState.isLinkHandlingAllowed());
+        mOpenInAppSelector.setOnClickListener(this);
+        mOpenInBrowserSelector.setOnClickListener(this);
         mMainPreferenceCategory.setVisible(userState.isLinkHandlingAllowed());
         return true;
     }
 
     /** Initialize verified links preference */
     private void initVerifiedLinksPreference() {
-        final VerifiedLinksPreference verifiedLinksPreference =
-                (VerifiedLinksPreference) mMainPreferenceCategory.findPreference(
-                        VERIFIED_LINKS_PREF_KEY);
-        verifiedLinksPreference.setWidgetFrameClickListener(l -> {
+        final Preference verifiedLinksPreference = mMainPreferenceCategory.findPreference(
+                VERIFIED_LINKS_PREF_KEY);
+        verifiedLinksPreference.setOnPreferenceClickListener(preference -> {
             showVerifiedLinksDialog();
+            return true;
         });
         final int verifiedLinksNo = getLinksNumber(DOMAIN_STATE_VERIFIED);
         verifiedLinksPreference.setTitle(getVerifiedLinksTitle(verifiedLinksNo));
-        verifiedLinksPreference.setCheckBoxVisible(verifiedLinksNo > 0);
         verifiedLinksPreference.setEnabled(verifiedLinksNo > 0);
+    }
+
+    private void setOpenByDefaultPreference(boolean openInApp) {
+        if (mOpenInBrowserSelector == null || mOpenInAppSelector == null) return;
+        mOpenInAppSelector.setChecked(openInApp);
+        mOpenInBrowserSelector.setChecked(!openInApp);
     }
 
     private void showVerifiedLinksDialog() {
@@ -273,23 +292,38 @@ public class AppLaunchSettings extends AppInfoBase implements
 
         final List<String> verifiedLinksList = IntentPickerUtils.getLinksList(
                 mDomainVerificationManager, mPackageName, DOMAIN_STATE_VERIFIED);
-        return new AlertDialog.Builder(mContext)
+        AlertDialog dialog = new AlertDialog.Builder(mContext)
                 .setCustomTitle(titleView)
                 .setCancelable(true)
                 .setItems(verifiedLinksList.toArray(new String[0]), /* listener= */ null)
                 .setPositiveButton(R.string.app_launch_dialog_ok, /* listener= */ null)
                 .create();
+        if (dialog.getListView() != null) {
+            dialog.getListView().setTextDirection(View.TEXT_DIRECTION_LOCALE);
+            dialog.getListView().setEnabled(false);
+        } else {
+            Log.w(TAG, "createVerifiedLinksDialog: dialog.getListView() is null, please check it.");
+        }
+        return dialog;
     }
 
     @VisibleForTesting
     String getVerifiedLinksTitle(int linksNo) {
-        return getResources().getQuantityString(
-                R.plurals.app_launch_verified_links_title, linksNo, linksNo);
+        MessageFormat msgFormat = new MessageFormat(
+                getResources().getString(R.string.app_launch_verified_links_title),
+                Locale.getDefault());
+        Map<String, Object> arguments = new HashMap<>();
+        arguments.put("count", linksNo);
+        return msgFormat.format(arguments);
     }
 
     private String getVerifiedLinksMessage(int linksNo) {
-        return getResources().getQuantityString(
-                R.plurals.app_launch_verified_links_message, linksNo, linksNo);
+        MessageFormat msgFormat = new MessageFormat(
+                getResources().getString(R.string.app_launch_verified_links_message),
+                Locale.getDefault());
+        Map<String, Object> arguments = new HashMap<>();
+        arguments.put("count", linksNo);
+        return msgFormat.format(arguments);
     }
 
     /** Add selected links items */
@@ -338,9 +372,12 @@ public class AppLaunchSettings extends AppInfoBase implements
     }
 
     private void disabledPreference() {
-        mMainSwitchPreference.updateStatus(false);
-        mMainSwitchPreference.setSelectable(false);
-        mMainSwitchPreference.setEnabled(false);
+        if (mOpenInAppSelector == null ||mOpenInBrowserSelector == null) return;
+        setOpenByDefaultPreference(false /* openInApp */);
+        mOpenInAppSelector.setSelectable(false);
+        mOpenInAppSelector.setEnabled(false);
+        mOpenInBrowserSelector.setSelectable(false);
+        mOpenInBrowserSelector.setEnabled(false);
         mMainPreferenceCategory.setVisible(false);
     }
 
@@ -362,9 +399,9 @@ public class AppLaunchSettings extends AppInfoBase implements
             final Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(LEARN_MORE_URI));
             mContext.startActivity(intent);
         });
-        final String learnMoreContentDescription = mContext.getString(
+        final String learnMoreText = mContext.getString(
                 R.string.footer_learn_more_content_description, getLabelName());
-        footerPreference.setLearnMoreContentDescription(learnMoreContentDescription);
+        footerPreference.setLearnMoreText(learnMoreText);
     }
 
     private String getLabelName() {

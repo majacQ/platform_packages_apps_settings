@@ -19,22 +19,23 @@ package com.android.settings.display;
 import android.content.Context;
 import android.hardware.display.ColorDisplayManager;
 import android.text.TextUtils;
-import android.widget.Switch;
+import android.widget.CompoundButton;
+import android.widget.CompoundButton.OnCheckedChangeListener;
 
 import androidx.preference.Preference;
 import androidx.preference.PreferenceScreen;
 
+import com.android.settings.R;
 import com.android.settings.core.TogglePreferenceController;
 import com.android.settings.overlay.FeatureFactory;
 import com.android.settingslib.core.instrumentation.MetricsFeatureProvider;
 import com.android.settingslib.widget.MainSwitchPreference;
-import com.android.settingslib.widget.OnMainSwitchChangeListener;
 
 /**
  * Controller that updates the night display.
  */
 public class NightDisplayActivationPreferenceController extends
-        TogglePreferenceController implements OnMainSwitchChangeListener {
+        TogglePreferenceController implements OnCheckedChangeListener {
 
     private final MetricsFeatureProvider mMetricsFeatureProvider;
     private ColorDisplayManager mColorDisplayManager;
@@ -46,7 +47,7 @@ public class NightDisplayActivationPreferenceController extends
 
         mColorDisplayManager = context.getSystemService(ColorDisplayManager.class);
         mTimeFormatter = new NightDisplayTimeFormatter(context);
-        mMetricsFeatureProvider = FeatureFactory.getFactory(context).getMetricsFeatureProvider();
+        mMetricsFeatureProvider = FeatureFactory.getFeatureFactory().getMetricsFeatureProvider();
     }
 
     @Override
@@ -66,6 +67,11 @@ public class NightDisplayActivationPreferenceController extends
     }
 
     @Override
+    public int getSliceHighlightMenuRes() {
+        return R.string.menu_key_display;
+    }
+
+    @Override
     public void displayPreference(PreferenceScreen screen) {
         super.displayPreference(screen);
 
@@ -75,18 +81,13 @@ public class NightDisplayActivationPreferenceController extends
     }
 
     @Override
-    public void onSwitchChanged(Switch switchView, boolean isChecked) {
+    public void onCheckedChanged(CompoundButton buttonView, boolean isChecked) {
         final boolean activated = mColorDisplayManager.isNightDisplayActivated();
         if (isChecked != activated) {
             // TODO(b/179017365): Create a controller which extends TogglePreferenceController to
             //  control the toggle preference.
             setChecked(isChecked);
         }
-    }
-
-    @Override
-    public final void updateState(Preference preference) {
-        updateStateInternal();
     }
 
     /** FOR SLICES */
@@ -106,14 +107,4 @@ public class NightDisplayActivationPreferenceController extends
         return mTimeFormatter.getAutoModeSummary(mContext, mColorDisplayManager);
     }
 
-    private void updateStateInternal() {
-        final boolean isActivated = mColorDisplayManager.isNightDisplayActivated();
-        final int autoMode = mColorDisplayManager.getNightDisplayAutoMode();
-
-        if (autoMode == ColorDisplayManager.AUTO_MODE_CUSTOM_TIME) {
-            mTimeFormatter.getFormattedTimeString(isActivated
-                    ? mColorDisplayManager.getNightDisplayCustomStartTime()
-                    : mColorDisplayManager.getNightDisplayCustomEndTime());
-        }
-    }
 }

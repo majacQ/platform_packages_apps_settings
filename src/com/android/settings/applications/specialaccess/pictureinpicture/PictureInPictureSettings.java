@@ -17,7 +17,6 @@ package com.android.settings.applications.specialaccess.pictureinpicture;
 
 import static android.content.pm.PackageManager.GET_ACTIVITIES;
 
-import android.annotation.Nullable;
 import android.app.settings.SettingsEnums;
 import android.content.Context;
 import android.content.pm.ActivityInfo;
@@ -32,12 +31,14 @@ import android.util.IconDrawableFactory;
 import android.util.Pair;
 import android.view.View;
 
+import androidx.annotation.Nullable;
 import androidx.annotation.VisibleForTesting;
 import androidx.preference.Preference;
 import androidx.preference.Preference.OnPreferenceClickListener;
 import androidx.preference.PreferenceScreen;
 
 import com.android.settings.R;
+import com.android.settings.Utils;
 import com.android.settings.applications.AppInfoBase;
 import com.android.settings.search.BaseSearchIndexProvider;
 import com.android.settings.widget.EmptyTextSettings;
@@ -57,7 +58,7 @@ public class PictureInPictureSettings extends EmptyTextSettings {
     static final List<String> IGNORE_PACKAGE_LIST = new ArrayList<>();
 
     static {
-        IGNORE_PACKAGE_LIST.add("com.android.systemui");
+        IGNORE_PACKAGE_LIST.add(Utils.SYSTEMUI_PACKAGE_NAME);
     }
 
     /**
@@ -168,7 +169,8 @@ public class PictureInPictureSettings extends EmptyTextSettings {
                 @Override
                 public boolean onPreferenceClick(Preference preference) {
                     AppInfoBase.startAppInfoFragment(PictureInPictureDetails.class,
-                            R.string.picture_in_picture_app_detail_title, packageName, appInfo.uid,
+                            getString(R.string.picture_in_picture_app_detail_title),
+                            packageName, appInfo.uid,
                             PictureInPictureSettings.this, -1, getMetricsCategory());
                     return true;
                 }

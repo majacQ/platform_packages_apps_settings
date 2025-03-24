@@ -16,23 +16,25 @@ import static com.google.common.truth.Truth.assertThat;
 
 import static junit.framework.Assert.assertEquals;
 
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import android.app.AutomaticZenRule;
+import android.app.Flags;
 import android.app.NotificationManager;
 import android.app.NotificationManager.Policy;
 import android.content.Context;
 import android.database.Cursor;
+import android.platform.test.annotations.DisableFlags;
+import android.platform.test.flag.junit.SetFlagsRule;
 import android.provider.Settings;
 import android.service.notification.ZenModeConfig;
 
-import com.android.settings.R;
-
 import org.junit.Before;
+import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.mockito.ArgumentCaptor;
@@ -55,11 +57,14 @@ public class ZenModeBackendTest {
     private NotificationManager mNotificationManager;
 
     private static final String GENERIC_RULE_NAME = "test";
-    private static final String DEFAULT_ID_1 = ZenModeConfig.EVENTS_DEFAULT_RULE_ID;
+    private static final String DEFAULT_ID_1 = ZenModeConfig.EVENTS_OBSOLETE_RULE_ID;
     private static final String DEFAULT_ID_2 = ZenModeConfig.EVERY_NIGHT_DEFAULT_RULE_ID;
 
     private Context mContext;
     private ZenModeBackend mBackend;
+
+    @Rule
+    public final SetFlagsRule mSetFlagsRule = new SetFlagsRule();
 
     @Before
     public void setup() {
@@ -163,6 +168,10 @@ public class ZenModeBackendTest {
     }
 
     @Test
+    // With MODES_UI the Events rule is not default and is sorted differently. Most likely this
+    // whole test class should be disabled since ZenModeBackend should never be used with
+    // MODES_UI. However the other tests pass, so...
+    @DisableFlags(Flags.FLAG_MODES_UI)
     public void updateState_checkRuleOrderingDescending_withDefaultRules() {
         final int NUM_RULES = 4;
 
@@ -170,8 +179,8 @@ public class ZenModeBackendTest {
                 true);
         Arrays.sort(rules, ZenModeBackend.RULE_COMPARATOR);
 
-        assertEquals(rules[0].getKey(), DEFAULT_ID_1);
-        assertEquals(rules[1].getKey(), DEFAULT_ID_2);
+        assertEquals(DEFAULT_ID_1, rules[0].getKey());
+        assertEquals(DEFAULT_ID_2, rules[1].getKey());
         // NON-DEFAULT RULES check ordering, most recent at the bottom/end
         for (int i = 0; i < NUM_RULES; i++) {
             assertEquals(GENERIC_RULE_NAME + (NUM_RULES - 1 - i), rules[i + 2].getKey());
@@ -204,7 +213,11 @@ public class ZenModeBackendTest {
         mBackend.saveConversationSenders(CONVERSATION_SENDERS_NONE);
 
         ArgumentCaptor<Policy> captor = ArgumentCaptor.forClass(Policy.class);
-        verify(mNotificationManager, times(1)).setNotificationPolicy(captor.capture());
+        if (android.app.Flags.modesApi()) {
+            verify(mNotificationManager).setNotificationPolicy(captor.capture(), eq(true));
+        } else {
+            verify(mNotificationManager).setNotificationPolicy(captor.capture());
+        }
 
         Policy expected = new Policy(
                 PRIORITY_CATEGORY_CALLS | PRIORITY_CATEGORY_MESSAGES | PRIORITY_CATEGORY_ALARMS,
@@ -228,7 +241,11 @@ public class ZenModeBackendTest {
         mBackend.saveConversationSenders(CONVERSATION_SENDERS_ANYONE);
 
         ArgumentCaptor<Policy> captor = ArgumentCaptor.forClass(Policy.class);
-        verify(mNotificationManager, times(1)).setNotificationPolicy(captor.capture());
+        if (android.app.Flags.modesApi()) {
+            verify(mNotificationManager).setNotificationPolicy(captor.capture(), eq(true));
+        } else {
+            verify(mNotificationManager).setNotificationPolicy(captor.capture());
+        }
 
         Policy expected = new Policy(PRIORITY_CATEGORY_CONVERSATIONS
                 | PRIORITY_CATEGORY_CALLS | PRIORITY_CATEGORY_MESSAGES | PRIORITY_CATEGORY_ALARMS,
@@ -253,7 +270,11 @@ public class ZenModeBackendTest {
         mBackend.saveSenders(PRIORITY_CATEGORY_CALLS, PRIORITY_SENDERS_ANY);
 
         ArgumentCaptor<Policy> captor = ArgumentCaptor.forClass(Policy.class);
-        verify(mNotificationManager, times(1)).setNotificationPolicy(captor.capture());
+        if (android.app.Flags.modesApi()) {
+            verify(mNotificationManager).setNotificationPolicy(captor.capture(), eq(true));
+        } else {
+            verify(mNotificationManager).setNotificationPolicy(captor.capture());
+        }
 
         Policy expected = new Policy(PRIORITY_CATEGORY_CONVERSATIONS
                 | PRIORITY_CATEGORY_CALLS | PRIORITY_CATEGORY_MESSAGES | PRIORITY_CATEGORY_ALARMS,

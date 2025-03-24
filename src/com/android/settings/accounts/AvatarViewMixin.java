@@ -37,6 +37,7 @@ import androidx.lifecycle.MutableLiveData;
 import androidx.lifecycle.OnLifecycleEvent;
 
 import com.android.settings.R;
+import com.android.settings.activityembedding.ActivityEmbeddingRulesController;
 import com.android.settings.homepage.SettingsHomepageActivity;
 import com.android.settings.overlay.FeatureFactory;
 import com.android.settingslib.utils.ThreadUtils;
@@ -105,7 +106,18 @@ public class AvatarViewMixin implements LifecycleObserver {
                 return;
             }
 
-            FeatureFactory.getFactory(mContext).getMetricsFeatureProvider()
+            // Set a component name since activity embedding requires a component name for
+            // registering a rule.
+            intent.setComponent(matchedIntents.get(0).getComponentInfo().getComponentName());
+            ActivityEmbeddingRulesController.registerTwoPanePairRuleForSettingsHome(
+                    mContext,
+                    intent.getComponent(),
+                    intent.getAction(),
+                    false /* finishPrimaryWithSecondary */,
+                    true /* finishSecondaryWithPrimary */,
+                    false /* clearTop */);
+
+            FeatureFactory.getFeatureFactory().getMetricsFeatureProvider()
                     .logSettingsTileClick(KEY_AVATAR_ICON, SettingsEnums.SETTINGS_HOMEPAGE);
 
             // Here may have two different UI while start the activity.
@@ -132,8 +144,8 @@ public class AvatarViewMixin implements LifecycleObserver {
 
     @VisibleForTesting
     boolean hasAccount() {
-        final Account accounts[] = FeatureFactory.getFactory(
-                mContext).getAccountFeatureProvider().getAccounts(mContext);
+        final Account[] accounts = FeatureFactory.getFeatureFactory().getAccountFeatureProvider()
+                .getAccounts(mContext);
         return (accounts != null) && (accounts.length > 0);
     }
 

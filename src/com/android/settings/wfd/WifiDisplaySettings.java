@@ -38,6 +38,7 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.provider.Settings;
+import android.text.TextUtils;
 import android.util.Slog;
 import android.util.TypedValue;
 import android.view.Menu;
@@ -58,7 +59,8 @@ import androidx.preference.PreferenceCategory;
 import androidx.preference.PreferenceGroup;
 import androidx.preference.PreferenceScreen;
 import androidx.preference.PreferenceViewHolder;
-import androidx.preference.SwitchPreference;
+import androidx.preference.SwitchPreferenceCompat;
+import androidx.preference.TwoStatePreference;
 
 import com.android.internal.app.MediaRouteDialogPresenter;
 import com.android.settings.R;
@@ -138,7 +140,6 @@ public final class WifiDisplaySettings extends SettingsPreferenceFragment implem
         mWifiP2pChannel = mWifiP2pManager.initialize(context, Looper.getMainLooper(), null);
 
         addPreferencesFromResource(R.xml.wifi_display_settings);
-        setHasOptionsMenu(true);
     }
 
     @Override
@@ -195,8 +196,9 @@ public final class WifiDisplaySettings extends SettingsPreferenceFragment implem
 
     @Override
     public void onCreateOptionsMenu(Menu menu, MenuInflater inflater) {
-        if (mWifiDisplayStatus != null && mWifiDisplayStatus.getFeatureState()
-                != WifiDisplayStatus.FEATURE_STATE_UNAVAILABLE) {
+        if (getResources().getBoolean(R.bool.config_show_wifi_display_enable_menu)
+                && mWifiDisplayStatus != null && mWifiDisplayStatus.getFeatureState()
+                        != WifiDisplayStatus.FEATURE_STATE_UNAVAILABLE) {
             MenuItem item = menu.add(Menu.NONE, MENU_ID_ENABLE_WIFI_DISPLAY, 0,
                     R.string.wifi_display_enable_menu_item);
             item.setCheckable(true);
@@ -369,7 +371,7 @@ public final class WifiDisplaySettings extends SettingsPreferenceFragment implem
         }
 
         // switch for Listen Mode
-        SwitchPreference pref = new SwitchPreference(getPrefContext()) {
+        TwoStatePreference pref = new SwitchPreferenceCompat(getPrefContext()) {
             @Override
             protected void onClick() {
                 mListen = !mListen;
@@ -382,7 +384,7 @@ public final class WifiDisplaySettings extends SettingsPreferenceFragment implem
         mCertCategory.addPreference(pref);
 
         // switch for Autonomous GO
-        pref = new SwitchPreference(getPrefContext()) {
+        pref = new SwitchPreferenceCompat(getPrefContext()) {
             @Override
             protected void onClick() {
                 mAutoGO = !mAutoGO;
@@ -678,7 +680,12 @@ public final class WifiDisplaySettings extends SettingsPreferenceFragment implem
                 if (route.isConnecting()) {
                     setSummary(R.string.wifi_display_status_connecting);
                 } else {
-                    setSummary(R.string.wifi_display_status_connected);
+                    CharSequence status = route.getStatus();
+                    if (!TextUtils.isEmpty(status)) {
+                        setSummary(status);
+                    } else {
+                        setSummary(R.string.wifi_display_status_connected);
+                    }
                 }
             } else {
                 if (isEnabled()) {

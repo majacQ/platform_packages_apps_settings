@@ -20,12 +20,18 @@ import android.content.Context;
 import android.content.Intent;
 import android.os.Bundle;
 import android.provider.Settings;
+import android.util.FeatureFlagUtils;
 
+import androidx.annotation.Nullable;
+
+import com.android.settings.Utils;
+import com.android.settings.flags.Flags;
+
+@Deprecated(forRemoval = true)
 public class PanelFeatureProviderImpl implements PanelFeatureProvider {
 
-    private static final String SYSTEMUI_PACKAGE_NAME = "com.android.systemui";
-
     @Override
+    @Nullable
     public PanelContent getPanel(Context context, Bundle bundle) {
         if (context == null) {
             return null;
@@ -41,17 +47,48 @@ public class PanelFeatureProviderImpl implements PanelFeatureProvider {
                 // Redirect to the internet dialog in SystemUI.
                 Intent intent = new Intent(Settings.Panel.ACTION_INTERNET_CONNECTIVITY);
                 intent.addFlags(Intent.FLAG_RECEIVER_FOREGROUND)
-                        .setPackage(SYSTEMUI_PACKAGE_NAME);
+                        .setPackage(Utils.SYSTEMUI_PACKAGE_NAME);
                 context.sendBroadcast(intent);
                 return null;
             case Settings.Panel.ACTION_NFC:
-                return NfcPanel.create(context);
+                if (Flags.slicesRetirement()) {
+                    Intent nfcIntent = new Intent(Settings.ACTION_NFC_SETTINGS);
+                    nfcIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                    context.startActivity(nfcIntent);
+                    return null;
+                } else {
+                    return NfcPanel.create(context);
+                }
             case Settings.Panel.ACTION_WIFI:
-                return WifiPanel.create(context);
+                if (Flags.slicesRetirement()) {
+                    Intent wifiIntent = new Intent(Settings.ACTION_WIFI_SETTINGS);
+                    wifiIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                    context.startActivity(wifiIntent);
+                    return null;
+                } else {
+                    return WifiPanel.create(context);
+                }
             case Settings.Panel.ACTION_VOLUME:
-                return VolumePanel.create(context);
+                if (FeatureFlagUtils.isEnabled(context,
+                        FeatureFlagUtils.SETTINGS_VOLUME_PANEL_IN_SYSTEMUI)) {
+                    // Redirect to the volume panel in SystemUI.
+                    Intent volumeIntent = new Intent(Settings.Panel.ACTION_VOLUME);
+                    volumeIntent.addFlags(Intent.FLAG_RECEIVER_FOREGROUND).setPackage(
+                            Utils.SYSTEMUI_PACKAGE_NAME);
+                    context.sendBroadcast(volumeIntent);
+                    return null;
+                } else {
+                    if (Flags.slicesRetirement()) {
+                        Intent volIntent = new Intent(Settings.ACTION_SOUND_SETTINGS);
+                        volIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                        context.startActivity(volIntent);
+                        return null;
+                    } else {
+                        return VolumePanel.create(context);
+                    }
+                }
         }
 
-        throw new IllegalStateException("No matching panel for: "  + panelType);
+        throw new IllegalStateException("No matching panel for: " + panelType);
     }
 }

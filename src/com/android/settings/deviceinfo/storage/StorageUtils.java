@@ -19,8 +19,10 @@ package com.android.settings.deviceinfo.storage;
 import android.app.Dialog;
 import android.app.settings.SettingsEnums;
 import android.content.Context;
+import android.content.Intent;
+import android.content.pm.ResolveInfo;
+import android.graphics.drawable.Drawable;
 import android.os.AsyncTask;
-import android.os.Build;
 import android.os.Bundle;
 import android.os.storage.DiskInfo;
 import android.os.storage.StorageManager;
@@ -31,10 +33,12 @@ import android.text.format.Formatter;
 import android.util.Log;
 import android.widget.Toast;
 
+import androidx.annotation.NonNull;
 import androidx.appcompat.app.AlertDialog;
 import androidx.fragment.app.Fragment;
 
 import com.android.settings.R;
+import com.android.settings.Utils;
 import com.android.settings.core.SubSettingLauncher;
 import com.android.settings.core.instrumentation.InstrumentedDialogFragment;
 import com.android.settings.deviceinfo.PrivateVolumeForget;
@@ -199,10 +203,10 @@ public class StorageUtils {
         }
     }
 
-    /* Shows information about system storage. */
+    /** Shows information about system storage. */
     public static class SystemInfoFragment extends InstrumentedDialogFragment {
         /** Shows the fragment. */
-        public static void show(Fragment parent) {
+        public static void show(@NonNull Fragment parent) {
             if (!parent.isAdded()) return;
 
             final SystemInfoFragment dialog = new SystemInfoFragment();
@@ -218,10 +222,53 @@ public class StorageUtils {
         @Override
         public Dialog onCreateDialog(Bundle savedInstanceState) {
             return new AlertDialog.Builder(getActivity())
-                    .setMessage(getContext().getString(R.string.storage_detail_dialog_system,
-                            Build.VERSION.RELEASE_OR_CODENAME))
+                    .setMessage(getContext().getString(R.string.storage_os_detail_dialog_system))
                     .setPositiveButton(android.R.string.ok, null)
                     .create();
         }
+    }
+
+    /** Shows information about temporary system files. */
+    public static class TemporaryFilesInfoFragment extends InstrumentedDialogFragment {
+        /** Shows the fragment. */
+        public static void show(@NonNull Fragment parent) {
+            if (!parent.isAdded()) return;
+
+            final TemporaryFilesInfoFragment dialog = new TemporaryFilesInfoFragment();
+            dialog.setTargetFragment(parent, 0);
+            dialog.show(parent.getFragmentManager(), "temporaryFilesInfo");
+        }
+
+        @Override
+        public int getMetricsCategory() {
+            return SettingsEnums.DIALOG_TEMPORARY_FILES_INFO;
+        }
+
+        @Override
+        public Dialog onCreateDialog(Bundle savedInstanceState) {
+            return new AlertDialog.Builder(getActivity())
+                    .setMessage(getContext().getString(
+                            R.string.storage_other_files_detail_dialog_system))
+                    .setPositiveButton(android.R.string.ok, null)
+                    .create();
+        }
+    }
+
+    /** Gets a summary which has a byte size information. */
+    public static String getStorageSummary(Context context, int resId, long bytes) {
+        final Formatter.BytesResult result = Formatter.formatBytes(context.getResources(),
+                bytes, Formatter.FLAG_SHORTER);
+        return context.getString(resId, result.value, result.units);
+    }
+
+    /** Gets icon for Preference of Free up space. */
+    public static Drawable getManageStorageIcon(Context context, int userId) {
+        ResolveInfo resolveInfo = context.getPackageManager().resolveActivityAsUser(
+                new Intent(StorageManager.ACTION_MANAGE_STORAGE), 0 /* flags */, userId);
+        if (resolveInfo == null || resolveInfo.activityInfo == null) {
+            return null;
+        }
+
+        return Utils.getBadgedIcon(context, resolveInfo.activityInfo.applicationInfo);
     }
 }

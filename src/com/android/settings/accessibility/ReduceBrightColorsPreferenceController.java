@@ -29,15 +29,17 @@ import android.text.TextUtils;
 import androidx.preference.Preference;
 import androidx.preference.PreferenceScreen;
 
+import com.android.server.display.feature.flags.Flags;
 import com.android.settings.R;
 import com.android.settings.core.TogglePreferenceController;
-import com.android.settings.widget.PrimarySwitchPreference;
+import com.android.settingslib.PrimarySwitchPreference;
 import com.android.settingslib.core.lifecycle.LifecycleObserver;
 import com.android.settingslib.core.lifecycle.events.OnStart;
 import com.android.settingslib.core.lifecycle.events.OnStop;
 
 /** PreferenceController that shows the Reduce Bright Colors summary */
-public class ReduceBrightColorsPreferenceController extends TogglePreferenceController
+public class ReduceBrightColorsPreferenceController
+        extends TogglePreferenceController
         implements LifecycleObserver, OnStart, OnStop {
     private ContentObserver mSettingsContentObserver;
     private PrimarySwitchPreference mPreference;
@@ -84,6 +86,15 @@ public class ReduceBrightColorsPreferenceController extends TogglePreferenceCont
 
     @Override
     public int getAvailabilityStatus() {
+        // Successor to this feature is Even Dimmer
+        // found in display/EvenDimmerPreferenceController
+        // Only allow RBC if even dimmer is not possible on this device
+        if (Flags.evenDimmer() && mContext.getResources().getBoolean(
+                com.android.internal.R.bool.config_evenDimmerEnabled)) {
+            return UNSUPPORTED_ON_DEVICE;
+        }
+
+
         return ColorDisplayManager.isReduceBrightColorsAvailable(mContext) ? AVAILABLE
                 : UNSUPPORTED_ON_DEVICE;
     }
@@ -95,11 +106,17 @@ public class ReduceBrightColorsPreferenceController extends TogglePreferenceCont
     }
 
     @Override
+    public int getSliceHighlightMenuRes() {
+        return R.string.menu_key_accessibility;
+    }
+
+    @Override
     public void onStart() {
         mContext.getContentResolver().registerContentObserver(Settings.Secure.getUriFor(
                 Settings.Secure.REDUCE_BRIGHT_COLORS_ACTIVATED),
                 false, mSettingsContentObserver, UserHandle.USER_CURRENT);
     }
+
     @Override
     public void onStop() {
         mContext.getContentResolver().unregisterContentObserver(mSettingsContentObserver);

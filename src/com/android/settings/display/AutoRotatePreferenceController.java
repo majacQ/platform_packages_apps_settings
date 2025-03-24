@@ -20,6 +20,7 @@ import android.text.TextUtils;
 import androidx.preference.Preference;
 
 import com.android.internal.view.RotationPolicy;
+import com.android.settings.R;
 import com.android.settings.core.PreferenceControllerMixin;
 import com.android.settings.core.TogglePreferenceController;
 import com.android.settings.overlay.FeatureFactory;
@@ -38,7 +39,7 @@ public class AutoRotatePreferenceController extends TogglePreferenceController i
 
     public AutoRotatePreferenceController(Context context, String key) {
         super(context, key);
-        mMetricsFeatureProvider = FeatureFactory.getFactory(context).getMetricsFeatureProvider();
+        mMetricsFeatureProvider = FeatureFactory.getFeatureFactory().getMetricsFeatureProvider();
     }
 
     @Override
@@ -73,6 +74,7 @@ public class AutoRotatePreferenceController extends TogglePreferenceController i
     @Override
     public int getAvailabilityStatus() {
         return RotationPolicy.isRotationLockToggleVisible(mContext)
+                && !DeviceStateAutoRotationHelper.isDeviceStateRotationEnabled(mContext)
                 ? AVAILABLE : UNSUPPORTED_ON_DEVICE;
     }
 
@@ -87,6 +89,11 @@ public class AutoRotatePreferenceController extends TogglePreferenceController i
     }
 
     @Override
+    public int getSliceHighlightMenuRes() {
+        return R.string.menu_key_display;
+    }
+
+    @Override
     public boolean isChecked() {
         return !RotationPolicy.isRotationLocked(mContext);
     }
@@ -96,7 +103,8 @@ public class AutoRotatePreferenceController extends TogglePreferenceController i
         final boolean isLocked = !isChecked;
         mMetricsFeatureProvider.action(mContext, SettingsEnums.ACTION_ROTATION_LOCK,
                 isLocked);
-        RotationPolicy.setRotationLock(mContext, isLocked);
+        RotationPolicy.setRotationLock(mContext, isLocked,
+                /* caller= */ "AutoRotatePreferenceController#setChecked");
         return true;
     }
 }

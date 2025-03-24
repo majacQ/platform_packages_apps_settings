@@ -16,15 +16,16 @@
 
 package com.android.settings.widget;
 
-import android.annotation.NonNull;
-import android.annotation.Nullable;
+
 import android.content.res.ColorStateList;
 import android.content.res.Resources;
 import android.content.res.Resources.Theme;
 import android.content.res.TypedArray;
 import android.graphics.drawable.DrawableWrapper;
 import android.util.AttributeSet;
-import android.util.Log;
+
+import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
 
 import com.android.settings.R;
 
@@ -38,7 +39,7 @@ import java.io.IOException;
  * underlying drawable. This class should only be used in XML.
  *
  * @attr ref android.R.styleable#DrawableWrapper_drawable
- * @attr ref R.styleable#TintDrawable_tint
+ * @attr ref android.R.styleable#TintDrawable_tint
  */
 public class TintDrawable extends DrawableWrapper {
     private ColorStateList mTint;

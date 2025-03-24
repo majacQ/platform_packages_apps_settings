@@ -21,8 +21,7 @@
     style="?attr/fingerprint_layout_theme"
     android:id="@+id/setup_wizard_layout"
     android:layout_width="match_parent"
-    android:layout_height="match_parent"
-    app:sudDescriptionText="@string/security_settings_fingerprint_enroll_introduction_message">
+    android:layout_height="match_parent">
 
     <LinearLayout
         style="@style/SudContentFrame"
@@ -30,9 +29,7 @@
         android:layout_height="wrap_content"
         android:clipChildren="false"
         android:clipToPadding="false"
-        android:orientation="vertical"
-        android:layout_marginStart="?attr/sudMarginStart"
-        android:layout_marginEnd="?attr/sudMarginEnd">
+        android:orientation="vertical">
 
         <com.google.android.setupdesign.view.RichTextView
             android:id="@+id/error_text"
@@ -84,6 +81,7 @@
                     android:id="@+id/footer_message_2"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
+                    android:text="@string/security_settings_fingerprint_v2_enroll_introduction_footer_message_2"
                     style="@style/BiometricEnrollIntroMessage" />
             </LinearLayout>
 
@@ -97,7 +95,7 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:contentDescription="@null"
-                    android:src="@drawable/ic_device_locked_24dp"/>
+                    android:src="@drawable/ic_lock_24dp"/>
                 <Space
                     android:layout_width="16dp"
                     android:layout_height="wrap_content"/>
@@ -105,6 +103,7 @@
                     android:id="@+id/footer_message_3"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
+                    android:text="@string/security_settings_fingerprint_v2_enroll_introduction_footer_message_3"
                     style="@style/BiometricEnrollIntroMessage" />
             </LinearLayout>
 
@@ -113,6 +112,7 @@
                 android:id="@+id/footer_title_1"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
+                android:text="@string/security_settings_fingerprint_enroll_introduction_footer_title_1"
                 style="@style/BiometricEnrollIntroTitle" />
 
             <LinearLayout
@@ -133,6 +133,7 @@
                     android:id="@+id/footer_message_4"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
+                    android:text="@string/security_settings_fingerprint_v2_enroll_introduction_footer_message_4"
                     style="@style/BiometricEnrollIntroMessage" />
             </LinearLayout>
 
@@ -142,7 +143,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 style="@style/BiometricEnrollIntroTitle"
-                android:text="@string/security_settings_face_enroll_introduction_info_title"/>
+                android:text="@string/security_settings_fingerprint_enroll_introduction_footer_title_2"/>
 
             <LinearLayout
                 android:layout_width="match_parent"
@@ -162,6 +163,29 @@
                     android:id="@+id/footer_message_5"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
+                    android:text="@string/security_settings_fingerprint_v2_enroll_introduction_footer_message_5"
+                    style="@style/BiometricEnrollIntroMessage" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
+
+                <ImageView
+                    android:id="@+id/icon_shield"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:contentDescription="@null"
+                    android:src="@drawable/ic_guarantee"/>
+                <Space
+                    android:layout_width="16dp"
+                    android:layout_height="wrap_content"/>
+                <TextView
+                    android:id="@+id/footer_message_6"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="@string/security_settings_fingerprint_v2_enroll_introduction_footer_message_6"
                     style="@style/BiometricEnrollIntroMessage" />
             </LinearLayout>
 
@@ -180,6 +204,8 @@
                     android:layout_width="16dp"
                     android:layout_height="wrap_content"/>
                 <TextView
+                    android:id="@+id/footer_learn_more"
+                    android:linksClickable="true"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     style="@style/BiometricEnrollIntroMessage"

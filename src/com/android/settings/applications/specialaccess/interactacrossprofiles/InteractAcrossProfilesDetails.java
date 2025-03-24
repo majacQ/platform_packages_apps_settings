@@ -15,9 +15,21 @@
  */
 package com.android.settings.applications.specialaccess.interactacrossprofiles;
 
+import static android.app.admin.DevicePolicyResources.Strings.Settings.APP_CAN_ACCESS_PERSONAL_DATA;
+import static android.app.admin.DevicePolicyResources.Strings.Settings.APP_CAN_ACCESS_PERSONAL_PERMISSIONS;
+import static android.app.admin.DevicePolicyResources.Strings.Settings.CONNECTED_APPS_SHARE_PERMISSIONS_AND_DATA;
+import static android.app.admin.DevicePolicyResources.Strings.Settings.CONNECTED_WORK_AND_PERSONAL_APPS_TITLE;
+import static android.app.admin.DevicePolicyResources.Strings.Settings.CONNECT_APPS_DIALOG_SUMMARY;
+import static android.app.admin.DevicePolicyResources.Strings.Settings.CONNECT_APPS_DIALOG_TITLE;
+import static android.app.admin.DevicePolicyResources.Strings.Settings.HOW_TO_DISCONNECT_APPS;
+import static android.app.admin.DevicePolicyResources.Strings.Settings.INSTALL_IN_PERSONAL_PROFILE_TO_CONNECT_PROMPT;
+import static android.app.admin.DevicePolicyResources.Strings.Settings.INSTALL_IN_WORK_PROFILE_TO_CONNECT_PROMPT;
+import static android.app.admin.DevicePolicyResources.Strings.Settings.ONLY_CONNECT_TRUSTED_APPS;
 import static android.content.pm.PackageManager.MATCH_DIRECT_BOOT_AWARE;
 import static android.content.pm.PackageManager.MATCH_DIRECT_BOOT_UNAWARE;
 import static android.provider.Settings.ACTION_MANAGE_CROSS_PROFILE_ACCESS;
+import static android.provider.Settings.Global.CONNECTED_APPS_ALLOWED_PACKAGES;
+import static android.provider.Settings.Global.CONNECTED_APPS_DISALLOWED_PACKAGES;
 
 import android.Manifest;
 import android.annotation.UserIdInt;
@@ -25,6 +37,7 @@ import android.app.ActionBar;
 import android.app.AppOpsManager;
 import android.app.admin.DevicePolicyEventLogger;
 import android.app.admin.DevicePolicyManager;
+import android.app.admin.flags.Flags;
 import android.app.settings.SettingsEnums;
 import android.content.Context;
 import android.content.DialogInterface;
@@ -39,9 +52,12 @@ import android.graphics.drawable.Drawable;
 import android.os.Bundle;
 import android.os.UserHandle;
 import android.os.UserManager;
+import android.provider.Settings;
 import android.stats.devicepolicy.DevicePolicyEnums;
 import android.util.IconDrawableFactory;
+import android.view.LayoutInflater;
 import android.view.View;
+import android.view.ViewGroup;
 import android.widget.ImageView;
 import android.widget.TextView;
 
@@ -56,6 +72,10 @@ import com.android.settingslib.RestrictedLockUtils;
 import com.android.settingslib.RestrictedSwitchPreference;
 import com.android.settingslib.widget.LayoutPreference;
 
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.Optional;
+
 public class InteractAcrossProfilesDetails extends AppInfoBase
         implements Preference.OnPreferenceClickListener {
 
@@ -67,6 +87,7 @@ public class InteractAcrossProfilesDetails extends AppInfoBase
             "interact_across_profiles_extra_summary";
     public static final String EXTRA_SHOW_FRAGMENT_ARGS = ":settings:show_fragment_args";
     public static final String INTENT_KEY = "intent";
+    private static final String TAG = "InteractAcrossProfilesDetails";
 
     private Context mContext;
     private CrossProfileApps mCrossProfileApps;
@@ -86,7 +107,6 @@ public class InteractAcrossProfilesDetails extends AppInfoBase
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-
         mContext = getContext();
         mCrossProfileApps = mContext.getSystemService(CrossProfileApps.class);
         mUserManager = mContext.getSystemService(UserManager.class);
@@ -101,6 +121,25 @@ public class InteractAcrossProfilesDetails extends AppInfoBase
         mInstallAppIntent = AppStoreUtil.getAppStoreLink(mContext, mPackageName);
 
         addPreferencesFromResource(R.xml.interact_across_profiles_permissions_details);
+    }
+
+    @Override
+    public View onCreateView(LayoutInflater inflater, ViewGroup container,
+            Bundle savedInstanceState) {
+        final View view =  super.onCreateView(inflater, container, savedInstanceState);
+
+        replaceEnterprisePreferenceScreenTitle(CONNECTED_WORK_AND_PERSONAL_APPS_TITLE,
+                R.string.interact_across_profiles_title);
+        replaceEnterpriseStringSummary("interact_across_profiles_summary_1",
+                CONNECTED_APPS_SHARE_PERMISSIONS_AND_DATA,
+                R.string.interact_across_profiles_summary_1);
+        replaceEnterpriseStringSummary("interact_across_profiles_summary_2",
+                ONLY_CONNECT_TRUSTED_APPS,
+                R.string.interact_across_profiles_summary_2);
+        replaceEnterpriseStringSummary("interact_across_profiles_extra_summary",
+                HOW_TO_DISCONNECT_APPS,
+                R.string.interact_across_profiles_summary_3);
+
         mSwitchPref = findPreference(INTERACT_ACROSS_PROFILES_SETTINGS_SWITCH);
         mSwitchPref.setOnPreferenceClickListener(this);
 
@@ -120,6 +159,8 @@ public class InteractAcrossProfilesDetails extends AppInfoBase
         styleActionBar();
         maybeShowExtraSummary();
         logPageLaunchMetrics();
+
+        return view;
     }
 
     private void maybeShowExtraSummary() {
@@ -175,7 +216,8 @@ public class InteractAcrossProfilesDetails extends AppInfoBase
             title.setText(appLabel);
         }
 
-        final ImageView personalIconView = mHeader.findViewById(R.id.entity_header_icon_personal);
+        final ImageView personalIconView = mHeader.findViewById(
+                com.android.settingslib.widget.preference.layout.R.id.entity_header_icon_personal);
         if (personalIconView != null) {
             Drawable icon = IconDrawableFactory.newInstance(mContext)
                     .getBadgedIcon(mPackageInfo.applicationInfo, personalProfile.getIdentifier())
@@ -186,7 +228,8 @@ public class InteractAcrossProfilesDetails extends AppInfoBase
             personalIconView.setImageDrawable(icon);
         }
 
-        final ImageView workIconView = mHeader.findViewById(R.id.entity_header_icon_work);
+        final ImageView workIconView = mHeader.findViewById(
+                com.android.settingslib.widget.preference.layout.R.id.entity_header_icon_work);
         if (workIconView != null) {
             Drawable icon = IconDrawableFactory.newInstance(mContext)
                     .getBadgedIcon(mPackageInfo.applicationInfo, workProfile.getIdentifier())
@@ -258,16 +301,30 @@ public class InteractAcrossProfilesDetails extends AppInfoBase
 
         final TextView dialogTitle = dialogView.findViewById(
                 R.id.interact_across_profiles_consent_dialog_title);
-        dialogTitle.setText(
-                getString(R.string.interact_across_profiles_consent_dialog_title, mAppLabel));
+        dialogTitle.setText(mDpm.getResources().getString(CONNECT_APPS_DIALOG_TITLE, () ->
+                getString(R.string.interact_across_profiles_consent_dialog_title, mAppLabel),
+                mAppLabel));
 
         final TextView appDataSummary = dialogView.findViewById(R.id.app_data_summary);
-        appDataSummary.setText(getString(
-                R.string.interact_across_profiles_consent_dialog_app_data_summary, mAppLabel));
+        appDataSummary.setText(
+                mDpm.getResources().getString(APP_CAN_ACCESS_PERSONAL_DATA,
+                        () -> getString(
+                                R.string.interact_across_profiles_consent_dialog_app_data_summary,
+                                mAppLabel), mAppLabel));
 
         final TextView permissionsSummary = dialogView.findViewById(R.id.permissions_summary);
-        permissionsSummary.setText(getString(
-                R.string.interact_across_profiles_consent_dialog_permissions_summary, mAppLabel));
+        permissionsSummary.setText(mDpm.getResources().getString(
+                APP_CAN_ACCESS_PERSONAL_PERMISSIONS,
+                () -> getString(
+                        R.string.interact_across_profiles_consent_dialog_permissions_summary,
+                        mAppLabel),
+                mAppLabel));
+
+        final TextView dialogSummary =
+                dialogView.findViewById(R.id.interact_across_profiles_consent_dialog_summary);
+        dialogSummary.setText(mDpm.getResources().getString(CONNECT_APPS_DIALOG_SUMMARY,
+                () -> getString(
+                        R.string.interact_across_profiles_consent_dialog_summary)));
 
         AlertDialog.Builder builder = new AlertDialog.Builder(getActivity());
         builder.setView(dialogView)
@@ -332,31 +389,32 @@ public class InteractAcrossProfilesDetails extends AppInfoBase
     private void enableInteractAcrossProfiles(boolean newState) {
         mCrossProfileApps.setInteractAcrossProfilesAppOp(
                 mPackageName, newState ? AppOpsManager.MODE_ALLOWED : AppOpsManager.MODE_IGNORED);
+        setUserPreferenceForPackage(newState, mPackageName);
     }
 
     private void handleInstallBannerClick() {
-        if (mInstallAppIntent == null) {
-            logEvent(
-                    DevicePolicyEnums.CROSS_PROFILE_SETTINGS_PAGE_INSTALL_BANNER_NO_INTENT_CLICKED);
-            return;
-        }
-        if (!mInstalledInWork) {
+        if (mInstallAppIntent != null
+                && !mInstalledInWork
+                && isInstallableInProfile(mInstallAppIntent, mWorkProfile)) {
             logEvent(DevicePolicyEnums.CROSS_PROFILE_SETTINGS_PAGE_INSTALL_BANNER_CLICKED);
             mContext.startActivityAsUser(mInstallAppIntent, mWorkProfile);
             return;
         }
-        if (!mInstalledInPersonal) {
+        if (mInstallAppIntent != null
+                && !mInstalledInPersonal
+                && isInstallableInProfile(mInstallAppIntent, mPersonalProfile)) {
             logEvent(DevicePolicyEnums.CROSS_PROFILE_SETTINGS_PAGE_INSTALL_BANNER_CLICKED);
             mContext.startActivityAsUser(mInstallAppIntent, mPersonalProfile);
+            return;
         }
+        logEvent(DevicePolicyEnums.CROSS_PROFILE_SETTINGS_PAGE_INSTALL_BANNER_NO_INTENT_CLICKED);
     }
 
     /**
      * @return the summary for the current state of whether the app associated with the given
      * {@code packageName} is allowed to interact across profiles.
      */
-    public static CharSequence getPreferenceSummary(
-            Context context, String packageName) {
+    public static String getPreferenceSummary(Context context, String packageName) {
         return context.getString(isInteractAcrossProfilesEnabled(context, packageName)
                 ? R.string.interact_across_profiles_summary_allowed
                 : R.string.interact_across_profiles_summary_not_allowed);
@@ -393,10 +451,14 @@ public class InteractAcrossProfilesDetails extends AppInfoBase
             return false;
         }
         if (!mInstalledInPersonal) {
-            mInstallBanner.setTitle(getString(
-                    R.string.interact_across_profiles_install_personal_app_title,
-                    mAppLabel));
-            if (mInstallAppIntent != null) {
+            mInstallBanner.setTitle(
+                    mDpm.getResources().getString(INSTALL_IN_PERSONAL_PROFILE_TO_CONNECT_PROMPT,
+                            () -> getString(
+                                    R.string.interact_across_profiles_install_personal_app_title,
+                                    mAppLabel),
+                            mAppLabel));
+            if (mInstallAppIntent != null
+                    && isInstallableInProfile(mInstallAppIntent, mPersonalProfile)) {
                 mInstallBanner.setSummary(
                         R.string.interact_across_profiles_install_app_summary);
             }
@@ -404,10 +466,14 @@ public class InteractAcrossProfilesDetails extends AppInfoBase
             return true;
         }
         if (!mInstalledInWork) {
-            mInstallBanner.setTitle(getString(
-                    R.string.interact_across_profiles_install_work_app_title,
-                    mAppLabel));
-            if (mInstallAppIntent != null) {
+            mInstallBanner.setTitle(
+                    mDpm.getResources().getString(INSTALL_IN_WORK_PROFILE_TO_CONNECT_PROMPT,
+                            () -> getString(
+                                    R.string.interact_across_profiles_install_work_app_title,
+                                    mAppLabel),
+                            mAppLabel));
+            if (mInstallAppIntent != null
+                    && isInstallableInProfile(mInstallAppIntent, mWorkProfile)) {
                 mInstallBanner.setSummary(
                         R.string.interact_across_profiles_install_app_summary);
             }
@@ -434,6 +500,12 @@ public class InteractAcrossProfilesDetails extends AppInfoBase
         return info != null;
     }
 
+    private boolean isInstallableInProfile(Intent intent, UserHandle profile) {
+        return !mContext.getPackageManager()
+                .queryIntentActivitiesAsUser(intent, /* flags= */ 0, profile)
+                .isEmpty();
+    }
+
     private void refreshUiForConfigurableApps() {
         mInstallBanner.setVisible(false);
         mSwitchPref.setEnabled(true);
@@ -447,20 +519,24 @@ public class InteractAcrossProfilesDetails extends AppInfoBase
     private void enableSwitchPref() {
         mSwitchPref.setChecked(true);
         mSwitchPref.setTitle(R.string.interact_across_profiles_switch_enabled);
-        final ImageView horizontalArrowIcon = mHeader.findViewById(R.id.entity_header_swap_horiz);
+        final ImageView horizontalArrowIcon =
+                mHeader.findViewById(com.android.settingslib.widget.preference.layout.R.id.entity_header_swap_horiz);
         if (horizontalArrowIcon != null) {
             horizontalArrowIcon.setImageDrawable(
-                    mContext.getDrawable(R.drawable.ic_swap_horiz_blue));
+                    mContext.getDrawable(
+                            com.android.settingslib.widget.preference.layout.R.drawable.ic_swap_horiz_blue));
         }
     }
 
     private void disableSwitchPref() {
         mSwitchPref.setChecked(false);
         mSwitchPref.setTitle(R.string.interact_across_profiles_switch_disabled);
-        final ImageView horizontalArrowIcon = mHeader.findViewById(R.id.entity_header_swap_horiz);
+        final ImageView horizontalArrowIcon =
+                mHeader.findViewById(com.android.settingslib.widget.preference.layout.R.id.entity_header_swap_horiz);
         if (horizontalArrowIcon != null) {
             horizontalArrowIcon.setImageDrawable(
-                    mContext.getDrawable(R.drawable.ic_swap_horiz_grey));
+                    mContext.getDrawable(
+                            com.android.settingslib.widget.preference.layout.R.drawable.ic_swap_horiz_grey));
         }
     }
 
@@ -484,5 +560,41 @@ public class InteractAcrossProfilesDetails extends AppInfoBase
             return false;
         }
         return ACTION_MANAGE_CROSS_PROFILE_ACCESS.equals(intent.getAction());
+    }
+
+    private void setUserPreferenceForPackage(boolean enabled, String crossProfilePackage) {
+        if (!Flags.backupConnectedAppsSettings()) {
+            return;
+        }
+        String allowedPackagesString = Settings.Global.getString(getContentResolver(),
+                CONNECTED_APPS_ALLOWED_PACKAGES);
+        String disallowedPackagesString = Settings.Global.getString(getContentResolver(),
+                CONNECTED_APPS_DISALLOWED_PACKAGES);
+
+        HashSet<String> allowedPackagesSet = getSetFromString(allowedPackagesString);
+        HashSet<String> disallowedPackagesSet = getSetFromString(disallowedPackagesString);
+
+        if (enabled) {
+            allowedPackagesSet.add(crossProfilePackage);
+            disallowedPackagesSet.remove(crossProfilePackage);
+
+        } else {
+            allowedPackagesSet.remove(crossProfilePackage);
+            disallowedPackagesSet.add(crossProfilePackage);
+        }
+
+        Settings.Global.putString(getContentResolver(),
+                CONNECTED_APPS_ALLOWED_PACKAGES,
+                String.join(",", allowedPackagesSet));
+
+        Settings.Global.putString(getContentResolver(),
+                CONNECTED_APPS_DISALLOWED_PACKAGES,
+                String.join(",", disallowedPackagesSet));
+    }
+
+    private HashSet<String> getSetFromString(String packages) {
+        return Optional.ofNullable(packages)
+                .map(pkg -> new HashSet<>(Arrays.asList(pkg.split(","))))
+                .orElseGet(HashSet::new);
     }
 }

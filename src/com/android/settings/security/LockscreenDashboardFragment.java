@@ -16,10 +16,21 @@
 
 package com.android.settings.security;
 
+import static android.app.admin.DevicePolicyResources.Strings.Settings.WORK_PROFILE_LOCKED_NOTIFICATION_TITLE;
+import static android.app.admin.DevicePolicyResources.Strings.Settings.WORK_PROFILE_NOTIFICATIONS_SECTION_HEADER;
+
 import android.app.settings.SettingsEnums;
 import android.content.Context;
+import android.database.ContentObserver;
 import android.hardware.display.AmbientDisplayConfiguration;
+import android.net.Uri;
+import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
+import android.provider.Settings;
 
+import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
 import androidx.annotation.VisibleForTesting;
 
 import com.android.settings.R;
@@ -45,8 +56,6 @@ import java.util.List;
 public class LockscreenDashboardFragment extends DashboardFragment
         implements OwnerInfoPreferenceController.OwnerInfoCallback {
 
-    public static final String KEY_AMBIENT_DISPLAY_ALWAYS_ON = "ambient_display_always_on";
-
     private static final String TAG = "LockscreenDashboardFragment";
 
     @VisibleForTesting
@@ -64,6 +73,8 @@ public class LockscreenDashboardFragment extends DashboardFragment
 
     private AmbientDisplayConfiguration mConfig;
     private OwnerInfoPreferenceController mOwnerInfoPreferenceController;
+    @VisibleForTesting
+    ContentObserver mControlsContentObserver;
 
     @Override
     public int getMetricsCategory() {
@@ -73,6 +84,16 @@ public class LockscreenDashboardFragment extends DashboardFragment
     @Override
     protected String getLogTag() {
         return TAG;
+    }
+
+    @Override
+    public void onCreate(Bundle icicle) {
+        super.onCreate(icicle);
+        replaceEnterpriseStringTitle("security_setting_lock_screen_notif_work",
+                WORK_PROFILE_LOCKED_NOTIFICATION_TITLE,
+                R.string.locked_work_profile_notification_title);
+        replaceEnterpriseStringTitle("security_setting_lock_screen_notif_work_header",
+                WORK_PROFILE_NOTIFICATIONS_SECTION_HEADER, R.string.profile_section_header);
     }
 
     @Override
@@ -88,10 +109,33 @@ public class LockscreenDashboardFragment extends DashboardFragment
     @Override
     public void onAttach(Context context) {
         super.onAttach(context);
-        use(AmbientDisplayAlwaysOnPreferenceController.class).setConfig(getConfig(context));
+        if (!isCatalystEnabled()) {
+            use(AmbientDisplayAlwaysOnPreferenceController.class).setConfig(getConfig(context));
+        }
         use(AmbientDisplayNotificationsPreferenceController.class).setConfig(getConfig(context));
         use(DoubleTapScreenPreferenceController.class).setConfig(getConfig(context));
         use(PickupGesturePreferenceController.class).setConfig(getConfig(context));
+
+        mControlsContentObserver = new ContentObserver(
+                new Handler(Looper.getMainLooper())) {
+            @Override
+            public void onChange(boolean selfChange, Uri uri) {
+                super.onChange(selfChange, uri);
+                updatePreferenceStates();
+            }
+        };
+        context.getContentResolver().registerContentObserver(
+                Settings.Secure.getUriFor(Settings.Secure.LOCKSCREEN_SHOW_CONTROLS),
+                false /* notifyForDescendants */, mControlsContentObserver);
+    }
+
+    @Override
+    public void onDetach() {
+        if (mControlsContentObserver != null) {
+            getContext().getContentResolver().unregisterContentObserver(mControlsContentObserver);
+            mControlsContentObserver = null;
+        }
+        super.onDetach();
     }
 
     @Override
@@ -116,6 +160,11 @@ public class LockscreenDashboardFragment extends DashboardFragment
         if (mOwnerInfoPreferenceController != null) {
             mOwnerInfoPreferenceController.updateSummary();
         }
+    }
+
+    @Override
+    public @Nullable String getPreferenceScreenBindingKey(@NonNull Context context) {
+        return LockScreenPreferenceScreen.KEY;
     }
 
     private AmbientDisplayConfiguration getConfig(Context context) {

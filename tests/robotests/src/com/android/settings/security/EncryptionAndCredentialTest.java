@@ -16,19 +16,17 @@
 
 package com.android.settings.security;
 
-import static com.android.settings.security.EncryptionAndCredential.SEARCH_INDEX_DATA_PROVIDER;
-
 import static com.google.common.truth.Truth.assertThat;
-
-import static org.mockito.Mockito.when;
 
 import android.app.admin.DevicePolicyManager;
 import android.content.Context;
+import android.os.Bundle;
 import android.os.UserManager;
-import android.provider.SearchIndexableResource;
+
+import androidx.preference.Preference;
+import androidx.preference.PreferenceFragmentCompat;
 
 import com.android.internal.logging.nano.MetricsProto.MetricsEvent;
-import com.android.settings.search.BaseSearchIndexProvider;
 
 import org.junit.Before;
 import org.junit.Test;
@@ -38,9 +36,7 @@ import org.mockito.MockitoAnnotations;
 import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;
 import org.robolectric.shadows.ShadowApplication;
-
-import java.util.ArrayList;
-import java.util.List;
+import org.robolectric.shadows.androidx.fragment.FragmentController;
 
 @RunWith(RobolectricTestRunner.class)
 public class EncryptionAndCredentialTest {
@@ -68,18 +64,23 @@ public class EncryptionAndCredentialTest {
     }
 
     @Test
-    public void getNonIndexableKeys_pageIsDisabled_shouldReturnAllKeysAsNonIndexable() {
-        when(mUserManager.isAdminUser()).thenReturn(false);
+    public void isSelectable_encryptionPreferenceStatus_isNotSelectable() {
+        final PreferenceFragmentCompat fragment =
+                FragmentController.of(new TestFragment(), new Bundle())
+                .create()
+                .start()
+                .resume()
+                .get();
+        final Preference preference =
+                fragment.findPreference("encryption_and_credentials_encryption_status");
 
-        final List<SearchIndexableResource> index =
-                SEARCH_INDEX_DATA_PROVIDER.getXmlResourcesToIndex(mContext, true /* enabled */);
-        final List<String> expectedKeys = new ArrayList<>();
-        for (SearchIndexableResource res : index) {
-            expectedKeys.addAll(((BaseSearchIndexProvider) SEARCH_INDEX_DATA_PROVIDER)
-                    .getNonIndexableKeysFromXml(mContext, res.xmlResId, true /* suppressAll */));
+        assertThat(preference.isSelectable()).isFalse();
+    }
+
+    public static class TestFragment extends PreferenceFragmentCompat {
+        @Override
+        public void onCreatePreferences(Bundle savedInstanceState, String rootKey) {
+            addPreferencesFromResource(com.android.settings.R.xml.encryption_and_credential);
         }
-        final List<String> keys = SEARCH_INDEX_DATA_PROVIDER.getNonIndexableKeys(mContext);
-
-        assertThat(keys).containsExactlyElementsIn(expectedKeys);
     }
 }

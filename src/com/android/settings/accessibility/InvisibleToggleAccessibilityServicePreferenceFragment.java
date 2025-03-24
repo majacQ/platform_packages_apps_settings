@@ -17,11 +17,6 @@
 package com.android.settings.accessibility;
 
 import android.accessibilityservice.AccessibilityServiceInfo;
-import android.content.DialogInterface;
-import android.view.View;
-
-import com.android.settings.R;
-import com.android.settingslib.accessibility.AccessibilityUtils;
 
 /**
  * Fragment that does not have toggle bar to turn on service to use.
@@ -39,47 +34,5 @@ public class InvisibleToggleAccessibilityServicePreferenceFragment extends
     protected void onInstallSwitchPreferenceToggleSwitch() {
         super.onInstallSwitchPreferenceToggleSwitch();
         mToggleServiceSwitchPreference.setVisible(false);
-    }
-
-    /**
-     * {@inheritDoc}
-     *
-     * Enables accessibility service only when user had allowed permission. Disables
-     * accessibility service when shortcutPreference is unchecked.
-     */
-    @Override
-    public void onToggleClicked(ShortcutPreference preference) {
-        super.onToggleClicked(preference);
-        boolean enabled = getArguments().getBoolean(AccessibilitySettings.EXTRA_CHECKED)
-                && preference.isChecked();
-
-        AccessibilityUtils.setAccessibilityServiceState(getContext(), mComponentName, enabled);
-    }
-
-    /**
-     * {@inheritDoc}
-     *
-     * Enables accessibility service when user clicks permission allow button.
-     */
-    @Override
-    void onDialogButtonFromShortcutToggleClicked(View view) {
-        super.onDialogButtonFromShortcutToggleClicked(view);
-        if (view.getId() == R.id.permission_enable_allow_button) {
-            AccessibilityUtils.setAccessibilityServiceState(getContext(), mComponentName,
-                    true);
-        }
-    }
-
-    /**
-     * {@inheritDoc}
-     *
-     * Enables accessibility service when shortcutPreference is checked.
-     */
-    @Override
-    protected void callOnAlertDialogCheckboxClicked(DialogInterface dialog, int which) {
-        super.callOnAlertDialogCheckboxClicked(dialog, which);
-
-        final boolean enabled = mShortcutPreference.isChecked();
-        AccessibilityUtils.setAccessibilityServiceState(getContext(), mComponentName, enabled);
     }
 }

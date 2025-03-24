@@ -16,7 +16,8 @@
 
 package com.android.settings.security;
 
-import android.annotation.Nullable;
+import static android.view.WindowManager.LayoutParams.SYSTEM_FLAG_HIDE_NON_SYSTEM_OVERLAY_WINDOWS;
+
 import android.app.Activity;
 import android.app.admin.DevicePolicyEventLogger;
 import android.app.admin.DevicePolicyManager;
@@ -45,6 +46,7 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 
 import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
 import androidx.annotation.VisibleForTesting;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
@@ -120,6 +122,7 @@ public class RequestManageCredentials extends Activity {
                 .setStrings(mCredentialManagerPackage)
                 .write();
         setContentView(R.layout.request_manage_credentials);
+        getWindow().addSystemFlags(SYSTEM_FLAG_HIDE_NON_SYSTEM_OVERLAY_WINDOWS);
         mIsLandscapeMode = getResources().getConfiguration().orientation
                 == Configuration.ORIENTATION_LANDSCAPE;
 
@@ -211,7 +214,9 @@ public class RequestManageCredentials extends Activity {
     private void loadButtons() {
         mButtonPanel = findViewById(R.id.button_panel);
         Button dontAllowButton = findViewById(R.id.dont_allow_button);
+        dontAllowButton.setFilterTouchesWhenObscured(true);
         Button allowButton = findViewById(R.id.allow_button);
+        allowButton.setFilterTouchesWhenObscured(true);
 
         dontAllowButton.setOnClickListener(b -> {
             DevicePolicyEventLogger

@@ -130,9 +130,15 @@ public class BluetoothDevicesSlice implements CustomSliceable {
         return SliceBuilderUtils.buildSearchResultPageIntent(mContext,
                 ConnectedDeviceDashboardFragment.class.getName(), "" /* key */,
                 screenTitle,
-                SettingsEnums.SLICE)
+                SettingsEnums.SLICE,
+                this)
                 .setClassName(mContext.getPackageName(), SubSettings.class.getName())
                 .setData(getUri());
+    }
+
+    @Override
+    public int getSliceHighlightMenuRes() {
+        return R.string.menu_key_connected_devices;
     }
 
     @Override
@@ -170,7 +176,7 @@ public class BluetoothDevicesSlice implements CustomSliceable {
     List<CachedBluetoothDevice> getPairedBluetoothDevices() {
         final List<CachedBluetoothDevice> bluetoothDeviceList = new ArrayList<>();
 
-        // If Bluetooth is disable, skip getting the Bluetooth devices.
+        // If Bluetooth is disabled, skip getting the Bluetooth devices.
         if (!BluetoothAdapter.getDefaultAdapter().isEnabled()) {
             Log.i(TAG, "Cannot get Bluetooth devices, Bluetooth is disabled.");
             return bluetoothDeviceList;
@@ -326,12 +332,13 @@ public class BluetoothDevicesSlice implements CustomSliceable {
     private void lazyInitUpdaters() {
         if (mAvailableMediaBtDeviceUpdater == null) {
             mAvailableMediaBtDeviceUpdater = new AvailableMediaBluetoothDeviceUpdater(mContext,
-                    null /* fragment */, null /* devicePreferenceCallback */);
+                    /* devicePreferenceCallback= */ null, /* metricsCategory= */ 0);
         }
 
         if (mSavedBtDeviceUpdater == null) {
             mSavedBtDeviceUpdater = new SavedBluetoothDeviceUpdater(mContext,
-                    null /* fragment */, null /* devicePreferenceCallback */);
+                    /* devicePreferenceCallback= */ null, /* showConnectedDevice= */
+                    false, /* metricsCategory= */ 0);
         }
     }
 

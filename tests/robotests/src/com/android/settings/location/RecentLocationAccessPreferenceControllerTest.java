@@ -17,13 +17,17 @@ package com.android.settings.location;
 
 import static com.google.common.truth.Truth.assertThat;
 
+import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.doReturn;
-import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import android.content.Context;
-import android.graphics.drawable.Drawable;
+import android.content.Intent;
+import android.location.LocationManager;
+import android.os.UserHandle;
+import android.provider.Settings;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.widget.TextView;
@@ -34,7 +38,9 @@ import androidx.preference.PreferenceScreen;
 import com.android.settings.R;
 import com.android.settings.dashboard.DashboardFragment;
 import com.android.settings.testutils.shadow.ShadowDeviceConfig;
-import com.android.settingslib.location.RecentLocationAccesses;
+import com.android.settingslib.applications.RecentAppOpsAccess;
+
+import com.google.common.collect.ImmutableList;
 
 import org.junit.After;
 import org.junit.Before;
@@ -42,13 +48,13 @@ import org.junit.Ignore;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.mockito.Mock;
+import org.mockito.Mockito;
 import org.mockito.MockitoAnnotations;
 import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;
 import org.robolectric.annotation.Config;
 
 import java.util.ArrayList;
-import java.util.List;
 
 @RunWith(RobolectricTestRunner.class)
 @Config(shadows = {ShadowDeviceConfig.class})
@@ -61,8 +67,9 @@ public class RecentLocationAccessPreferenceControllerTest {
     @Mock
     private DashboardFragment mDashboardFragment;
     @Mock
-    private RecentLocationAccesses mRecentLocationApps;
-
+    private RecentAppOpsAccess mRecentLocationApps;
+    @Mock
+    private LocationManager mLocationManager;
     private Context mContext;
     private RecentLocationAccessPreferenceController mController;
     private View mAppEntitiesHeaderView;
@@ -77,7 +84,7 @@ public class RecentLocationAccessPreferenceControllerTest {
         mController.init(mDashboardFragment);
         final String key = mController.getPreferenceKey();
         mAppEntitiesHeaderView = LayoutInflater.from(mContext).inflate(
-                R.layout.app_entities_header, null /* root */);
+                com.android.settingslib.widget.entityheader.R.layout.app_entities_header, null /* root */);
         when(mScreen.findPreference(key)).thenReturn(mLayoutPreference);
         when(mLayoutPreference.getKey()).thenReturn(key);
         when(mLayoutPreference.getContext()).thenReturn(mContext);
@@ -105,22 +112,45 @@ public class RecentLocationAccessPreferenceControllerTest {
         final TextView title = mAppEntitiesHeaderView.findViewById(R.id.header_title);
         assertThat(title.getText()).isEqualTo(
                 mContext.getText(R.string.location_category_recent_location_access));
-        final TextView details = mAppEntitiesHeaderView.findViewById(R.id.header_details);
+        final TextView details = mAppEntitiesHeaderView
+                .findViewById(com.android.settingslib.widget.entityheader.R.id.header_details);
         assertThat(details.getText()).isEqualTo(
                 mContext.getText(R.string.location_recent_location_access_view_details));
         assertThat(details.hasOnClickListeners()).isTrue();
     }
 
-    private List<RecentLocationAccesses.Access> createMockAccesses(int count) {
-        final List<RecentLocationAccesses.Access> accesses = new ArrayList<>();
-        for (int i = 0; i < count; i++) {
-            final Drawable icon = mock(Drawable.class);
-            // Add mock accesses
-            final RecentLocationAccesses.Access access = new RecentLocationAccesses.Access(
-                    "packageName", android.os.Process.myUserHandle(), icon,
-                    "appTitle" + i, "appSummary" + i, 1000 - i);
-            accesses.add(access);
-        }
-        return accesses;
+    /** Verifies the title text, details text are correct, and the click listener is set. */
+    @Test
+    public void updateState_showSystemAccess() {
+        doReturn(ImmutableList.of(
+                new RecentAppOpsAccess.Access("app", UserHandle.CURRENT, null, "app", "", 0)))
+                .when(mRecentLocationApps).getAppListSorted(false);
+        doReturn(new ArrayList<>()).when(mRecentLocationApps).getAppListSorted(true);
+        mController.displayPreference(mScreen);
+        mController.updateState(mLayoutPreference);
+        verify(mLayoutPreference).addPreference(Mockito.any());
+
+        Settings.Secure.putInt(
+                mContext.getContentResolver(), Settings.Secure.LOCATION_SHOW_SYSTEM_OPS, 1);
+        verify(mLayoutPreference, Mockito.times(1)).addPreference(Mockito.any());
+    }
+
+    @Test
+    public void testPreferenceClick_onExtraLocationPackage_startsExtraLocationActivity() {
+        String extraLocationPkgName = "extraLocationPkgName";
+        when(mContext.getSystemService(LocationManager.class)).thenReturn(mLocationManager);
+        when(mLocationManager.getExtraLocationControllerPackage()).thenReturn(extraLocationPkgName);
+        RecentLocationAccessPreferenceController.PackageEntryClickedListener listener =
+                new RecentLocationAccessPreferenceController.PackageEntryClickedListener(
+                        mContext, extraLocationPkgName, UserHandle.CURRENT);
+        doNothing().when(mContext).startActivityAsUser(Mockito.refEq(new Intent(
+                Settings.ACTION_LOCATION_CONTROLLER_EXTRA_PACKAGE_SETTINGS)),
+                Mockito.eq(UserHandle.CURRENT));
+
+        listener.onPreferenceClick(mLayoutPreference);
+
+        verify(mContext).startActivityAsUser(Mockito.refEq(new Intent(
+                Settings.ACTION_LOCATION_CONTROLLER_EXTRA_PACKAGE_SETTINGS)),
+                Mockito.eq(UserHandle.CURRENT));
     }
 }

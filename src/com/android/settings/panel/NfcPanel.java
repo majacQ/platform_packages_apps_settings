@@ -30,6 +30,7 @@ import com.android.settings.slices.SliceBuilderUtils;
 import java.util.ArrayList;
 import java.util.List;
 
+@Deprecated(forRemoval = true)
 public class NfcPanel implements PanelContent {
 
     private final Context mContext;
@@ -62,7 +63,8 @@ public class NfcPanel implements PanelContent {
                 AdvancedConnectedDeviceDashboardFragment.class.getName(),
                 null /* key */,
                 screenTitle,
-                SettingsEnums.SETTINGS_CONNECTED_DEVICE_CATEGORY);
+                SettingsEnums.SETTINGS_CONNECTED_DEVICE_CATEGORY,
+                R.string.menu_key_connected_devices);
         intent.setClassName(mContext.getPackageName(), SubSettings.class.getName());
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         return intent;

@@ -16,11 +16,15 @@
 
 package com.android.settings.development;
 
+import static com.android.settings.development.BluetoothLeAudioHwOffloadPreferenceController.LE_AUDIO_OFFLOAD_DISABLED_PROPERTY;
+
 import android.content.Context;
 import android.os.SystemProperties;
 
+import androidx.annotation.Nullable;
+import androidx.annotation.VisibleForTesting;
 import androidx.preference.Preference;
-import androidx.preference.SwitchPreference;
+import androidx.preference.TwoStatePreference;
 
 import com.android.settings.core.PreferenceControllerMixin;
 import com.android.settingslib.development.DeveloperOptionsPreferenceController;
@@ -29,13 +33,16 @@ public class BluetoothA2dpHwOffloadPreferenceController extends DeveloperOptions
         implements Preference.OnPreferenceChangeListener, PreferenceControllerMixin {
 
     private static final String PREFERENCE_KEY = "bluetooth_disable_a2dp_hw_offload";
-    private final DevelopmentSettingsDashboardFragment mFragment;
+    @Nullable private final DevelopmentSettingsDashboardFragment mFragment;
 
     static final String A2DP_OFFLOAD_DISABLED_PROPERTY = "persist.bluetooth.a2dp_offload.disabled";
     static final String A2DP_OFFLOAD_SUPPORTED_PROPERTY = "ro.bluetooth.a2dp_offload.supported";
 
+    @VisibleForTesting
+    boolean mChanged = false;
+
     public BluetoothA2dpHwOffloadPreferenceController(Context context,
-            DevelopmentSettingsDashboardFragment fragment) {
+            @Nullable DevelopmentSettingsDashboardFragment fragment) {
         super(context);
         mFragment = fragment;
     }
@@ -47,7 +54,8 @@ public class BluetoothA2dpHwOffloadPreferenceController extends DeveloperOptions
 
     @Override
     public boolean onPreferenceChange(Preference preference, Object newValue) {
-        BluetoothA2dpHwOffloadRebootDialog.show(mFragment, this);
+        BluetoothRebootDialog.show(mFragment);
+        mChanged = true;
         return false;
     }
 
@@ -59,11 +67,17 @@ public class BluetoothA2dpHwOffloadPreferenceController extends DeveloperOptions
         if (offloadSupported) {
             final boolean offloadDisabled =
                     SystemProperties.getBoolean(A2DP_OFFLOAD_DISABLED_PROPERTY, false);
-            ((SwitchPreference) mPreference).setChecked(offloadDisabled);
+            ((TwoStatePreference) mPreference).setChecked(offloadDisabled);
         } else {
             mPreference.setEnabled(false);
-            ((SwitchPreference) mPreference).setChecked(true);
+            ((TwoStatePreference) mPreference).setChecked(true);
         }
+    }
+
+    @Override
+    protected void onDeveloperOptionsSwitchEnabled() {
+        super.onDeveloperOptionsSwitchEnabled();
+        updateState(mPreference);
     }
 
     @Override
@@ -72,7 +86,7 @@ public class BluetoothA2dpHwOffloadPreferenceController extends DeveloperOptions
         final boolean offloadSupported =
                 SystemProperties.getBoolean(A2DP_OFFLOAD_SUPPORTED_PROPERTY, false);
         if (offloadSupported) {
-            ((SwitchPreference) mPreference).setChecked(false);
+            ((TwoStatePreference) mPreference).setChecked(false);
             SystemProperties.set(A2DP_OFFLOAD_DISABLED_PROPERTY, "false");
         }
     }
@@ -85,10 +99,26 @@ public class BluetoothA2dpHwOffloadPreferenceController extends DeveloperOptions
         return offloadSupported ? !offloadDisabled : true;
     }
 
-    public void onA2dpHwDialogConfirmed() {
+    /**
+     * Called when the RebootDialog confirm is clicked.
+     */
+    public void onRebootDialogConfirmed() {
+        if (!mChanged) {
+            return;
+        }
         final boolean offloadDisabled =
                 SystemProperties.getBoolean(A2DP_OFFLOAD_DISABLED_PROPERTY, false);
         SystemProperties.set(A2DP_OFFLOAD_DISABLED_PROPERTY, Boolean.toString(!offloadDisabled));
+        if (!offloadDisabled) {
+            SystemProperties.set(LE_AUDIO_OFFLOAD_DISABLED_PROPERTY,
+                    Boolean.toString(!offloadDisabled));
+        }
     }
 
+    /**
+     * Called when the RebootDialog cancel is clicked.
+     */
+    public void onRebootDialogCanceled() {
+        mChanged = false;
+    }
 }

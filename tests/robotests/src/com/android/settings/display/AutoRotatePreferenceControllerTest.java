@@ -20,8 +20,11 @@ import static com.google.common.truth.Truth.assertThat;
 
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import android.app.admin.DevicePolicyManager;
 import android.content.ContentResolver;
 import android.content.Context;
 import android.content.pm.PackageManager;
@@ -30,6 +33,7 @@ import android.provider.Settings;
 
 import androidx.preference.SwitchPreference;
 
+import com.android.internal.R;
 import com.android.internal.view.RotationPolicy;
 import com.android.settings.core.BasePreferenceController;
 import com.android.settings.testutils.FakeFeatureFactory;
@@ -46,6 +50,9 @@ import org.robolectric.RuntimeEnvironment;
 import org.robolectric.annotation.Config;
 
 @RunWith(RobolectricTestRunner.class)
+@Config(shadows = {
+        com.android.settings.testutils.shadow.ShadowSystemSettings.class,
+})
 public class AutoRotatePreferenceControllerTest {
 
     @Mock(answer = Answers.RETURNS_DEEP_STUBS)
@@ -59,11 +66,14 @@ public class AutoRotatePreferenceControllerTest {
     @Before
     public void setUp() {
         MockitoAnnotations.initMocks(this);
+        doReturn(mock(DevicePolicyManager.class)).when(mContext)
+                .getSystemService(Context.DEVICE_POLICY_SERVICE);
         FakeFeatureFactory.setupForTest();
         mContentResolver = RuntimeEnvironment.application.getContentResolver();
         mPreference = new SwitchPreference(RuntimeEnvironment.application);
         when(mContext.getPackageManager()).thenReturn(mPackageManager);
         when(mContext.getContentResolver()).thenReturn(mContentResolver);
+        disableDeviceStateRotation();
 
         mController = new AutoRotatePreferenceController(mContext, "auto_rotate");
     }
@@ -109,6 +119,26 @@ public class AutoRotatePreferenceControllerTest {
 
         assertThat(mController.getAvailabilityStatus()).isEqualTo(BasePreferenceController
                 .UNSUPPORTED_ON_DEVICE);
+    }
+
+    @Test
+    public void getAvailabilityStatus_deviceRotationDisabled_returnsAvailable() {
+        enableAutoRotationPreference();
+        disableDeviceStateRotation();
+
+        int availability = mController.getAvailabilityStatus();
+
+        assertThat(availability).isEqualTo(BasePreferenceController.AVAILABLE);
+    }
+
+    @Test
+    public void getAvailabilityStatus_deviceRotationEnabled_returnsUnsupported() {
+        enableAutoRotationPreference();
+        enableDeviceStateRotation();
+
+        int availability = mController.getAvailabilityStatus();
+
+        assertThat(availability).isEqualTo(BasePreferenceController.UNSUPPORTED_ON_DEVICE);
     }
 
     @Test
@@ -160,15 +190,17 @@ public class AutoRotatePreferenceControllerTest {
     private void enableAutoRotationPreference() {
         when(mPackageManager.hasSystemFeature(anyString())).thenReturn(true);
         when(mContext.getResources().getBoolean(anyInt())).thenReturn(true);
-        Settings.System.putInt(mContentResolver,
-                Settings.System.HIDE_ROTATION_LOCK_TOGGLE_FOR_ACCESSIBILITY, 0);
+        Settings.System.putIntForUser(mContentResolver,
+                Settings.System.HIDE_ROTATION_LOCK_TOGGLE_FOR_ACCESSIBILITY, 0,
+                UserHandle.USER_CURRENT);
     }
 
     private void disableAutoRotationPreference() {
         when(mPackageManager.hasSystemFeature(anyString())).thenReturn(true);
         when(mContext.getResources().getBoolean(anyInt())).thenReturn(true);
-        Settings.System.putInt(mContentResolver,
-                Settings.System.HIDE_ROTATION_LOCK_TOGGLE_FOR_ACCESSIBILITY, 1);
+        Settings.System.putIntForUser(mContentResolver,
+                Settings.System.HIDE_ROTATION_LOCK_TOGGLE_FOR_ACCESSIBILITY, 1,
+                UserHandle.USER_CURRENT);
     }
 
     private void enableAutoRotation() {
@@ -179,5 +211,16 @@ public class AutoRotatePreferenceControllerTest {
     private void disableAutoRotation() {
         Settings.System.putIntForUser(mContentResolver,
                 Settings.System.ACCELEROMETER_ROTATION, 0, UserHandle.USER_CURRENT);
+    }
+
+    private void enableDeviceStateRotation() {
+        when(mContext.getResources().getStringArray(
+                R.array.config_perDeviceStateRotationLockDefaults)).thenReturn(
+                new String[]{"0:0", "1:1", "2:2"});
+    }
+
+    private void disableDeviceStateRotation() {
+        when(mContext.getResources().getStringArray(
+                R.array.config_perDeviceStateRotationLockDefaults)).thenReturn(new String[]{});
     }
 }

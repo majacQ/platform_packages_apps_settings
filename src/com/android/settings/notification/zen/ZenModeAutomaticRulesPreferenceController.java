@@ -27,6 +27,7 @@ import androidx.preference.PreferenceScreen;
 
 import com.android.settingslib.core.lifecycle.Lifecycle;
 
+import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
 
@@ -35,12 +36,12 @@ public class ZenModeAutomaticRulesPreferenceController extends
 
     protected static final String KEY = "zen_mode_automatic_rules";
 
-    @VisibleForTesting
-    protected PreferenceCategory mPreferenceCategory;
+    Map.Entry<String, AutomaticZenRule>[] mSortedRules;
 
     public ZenModeAutomaticRulesPreferenceController(Context context, Fragment parent, Lifecycle
-            lifecycle) {
+            lifecycle, ZenModeBackend backend) {
         super(context, KEY, parent, lifecycle);
+        mBackend = backend;
     }
 
     @Override
@@ -56,46 +57,69 @@ public class ZenModeAutomaticRulesPreferenceController extends
     @Override
     public void displayPreference(PreferenceScreen screen) {
         super.displayPreference(screen);
-        mPreferenceCategory = screen.findPreference(getPreferenceKey());
-        mPreferenceCategory.setPersistent(false);
+        PreferenceCategory preferenceCategory = screen.findPreference(getPreferenceKey());
+        preferenceCategory.setPersistent(false);
+        mSortedRules = getRules();
+        updateRules(preferenceCategory);
     }
 
     @Override
     public void updateState(Preference preference) {
-        super.updateState(preference);
         Map.Entry<String, AutomaticZenRule>[] sortedRules = getRules();
-        final int currNumPreferences = mPreferenceCategory.getPreferenceCount();
-        if (currNumPreferences == sortedRules.length) {
-            for (int i = 0; i < sortedRules.length; i++) {
-                ZenRulePreference pref = (ZenRulePreference) mPreferenceCategory.getPreference(i);
-                // we are either:
-                // 1. updating everything about the rule
-                // 2. rule was added or deleted, so reload the entire list
-                if (Objects.equals(pref.mId, sortedRules[i].getKey())) {
-                    AutomaticZenRule rule = sortedRules[i].getValue();
-                    pref.updatePreference(rule);
-                } else {
-                    reloadAllRules(sortedRules);
+        boolean rulesChanged = false;
+        if (sortedRules.length != mSortedRules.length) {
+            rulesChanged = true;
+        } else {
+            for (int i = 0; i < mSortedRules.length; i++) {
+                if (!Objects.equals(mSortedRules[i].getKey(), sortedRules[i].getKey())
+                || !Objects.equals(mSortedRules[i].getValue(), sortedRules[i].getValue())) {
+                    rulesChanged = true;
                     break;
                 }
             }
-        } else {
-            reloadAllRules(sortedRules);
+        }
+
+        if (rulesChanged) {
+            mSortedRules = sortedRules;
+            updateRules((PreferenceCategory) preference);
+        }
+    }
+
+    private void updateRules(PreferenceCategory preferenceCategory) {
+        Map<String, ZenRulePreference> originalPreferences = new HashMap<>();
+        for (int i = 0; i < preferenceCategory.getPreferenceCount(); i++) {
+            ZenRulePreference pref = (ZenRulePreference) preferenceCategory.getPreference(i);
+            originalPreferences.put(pref.getKey(), pref);
+        }
+
+        // Loop through each rule, either updating the existing rule or creating the rule's
+        // preference
+        for (int i = 0; i < mSortedRules.length; i++) {
+            String key = mSortedRules[i].getKey();
+
+            if (originalPreferences.containsKey(key)) {
+                // existing rule; update its info if it's changed since the last display
+                AutomaticZenRule rule = mSortedRules[i].getValue();
+                originalPreferences.get(key).updatePreference(rule);
+            } else {
+                // new rule; create a new ZenRulePreference & add it to the preference category
+                ZenRulePreference pref = createZenRulePreference(
+                        mSortedRules[i], preferenceCategory);
+                preferenceCategory.addPreference(pref);
+            }
+
+            originalPreferences.remove(key);
+        }
+        // Remove preferences that no longer have a rule
+        for (String key : originalPreferences.keySet()) {
+            preferenceCategory.removePreferenceRecursively(key);
         }
     }
 
     @VisibleForTesting
-    void reloadAllRules(Map.Entry<String, AutomaticZenRule>[] rules) {
-        mPreferenceCategory.removeAll();
-        for (Map.Entry<String, AutomaticZenRule> rule : rules) {
-            ZenRulePreference pref = createZenRulePreference(rule);
-            mPreferenceCategory.addPreference(pref);
-        }
-    }
-
-    @VisibleForTesting
-    ZenRulePreference createZenRulePreference(Map.Entry<String, AutomaticZenRule> rule) {
-        return new ZenRulePreference(mPreferenceCategory.getContext(),
-                rule, mParent, mMetricsFeatureProvider);
+    ZenRulePreference createZenRulePreference(Map.Entry<String, AutomaticZenRule> rule,
+            PreferenceCategory preferenceCategory) {
+        return new ZenRulePreference(preferenceCategory.getContext(),
+                rule, mParent, mMetricsFeatureProvider, mBackend);
     }
 }

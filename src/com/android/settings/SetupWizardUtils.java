@@ -32,6 +32,9 @@ import java.util.Arrays;
 
 public class SetupWizardUtils {
 
+    public static final String ACTION_SETUP_WIZARD_FINISHED =
+            "com.google.android.setupwizard.SETUP_WIZARD_FINISHED";
+
     public static String getThemeString(Intent intent) {
         String theme = intent.getStringExtra(WizardManagerHelper.EXTRA_THEME);
         if (theme == null) {
@@ -48,6 +51,9 @@ public class SetupWizardUtils {
             if (WizardManagerHelper.isAnySetupWizard(intent)) {
                 if (ThemeHelper.isSetupWizardDayNightEnabled(context)) {
                     switch (theme) {
+                        case ThemeHelper.THEME_GLIF_V4_LIGHT:
+                        case ThemeHelper.THEME_GLIF_V4:
+                            return R.style.GlifV4Theme_DayNight;
                         case ThemeHelper.THEME_GLIF_V3_LIGHT:
                         case ThemeHelper.THEME_GLIF_V3:
                             return R.style.GlifV3Theme_DayNight;
@@ -60,6 +66,10 @@ public class SetupWizardUtils {
                     }
                 } else {
                     switch (theme) {
+                        case ThemeHelper.THEME_GLIF_V4_LIGHT:
+                            return R.style.GlifV4Theme_Light;
+                        case ThemeHelper.THEME_GLIF_V4:
+                            return R.style.GlifV4Theme;
                         case ThemeHelper.THEME_GLIF_V3_LIGHT:
                             return R.style.GlifV3Theme_Light;
                         case ThemeHelper.THEME_GLIF_V3:
@@ -76,6 +86,9 @@ public class SetupWizardUtils {
                 }
             } else {
                 switch (theme) {
+                    case ThemeHelper.THEME_GLIF_V4_LIGHT:
+                    case ThemeHelper.THEME_GLIF_V4:
+                        return R.style.GlifV4Theme;
                     case ThemeHelper.THEME_GLIF_V3_LIGHT:
                     case ThemeHelper.THEME_GLIF_V3:
                         return R.style.GlifV3Theme;

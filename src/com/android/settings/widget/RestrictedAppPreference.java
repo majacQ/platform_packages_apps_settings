@@ -20,14 +20,14 @@ import android.content.Context;
 import android.os.UserHandle;
 import android.text.TextUtils;
 import android.util.AttributeSet;
-import android.view.View;
 
+import androidx.annotation.NonNull;
 import androidx.preference.PreferenceManager;
 import androidx.preference.PreferenceViewHolder;
 
-import com.android.settings.R;
 import com.android.settingslib.RestrictedLockUtils;
 import com.android.settingslib.RestrictedPreferenceHelper;
+import com.android.settingslib.RestrictedPreferenceHelperProvider;
 import com.android.settingslib.widget.AppPreference;
 
 /**
@@ -35,7 +35,8 @@ import com.android.settingslib.widget.AppPreference;
  * {@link com.android.settingslib.RestrictedPreferenceHelper}.
  * Used to show policy transparency on {@link AppPreference}.
  */
-public class RestrictedAppPreference extends AppPreference {
+public class RestrictedAppPreference extends AppPreference implements
+        RestrictedPreferenceHelperProvider {
     private RestrictedPreferenceHelper mHelper;
     private String userRestriction;
 
@@ -55,19 +56,19 @@ public class RestrictedAppPreference extends AppPreference {
     }
 
     private void initialize(AttributeSet attrs, String userRestriction) {
-        setWidgetLayoutResource(R.layout.restricted_icon);
         mHelper = new RestrictedPreferenceHelper(getContext(), this, attrs);
         this.userRestriction = userRestriction;
+    }
+
+    @Override
+    public @NonNull RestrictedPreferenceHelper getRestrictedPreferenceHelper() {
+        return mHelper;
     }
 
     @Override
     public void onBindViewHolder(PreferenceViewHolder holder) {
         super.onBindViewHolder(holder);
         mHelper.onBindViewHolder(holder);
-        final View restrictedIcon = holder.findViewById(R.id.restricted_icon);
-        if (restrictedIcon != null) {
-            restrictedIcon.setVisibility(isDisabledByAdmin() ? View.VISIBLE : View.GONE);
-        }
     }
 
     @Override
@@ -79,10 +80,18 @@ public class RestrictedAppPreference extends AppPreference {
 
     @Override
     public void setEnabled(boolean enabled) {
-        if (isDisabledByAdmin() && enabled) {
-            return;
+        boolean changed = false;
+        if (enabled && isDisabledByAdmin()) {
+            mHelper.setDisabledByAdmin(null);
+            changed = true;
         }
-        super.setEnabled(enabled);
+        if (enabled && isDisabledByEcm()) {
+            mHelper.setDisabledByEcm(null);
+            changed = true;
+        }
+        if (!changed) {
+            super.setEnabled(enabled);
+        }
     }
 
     public void setDisabledByAdmin(RestrictedLockUtils.EnforcedAdmin admin) {
@@ -93,6 +102,10 @@ public class RestrictedAppPreference extends AppPreference {
 
     public boolean isDisabledByAdmin() {
         return mHelper.isDisabledByAdmin();
+    }
+
+    public boolean isDisabledByEcm() {
+        return mHelper.isDisabledByEcm();
     }
 
     public void useAdminDisabledSummary(boolean useSummary) {
@@ -118,5 +131,16 @@ public class RestrictedAppPreference extends AppPreference {
 
     public void checkRestrictionAndSetDisabled(String userRestriction, int userId) {
         mHelper.checkRestrictionAndSetDisabled(userRestriction, userId);
+    }
+
+    /**
+     * Checks if the given setting is subject to Enhanced Confirmation Mode restrictions for this
+     * package. Marks the preference as disabled if so.
+     * @param settingIdentifier The key identifying the setting
+     * @param packageName the package to check the settingIdentifier for
+     */
+    public void checkEcmRestrictionAndSetDisabled(@NonNull String settingIdentifier,
+                                                  @NonNull String packageName) {
+        mHelper.checkEcmRestrictionAndSetDisabled(settingIdentifier, packageName);
     }
 }

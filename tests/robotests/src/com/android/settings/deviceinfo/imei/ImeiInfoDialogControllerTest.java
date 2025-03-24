@@ -143,36 +143,6 @@ public class ImeiInfoDialogControllerTest {
     }
 
     @Test
-    public void populateImeiInfo_cdmaSimPresent_shouldSetImeiInfoAndSetAllCdmaSetting() {
-        ReflectionHelpers.setField(mController, "mSubscriptionInfo", null);
-        when(mTelephonyManager.getPhoneType()).thenReturn(TelephonyManager.PHONE_TYPE_CDMA);
-        when(mTelephonyManager.getSimState(anyInt())).thenReturn(
-                TelephonyManager.SIM_STATE_PRESENT);
-
-        mController.populateImeiInfo();
-
-        verify(mDialog).setText(ID_MEID_NUMBER_VALUE, MEID_NUMBER);
-        verify(mDialog).setText(ID_MIN_NUMBER_VALUE, "");
-        verify(mDialog).setText(ID_PRL_VERSION_VALUE, "");
-        verify(mDialog).setText(eq(ID_IMEI_VALUE), any());
-        verify(mDialog).setText(eq(ID_IMEI_SV_VALUE), any());
-    }
-
-    @Test
-    public void populateImeiInfo_cdmaSimABSENT_shouldSetImeiInfoAndSetAllCdmaSetting() {
-        ReflectionHelpers.setField(mController, "mSubscriptionInfo", null);
-        when(mTelephonyManager.getPhoneType()).thenReturn(TelephonyManager.PHONE_TYPE_CDMA);
-        when(mTelephonyManager.getSimState(anyInt())).thenReturn(TelephonyManager.SIM_STATE_ABSENT);
-
-        mController.populateImeiInfo();
-
-        verify(mDialog).setText(ID_MEID_NUMBER_VALUE, MEID_NUMBER);
-        verify(mDialog).setText(ID_MIN_NUMBER_VALUE, "");
-        verify(mDialog).setText(ID_PRL_VERSION_VALUE, "");
-        verify(mDialog).removeViewFromScreen(ID_GSM_SETTINGS);
-    }
-
-    @Test
     public void populateImeiInfo_gsmSimDisabled_shouldSetImeiAndRemoveCdmaSettings() {
         ReflectionHelpers.setField(mController, "mSubscriptionInfo", null);
         when(mTelephonyManager.getPhoneType()).thenReturn(TelephonyManager.PHONE_TYPE_GSM);
@@ -199,7 +169,7 @@ public class ImeiInfoDialogControllerTest {
     public void populateImeiInfo_emptyImei_shouldSetMeid_imeiSetToEmptyString() {
         doReturn(true).when(mController).isCdmaLteEnabled();
         when(mTelephonyManager.getPhoneType()).thenReturn(TelephonyManager.PHONE_TYPE_CDMA);
-        when(mTelephonyManager.getImei(anyInt())).thenReturn(null);
+        when(mTelephonyManager.getImei(anyInt())).thenReturn("");
 
         mController.populateImeiInfo();
 

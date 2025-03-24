@@ -15,9 +15,8 @@
  */
 package com.android.settings.applications.specialaccess.interactacrossprofiles;
 
-import static android.content.pm.PackageManager.GET_ACTIVITIES;
+import static android.app.admin.DevicePolicyResources.Strings.Settings.CONNECTED_WORK_AND_PERSONAL_APPS_TITLE;
 
-import android.annotation.Nullable;
 import android.app.settings.SettingsEnums;
 import android.content.Context;
 import android.content.pm.ApplicationInfo;
@@ -32,6 +31,7 @@ import android.util.IconDrawableFactory;
 import android.util.Pair;
 import android.view.View;
 
+import androidx.annotation.Nullable;
 import androidx.preference.Preference;
 import androidx.preference.Preference.OnPreferenceClickListener;
 import androidx.preference.PreferenceScreen;
@@ -72,6 +72,9 @@ public class InteractAcrossProfilesSettings extends EmptyTextSettings {
         final PreferenceScreen screen = getPreferenceScreen();
         screen.removeAll();
 
+        replaceEnterprisePreferenceScreenTitle(CONNECTED_WORK_AND_PERSONAL_APPS_TITLE,
+                R.string.interact_across_profiles_title);
+
         final ArrayList<Pair<ApplicationInfo, UserHandle>> crossProfileApps =
                 collectConfigurableApps(mPackageManager, mUserManager, mCrossProfileApps);
 
@@ -91,7 +94,9 @@ public class InteractAcrossProfilesSettings extends EmptyTextSettings {
                 @Override
                 public boolean onPreferenceClick(Preference preference) {
                     AppInfoBase.startAppInfoFragment(InteractAcrossProfilesDetails.class,
-                            R.string.interact_across_profiles_title,
+                            mDevicePolicyManager.getResources().getString(
+                                    CONNECTED_WORK_AND_PERSONAL_APPS_TITLE,
+                                    () -> getString(R.string.interact_across_profiles_title)),
                             packageName,
                             appInfo.uid,
                             InteractAcrossProfilesSettings.this/* source */,
@@ -150,9 +155,9 @@ public class InteractAcrossProfilesSettings extends EmptyTextSettings {
     private static List<PackageInfo> getAllInstalledPackages(
             PackageManager packageManager, UserHandle personalProfile, UserHandle workProfile) {
         List<PackageInfo> personalPackages = packageManager.getInstalledPackagesAsUser(
-                GET_ACTIVITIES, personalProfile.getIdentifier());
+                /* flags= */ 0, personalProfile.getIdentifier());
         List<PackageInfo> workPackages = packageManager.getInstalledPackagesAsUser(
-                GET_ACTIVITIES, workProfile.getIdentifier());
+                /* flags= */ 0, workProfile.getIdentifier());
         List<PackageInfo> allPackages = new ArrayList<>(personalPackages);
         for (PackageInfo workPackage : workPackages) {
             if (allPackages.stream().noneMatch(

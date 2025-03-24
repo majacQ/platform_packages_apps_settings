@@ -55,7 +55,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.TreeSet;
 import java.util.stream.Collectors;
 
 /**
@@ -196,11 +195,10 @@ public class ContextualCardManager implements ContextualCardLoader.CardContentLo
         // except Conditional cards, all other cards are from the database. So when the map sent
         // here is empty, we only keep Conditional cards.
         if (cardTypes.isEmpty()) {
-            final Set<Integer> conditionalCardTypes = new TreeSet<Integer>() {{
-                add(ContextualCard.CardType.CONDITIONAL);
-                add(ContextualCard.CardType.CONDITIONAL_HEADER);
-                add(ContextualCard.CardType.CONDITIONAL_FOOTER);
-            }};
+            final Set<Integer> conditionalCardTypes = Set.of(
+                    ContextualCard.CardType.CONDITIONAL,
+                    ContextualCard.CardType.CONDITIONAL_HEADER,
+                    ContextualCard.CardType.CONDITIONAL_FOOTER);
             cardsToKeep = mContextualCards.stream()
                     .filter(card -> conditionalCardTypes.contains(card.getCardType()))
                     .collect(Collectors.toList());
@@ -237,7 +235,7 @@ public class ContextualCardManager implements ContextualCardLoader.CardContentLo
         final List<ContextualCard> cardsToKeep = getCardsToKeep(cards);
 
         final MetricsFeatureProvider metricsFeatureProvider =
-                FeatureFactory.getFactory(mContext).getMetricsFeatureProvider();
+                FeatureFactory.getFeatureFactory().getMetricsFeatureProvider();
 
         //navigate back to the homepage, screen rotate or after card dismissal
         if (!mIsFirstLaunch) {

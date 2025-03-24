@@ -16,7 +16,6 @@
 
 package com.android.settings.accessibility;
 
-import static android.provider.Settings.Secure.ACCESSIBILITY_BUTTON_MODE_FLOATING_MENU;
 import static android.provider.Settings.Secure.ACCESSIBILITY_BUTTON_MODE_NAVIGATION_BAR;
 import static android.view.WindowManagerPolicyConstants.NAV_BAR_MODE_2BUTTON;
 import static android.view.WindowManagerPolicyConstants.NAV_BAR_MODE_GESTURAL;
@@ -70,16 +69,16 @@ public class AccessibilityButtonLocationPreferenceControllerTest {
 
     @Test
     public void getAvailabilityStatus_navigationGestureEnabled_returnConditionallyUnavailable() {
-        when(mResources.getInteger(com.android.internal.R.integer.config_navBarInteractionMode))
-                .thenReturn(NAV_BAR_MODE_GESTURAL);
+        Settings.Secure.putIntForUser(mContext.getContentResolver(),
+                Settings.Secure.NAVIGATION_MODE, NAV_BAR_MODE_GESTURAL, mContext.getUserId());
 
         assertThat(mController.getAvailabilityStatus()).isEqualTo(CONDITIONALLY_UNAVAILABLE);
     }
 
     @Test
     public void getAvailabilityStatus_navigationGestureDisabled_returnAvailable() {
-        when(mResources.getInteger(com.android.internal.R.integer.config_navBarInteractionMode))
-                .thenReturn(NAV_BAR_MODE_2BUTTON);
+        Settings.Secure.putIntForUser(mContext.getContentResolver(),
+                Settings.Secure.NAVIGATION_MODE, NAV_BAR_MODE_2BUTTON, mContext.getUserId());
 
         assertThat(mController.getAvailabilityStatus()).isEqualTo(AVAILABLE);
     }
@@ -93,14 +92,5 @@ public class AccessibilityButtonLocationPreferenceControllerTest {
 
         final String navigationBarValue = String.valueOf(ACCESSIBILITY_BUTTON_MODE_NAVIGATION_BAR);
         assertThat(mListPreference.getValue()).isEqualTo(navigationBarValue);
-    }
-
-    @Test
-    public void onPreferenceChange_a11yBtnModeFloatingMenu_floatingMenuValue() {
-        final String floatingMenuValue = String.valueOf(ACCESSIBILITY_BUTTON_MODE_FLOATING_MENU);
-
-        mController.onPreferenceChange(mListPreference, floatingMenuValue);
-
-        assertThat(mListPreference.getValue()).isEqualTo(floatingMenuValue);
     }
 }

@@ -16,13 +16,18 @@
 
 package com.android.settings.notification.zen;
 
+import static android.app.NotificationManager.EXTRA_AUTOMATIC_RULE_ID;
+
 import android.app.AutomaticZenRule;
+import android.app.Flags;
 import android.app.NotificationManager;
+import android.app.settings.SettingsEnums;
 import android.content.Context;
 import android.content.Intent;
-import android.net.Uri;
 import android.os.Bundle;
 import android.service.notification.ConditionProviderService;
+import android.service.notification.SystemZenRules;
+import android.service.notification.ZenModeConfig;
 import android.util.Log;
 import android.view.View;
 import android.widget.Toast;
@@ -43,10 +48,10 @@ public abstract class ZenModeRuleSettingsBase extends ZenModeSettingsBase {
 
     private final String CUSTOM_BEHAVIOR_KEY = "zen_custom_setting";
 
-    protected Context mContext;
     protected boolean mDisableListeners;
     protected AutomaticZenRule mRule;
     protected String mId;
+    private boolean mRuleRemoved;
 
     protected ZenAutomaticRuleHeaderPreferenceController mHeader;
     protected ZenRuleButtonsPreferenceController mActionButtons;
@@ -58,8 +63,8 @@ public abstract class ZenModeRuleSettingsBase extends ZenModeSettingsBase {
     abstract protected void updateControlsInternal();
 
     @Override
-    public void onCreate(Bundle icicle) {
-        mContext = getActivity();
+    public void onAttach(Context context) {
+        super.onAttach(context);
 
         final Intent intent = getActivity().getIntent();
         if (DEBUG) Log.d(TAG, "onCreate getIntent()=" + intent);
@@ -71,17 +76,26 @@ public abstract class ZenModeRuleSettingsBase extends ZenModeSettingsBase {
 
         mId = intent.getStringExtra(ConditionProviderService.EXTRA_RULE_ID);
         if (mId == null) {
-            Log.w(TAG, "rule id is null");
-            toastAndFinish();
-            return;
+            mId = intent.getStringExtra(EXTRA_AUTOMATIC_RULE_ID);
+            if (mId == null) {
+                Log.w(TAG, "rule id is null");
+                toastAndFinish();
+                return;
+            }
         }
 
         if (DEBUG) Log.d(TAG, "mId=" + mId);
-        if (refreshRuleOrFinish()) {
+        refreshRuleOrFinish();
+    }
+
+    @Override
+    public void onCreate(Bundle icicle) {
+        super.onCreate(icicle);
+
+        if (isFinishingOrDestroyed()) {
             return;
         }
 
-        super.onCreate(icicle);
         mCustomBehaviorPreference = getPreferenceScreen().findPreference(CUSTOM_BEHAVIOR_KEY);
         mCustomBehaviorPreference.setOnPreferenceClickListener(
                 new Preference.OnPreferenceClickListener() {
@@ -89,10 +103,21 @@ public abstract class ZenModeRuleSettingsBase extends ZenModeSettingsBase {
                     public boolean onPreferenceClick(Preference preference) {
                         Bundle bundle = new Bundle();
                         bundle.putString(ZenCustomRuleSettings.RULE_ID, mId);
+
+                        // When modes_api flag is on, we skip the radio button screen distinguishing
+                        // between "default" and "custom" and take users directly to the custom
+                        // settings screen.
+                        String destination = ZenCustomRuleSettings.class.getName();
+                        int sourceMetricsCategory = 0;
+                        if (Flags.modesApi()) {
+                            // From ZenRuleCustomPolicyPreferenceController#launchCustomSettings
+                            destination = ZenCustomRuleConfigSettings.class.getName();
+                            sourceMetricsCategory = SettingsEnums.ZEN_CUSTOM_RULE_SOUND_SETTINGS;
+                        }
                         new SubSettingLauncher(mContext)
-                                .setDestination(ZenCustomRuleSettings.class.getName())
+                                .setDestination(destination)
                                 .setArguments(bundle)
-                                .setSourceMetricsCategory(0) // TODO
+                                .setSourceMetricsCategory(sourceMetricsCategory)
                                 .launch();
                         return true;
                     }
@@ -128,21 +153,31 @@ public abstract class ZenModeRuleSettingsBase extends ZenModeSettingsBase {
     protected void updateHeader() {
         final PreferenceScreen screen = getPreferenceScreen();
 
-        mSwitch.onResume(mRule, mId);
         mSwitch.displayPreference(screen);
         updatePreference(mSwitch);
 
-        mHeader.onResume(mRule, mId);
         mHeader.displayPreference(screen);
         updatePreference(mHeader);
 
-        mActionButtons.onResume(mRule, mId);
         mActionButtons.displayPreference(screen);
         updatePreference(mActionButtons);
     }
 
-    protected void updateRule(Uri newConditionId) {
-        mRule.setConditionId(newConditionId);
+    protected void updateScheduleRule(ZenModeConfig.ScheduleInfo schedule) {
+        mRule.setConditionId(ZenModeConfig.toScheduleConditionId(schedule));
+        if (Flags.modesApi() && Flags.modesUi()) {
+            mRule.setTriggerDescription(
+                    SystemZenRules.getTriggerDescriptionForScheduleTime(mContext, schedule));
+        }
+        mBackend.updateZenRule(mId, mRule);
+    }
+
+    protected void updateEventRule(ZenModeConfig.EventInfo event) {
+        mRule.setConditionId(ZenModeConfig.toEventConditionId(event));
+        if (Flags.modesApi() && Flags.modesUi()) {
+            mRule.setTriggerDescription(
+                    SystemZenRules.getTriggerDescriptionForScheduleEvent(mContext, event));
+        }
         mBackend.updateZenRule(mId, mRule);
     }
 
@@ -155,8 +190,15 @@ public abstract class ZenModeRuleSettingsBase extends ZenModeSettingsBase {
     }
 
     private boolean refreshRuleOrFinish() {
+        if (mRuleRemoved && getActivity() != null) {
+            getActivity().finish();
+            return true;
+        }
         mRule = getZenRule();
         if (DEBUG) Log.d(TAG, "mRule=" + mRule);
+        mHeader.setRule(mRule);
+        mSwitch.setIdAndRule(mId, mRule);
+        mActionButtons.setIdAndRule(mId, mRule);
         if (!setRule(mRule)) {
             toastAndFinish();
             return true;
@@ -185,5 +227,9 @@ public abstract class ZenModeRuleSettingsBase extends ZenModeSettingsBase {
             mCustomBehaviorPreference.setSummary(R.string.zen_mode_custom_behavior_summary);
         }
         mDisableListeners = false;
+    }
+
+    void onRuleRemoved() {
+        mRuleRemoved = true;
     }
 }

@@ -17,46 +17,73 @@
 package com.android.settings.network;
 
 import static android.telephony.SubscriptionManager.INVALID_SIM_SLOT_INDEX;
+import static android.telephony.SubscriptionManager.PROFILE_CLASS_PROVISIONING;
+import static android.telephony.SubscriptionManager.TRANSFER_STATUS_CONVERTED;
 import static android.telephony.UiccSlotInfo.CARD_STATE_INFO_PRESENT;
 
 import static com.android.internal.util.CollectionUtils.emptyIfNull;
 
-import android.annotation.Nullable;
 import android.content.Context;
+import android.content.Intent;
+import android.content.SharedPreferences;
+import android.net.ConnectivityManager;
+import android.net.NetworkCapabilities;
 import android.os.ParcelUuid;
+import android.provider.Settings;
 import android.telephony.PhoneNumberUtils;
 import android.telephony.SubscriptionInfo;
 import android.telephony.SubscriptionManager;
 import android.telephony.TelephonyManager;
 import android.telephony.UiccCardInfo;
 import android.telephony.UiccSlotInfo;
+import android.text.BidiFormatter;
+import android.text.TextDirectionHeuristics;
 import android.text.TextUtils;
 import android.util.Log;
 
+import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
 import androidx.annotation.VisibleForTesting;
 
 import com.android.internal.telephony.MccTable;
 import com.android.settings.R;
+import com.android.settings.flags.Flags;
+import com.android.settings.network.helper.SelectableSubscriptions;
+import com.android.settings.network.helper.SubscriptionAnnotation;
 import com.android.settings.network.telephony.DeleteEuiccSubscriptionDialogActivity;
+import com.android.settings.network.telephony.EuiccRacConnectivityDialogActivity;
+import com.android.settings.network.telephony.SubscriptionRepository;
 import com.android.settings.network.telephony.ToggleSubscriptionDialogActivity;
-import com.android.settingslib.DeviceInfoUtils;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Function;
 import java.util.function.Supplier;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 public class SubscriptionUtil {
     private static final String TAG = "SubscriptionUtil";
     private static final String PROFILE_GENERIC_DISPLAY_NAME = "CARD";
+    @VisibleForTesting
+    static final String SUB_ID = "sub_id";
+    @VisibleForTesting
+    static final String KEY_UNIQUE_SUBSCRIPTION_DISPLAYNAME = "unique_subscription_displayName";
+    private static final String REGEX_DISPLAY_NAME_SUFFIX = "\\s[0-9]+";
+    private static final Pattern REGEX_DISPLAY_NAME_SUFFIX_PATTERN =
+            Pattern.compile(REGEX_DISPLAY_NAME_SUFFIX);
+
     private static List<SubscriptionInfo> sAvailableResultsForTesting;
     private static List<SubscriptionInfo> sActiveResultsForTesting;
+    @Nullable private static Boolean sEnableRacDialogForTesting;
 
     @VisibleForTesting
     public static void setAvailableSubscriptionsForTesting(List<SubscriptionInfo> results) {
@@ -68,7 +95,14 @@ public class SubscriptionUtil {
         sActiveResultsForTesting = results;
     }
 
+    @VisibleForTesting
+    public static void setEnableRacDialogForTesting(boolean enableRacDialog) {
+        sEnableRacDialogForTesting = enableRacDialog;
+    }
+
     public static List<SubscriptionInfo> getActiveSubscriptions(SubscriptionManager manager) {
+        //TODO (b/315499317) : Refactor the subscription utils.
+
         if (sActiveResultsForTesting != null) {
             return sActiveResultsForTesting;
         }
@@ -79,7 +113,20 @@ public class SubscriptionUtil {
         if (subscriptions == null) {
             return new ArrayList<>();
         }
-        return subscriptions;
+        // Since the SubscriptionManager.getActiveSubscriptionInfoList() has checked whether the
+        // sim visible by the SubscriptionManager.isSubscriptionVisible(), here only checks whether
+        // the esim visible here.
+        return subscriptions.stream()
+                .filter(subInfo -> subInfo != null && isEmbeddedSubscriptionVisible(subInfo))
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * Check if SIM hardware is visible to the end user.
+     */
+    public static boolean isSimHardwareVisible(Context context) {
+        return context.getResources()
+            .getBoolean(R.bool.config_show_sim_info);
     }
 
     @VisibleForTesting
@@ -105,7 +152,7 @@ public class SubscriptionUtil {
     }
 
     /**
-     * Get subscription which is available to be displayed to the user
+     * Get subscriptionInfo which is available to be displayed to the user
      * per subscription id.
      *
      * @param context {@code Context}
@@ -115,10 +162,17 @@ public class SubscriptionUtil {
      * @return {@code SubscriptionInfo} based on the given subscription id. Null of subscription
      *         is invalid or not allowed to be displayed to the user.
      */
-    public static SubscriptionInfo getAvailableSubscription(Context context,
+    public static SubscriptionInfo getAvailableSubscriptionBySubIdAndShowingForUser(Context context,
             ProxySubscriptionManager subscriptionManager, int subId) {
+        //TODO (b/315499317) : Refactor the subscription utils.
         final SubscriptionInfo subInfo = subscriptionManager.getAccessibleSubscriptionInfo(subId);
         if (subInfo == null) {
+            return null;
+        }
+
+        // hide provisioning/bootstrap and satellite profiles for user
+        if (!isEmbeddedSubscriptionVisible(subInfo)) {
+            Log.d(TAG, "Do not insert the provision eSIM or NTN eSim");
             return null;
         }
 
@@ -196,7 +250,8 @@ public class SubscriptionUtil {
             if (activeSlotSubInfoList.size() > 0) {
                 return (activeSlotSubInfoList.get(0).getSubscriptionId() == subId);
             }
-            return (inactiveSlotSubInfoList.get(0).getSubscriptionId() == subId);
+            return (inactiveSlotSubInfoList.size() > 0)
+                    && (inactiveSlotSubInfoList.get(0).getSubscriptionId() == subId);
         }
 
         // Allow non-opportunistic + active eSIM subscription as primary
@@ -251,20 +306,21 @@ public class SubscriptionUtil {
         // Map of SubscriptionId to DisplayName
         final Supplier<Stream<DisplayInfo>> originalInfos =
                 () -> getAvailableSubscriptions(context)
-                .stream()
-                .filter(i -> {
-                    // Filter out null values.
-                    return (i != null && i.getDisplayName() != null);
-                })
-                .map(i -> {
-                    DisplayInfo info = new DisplayInfo();
-                    info.subscriptionInfo = i;
-                    String displayName = i.getDisplayName().toString();
-                    info.originalName = TextUtils.equals(displayName, PROFILE_GENERIC_DISPLAY_NAME)
-                            ? context.getResources().getString(R.string.sim_card)
-                            : displayName.trim();
-                    return info;
-                });
+                        .stream()
+                        .filter(i -> {
+                            // Filter out null values.
+                            return (i != null && i.getDisplayName() != null);
+                        })
+                        .map(i -> {
+                            DisplayInfo info = new DisplayInfo();
+                            info.subscriptionInfo = i;
+                            String displayName = i.getDisplayName().toString();
+                            info.originalName =
+                                    TextUtils.equals(displayName, PROFILE_GENERIC_DISPLAY_NAME)
+                                            ? context.getResources().getString(R.string.sim_card)
+                                            : displayName.trim();
+                            return info;
+                        });
 
         // TODO(goldmanj) consider using a map of DisplayName to SubscriptionInfos.
         // A Unique set of display names
@@ -278,22 +334,44 @@ public class SubscriptionUtil {
         // If a display name is duplicate, append the final 4 digits of the phone number.
         // Creates a mapping of Subscription id to original display name + phone number display name
         final Supplier<Stream<DisplayInfo>> uniqueInfos = () -> originalInfos.get().map(info -> {
+            int infoSubId = info.subscriptionInfo.getSubscriptionId();
+            String cachedDisplayName = getDisplayNameFromSharedPreference(
+                    context, infoSubId);
+            if (isValidCachedDisplayName(cachedDisplayName, info.originalName.toString())) {
+                Log.d(TAG, "use cached display name : for subId : " + infoSubId
+                        + "cached display name : " + cachedDisplayName);
+                info.uniqueName = cachedDisplayName;
+                return info;
+            } else {
+                Log.d(TAG, "remove cached display name : " + infoSubId);
+                removeItemFromDisplayNameSharedPreference(context, infoSubId);
+            }
+
             if (duplicateOriginalNames.contains(info.originalName)) {
                 // This may return null, if the user cannot view the phone number itself.
-                final String phoneNumber = DeviceInfoUtils.getBidiFormattedPhoneNumber(context,
-                        info.subscriptionInfo);
+                String phoneNumber = "";
+                try {
+                    final SubscriptionManager subscriptionManager = context.getSystemService(
+                        SubscriptionManager.class);
+                    phoneNumber = subscriptionManager.getPhoneNumber(infoSubId);
+                } catch (IllegalStateException
+                        | SecurityException
+                        | UnsupportedOperationException e) {
+                    Log.w(TAG, "get number error." + e);
+                }
                 String lastFourDigits = "";
                 if (phoneNumber != null) {
                     lastFourDigits = (phoneNumber.length() > 4)
-                        ? phoneNumber.substring(phoneNumber.length() - 4) : phoneNumber;
+                            ? phoneNumber.substring(phoneNumber.length() - 4) : phoneNumber;
                 }
-
                 if (TextUtils.isEmpty(lastFourDigits)) {
                     info.uniqueName = info.originalName;
                 } else {
                     info.uniqueName = info.originalName + " " + lastFourDigits;
+                    Log.d(TAG, "Cache display name [" + info.uniqueName + "] for sub id "
+                            + infoSubId);
+                    saveDisplayNameToSharedPreference(context, infoSubId, info.uniqueName);
                 }
-
             } else {
                 info.uniqueName = info.originalName;
             }
@@ -331,7 +409,6 @@ public class SubscriptionUtil {
      *
      * @return map of active subscription ids to display names.
      */
-    @VisibleForTesting
     public static CharSequence getUniqueSubscriptionDisplayName(
             Integer subscriptionId, Context context) {
         final Map<Integer, CharSequence> displayNames = getUniqueSubscriptionDisplayNames(context);
@@ -355,6 +432,44 @@ public class SubscriptionUtil {
             return "";
         }
         return getUniqueSubscriptionDisplayName(info.getSubscriptionId(), context);
+    }
+
+
+    private static SharedPreferences getDisplayNameSharedPreferences(Context context) {
+        return context.getSharedPreferences(
+                KEY_UNIQUE_SUBSCRIPTION_DISPLAYNAME, Context.MODE_PRIVATE);
+    }
+
+    private static SharedPreferences.Editor getDisplayNameSharedPreferenceEditor(Context context) {
+        return getDisplayNameSharedPreferences(context).edit();
+    }
+
+    private static void saveDisplayNameToSharedPreference(
+            Context context, int subId, CharSequence displayName) {
+        getDisplayNameSharedPreferenceEditor(context)
+                .putString(SUB_ID + subId, String.valueOf(displayName))
+                .apply();
+    }
+
+    private static void removeItemFromDisplayNameSharedPreference(Context context, int subId) {
+        getDisplayNameSharedPreferenceEditor(context)
+                .remove(SUB_ID + subId)
+                .commit();
+    }
+
+    private static String getDisplayNameFromSharedPreference(Context context, int subid) {
+        return getDisplayNameSharedPreferences(context).getString(SUB_ID + subid, "");
+    }
+
+    @VisibleForTesting
+    static boolean isValidCachedDisplayName(String cachedDisplayName, String originalName) {
+        if (TextUtils.isEmpty(cachedDisplayName) || TextUtils.isEmpty(originalName)
+                || !cachedDisplayName.startsWith(originalName)) {
+            return false;
+        }
+        String displayNameSuffix = cachedDisplayName.substring(originalName.length());
+        Matcher matcher = REGEX_DISPLAY_NAME_SUFFIX_PATTERN.matcher(displayNameSuffix);
+        return matcher.matches();
     }
 
     public static String getDisplayName(SubscriptionInfo info) {
@@ -393,39 +508,7 @@ public class SubscriptionUtil {
      * @return list of user selectable subscriptions.
      */
     public static List<SubscriptionInfo> getSelectableSubscriptionInfoList(Context context) {
-        SubscriptionManager subManager = context.getSystemService(SubscriptionManager.class);
-        List<SubscriptionInfo> availableList = subManager.getAvailableSubscriptionInfoList();
-        if (availableList == null) {
-            return null;
-        } else {
-            // Multiple subscriptions in a group should only have one representative.
-            // It should be the current active primary subscription if any, or any
-            // primary subscription.
-            List<SubscriptionInfo> selectableList = new ArrayList<>();
-            Map<ParcelUuid, SubscriptionInfo> groupMap = new HashMap<>();
-
-            for (SubscriptionInfo info : availableList) {
-                // Opportunistic subscriptions are considered invisible
-                // to users so they should never be returned.
-                if (!isSubscriptionVisible(subManager, context, info)) continue;
-
-                ParcelUuid groupUuid = info.getGroupUuid();
-                if (groupUuid == null) {
-                    // Doesn't belong to any group. Add in the list.
-                    selectableList.add(info);
-                } else if (!groupMap.containsKey(groupUuid)
-                        || (groupMap.get(groupUuid).getSimSlotIndex() == INVALID_SIM_SLOT_INDEX
-                        && info.getSimSlotIndex() != INVALID_SIM_SLOT_INDEX)) {
-                    // If it belongs to a group that has never been recorded or it's the current
-                    // active subscription, add it in the list.
-                    selectableList.remove(groupMap.get(groupUuid));
-                    selectableList.add(info);
-                    groupMap.put(groupUuid, info);
-                }
-
-            }
-            return selectableList;
-        }
+        return new SubscriptionRepository(context).getSelectableSubscriptionInfoList();
     }
 
     /**
@@ -433,27 +516,44 @@ public class SubscriptionUtil {
      * @param context {@code Context}
      * @param subId The id of subscription need to be enabled or disabled.
      * @param enable Whether the subscription with {@code subId} should be enabled or disabled.
+     * @param isNewTask Whether the start activity add the new task or not
      */
     public static void startToggleSubscriptionDialogActivity(
-            Context context, int subId, boolean enable) {
+            Context context, int subId, boolean enable, boolean isNewTask) {
         if (!SubscriptionManager.isUsableSubscriptionId(subId)) {
             Log.i(TAG, "Unable to toggle subscription due to invalid subscription ID.");
             return;
         }
-        context.startActivity(ToggleSubscriptionDialogActivity.getIntent(context, subId, enable));
+        if (enable && Flags.isDualSimOnboardingEnabled()) {
+            SimOnboardingActivity.startSimOnboardingActivity(context, subId, isNewTask);
+            return;
+        }
+        Intent intent = ToggleSubscriptionDialogActivity.getIntent(context, subId, enable);
+        if (isNewTask) {
+            intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        }
+        context.startActivity(intent);
     }
 
     /**
      * Starts a dialog activity to handle eSIM deletion.
+     *
      * @param context {@code Context}
      * @param subId The id of subscription need to be deleted.
+     * @param carrierId The carrier id of the subscription.
      */
-    public static void startDeleteEuiccSubscriptionDialogActivity(Context context, int subId) {
+    public static void startDeleteEuiccSubscriptionDialogActivity(
+            @NonNull Context context, int subId, int carrierId) {
         if (!SubscriptionManager.isUsableSubscriptionId(subId)) {
             Log.i(TAG, "Unable to delete subscription due to invalid subscription ID.");
             return;
         }
-        context.startActivity(DeleteEuiccSubscriptionDialogActivity.getIntent(context, subId));
+
+        if (shouldShowRacDialogWhenErasingEsim(context, subId, carrierId)) {
+            context.startActivity(EuiccRacConnectivityDialogActivity.getIntent(context, subId));
+        } else {
+            context.startActivity(DeleteEuiccSubscriptionDialogActivity.getIntent(context, subId));
+        }
     }
 
     /**
@@ -475,7 +575,7 @@ public class SubscriptionUtil {
                 .stream()
                 .filter(subInfo -> subInfo.getSubscriptionId() == subId)
                 .findFirst()
-                .get();
+                .orElse(null);
     }
 
     /**
@@ -490,6 +590,12 @@ public class SubscriptionUtil {
     public static boolean isSubscriptionVisible(
             SubscriptionManager subscriptionManager, Context context, SubscriptionInfo info) {
         if (info == null) return false;
+
+        // hide provisioning/bootstrap and satellite profiles for user
+        if (!isEmbeddedSubscriptionVisible(info)) {
+            return false;
+        }
+
         // If subscription is NOT grouped opportunistic subscription, it's visible.
         if (info.getGroupUuid() == null || !info.isOpportunistic()) return true;
 
@@ -540,14 +646,35 @@ public class SubscriptionUtil {
             return null;
         }
 
-        TelephonyManager telephonyManager = context.getSystemService(TelephonyManager.class);
-        String rawPhoneNumber =
-                telephonyManager.getLine1Number(subscriptionInfo.getSubscriptionId());
-        String countryIso = MccTable.countryCodeForMcc(subscriptionInfo.getMccString());
+        final SubscriptionManager subscriptionManager = context.getSystemService(
+                SubscriptionManager.class);
+        String rawPhoneNumber = "";
+        try {
+            rawPhoneNumber = subscriptionManager.getPhoneNumber(
+                    subscriptionInfo.getSubscriptionId());
+        } catch (IllegalStateException e) {
+            Log.e(TAG, "Subscription service unavailable : " + e);
+        }
         if (TextUtils.isEmpty(rawPhoneNumber)) {
             return null;
         }
+        String countryIso = MccTable.countryCodeForMcc(subscriptionInfo.getMccString())
+                .toUpperCase(Locale.ROOT);
         return PhoneNumberUtils.formatNumber(rawPhoneNumber, countryIso);
+    }
+
+    /**
+     * To get the formatting text for display in a potentially opposite-directionality context
+     * without garbling.
+     * @param subscriptionInfo {@link SubscriptionInfo} subscription information.
+     * @return Returns phone number with Bidi format.
+     */
+    @Nullable
+    public static String getBidiFormattedPhoneNumber(Context context,
+            SubscriptionInfo subscriptionInfo) {
+        String phoneNumber = getFormattedPhoneNumber(context, subscriptionInfo);
+        return (phoneNumber == null) ? phoneNumber :
+                BidiFormatter.getInstance().unicodeWrap(phoneNumber, TextDirectionHeuristics.LTR);
     }
 
     /**
@@ -597,7 +724,7 @@ public class SubscriptionUtil {
         boolean isDefaultData = subId == getDefaultDataSubscriptionId();
 
         if (!isDefaultData && !isDefaultCall && !isDefaultSms) {
-            return null;
+            return "";
         }
 
         final StringBuilder defaultConfig = new StringBuilder();
@@ -641,5 +768,199 @@ public class SubscriptionUtil {
 
     private static int getDefaultDataSubscriptionId() {
         return SubscriptionManager.getDefaultDataSubscriptionId();
+    }
+
+
+    /**
+     * Select one of the subscription as the default subscription.
+     * @param subAnnoList a list of {@link SubscriptionAnnotation}
+     * @return ideally the {@link SubscriptionAnnotation} as expected
+     */
+    private static SubscriptionAnnotation getDefaultSubscriptionSelection(
+            List<SubscriptionAnnotation> subAnnoList) {
+        return (subAnnoList == null) ? null :
+                subAnnoList.stream()
+                        .filter(SubscriptionAnnotation::isDisplayAllowed)
+                        .filter(SubscriptionAnnotation::isActive)
+                        .findFirst().orElse(null);
+    }
+
+    public static boolean isDefaultSubscription(Context context, int subId) {
+        SubscriptionAnnotation subInfo = getDefaultSubscriptionSelection(
+                new SelectableSubscriptions(context, true).call());
+        return subInfo != null && subInfo.getSubscriptionId() == subId;
+    }
+
+    public static SubscriptionInfo getSubscriptionOrDefault(Context context, int subscriptionId) {
+        return getSubscription(context, subscriptionId,
+                (subscriptionId != SubscriptionManager.INVALID_SUBSCRIPTION_ID) ? null : (
+                        subAnnoList -> getDefaultSubscriptionSelection(subAnnoList)
+                ));
+    }
+
+    /**
+     * Get the current subscription to display. First check whether intent has {@link
+     * Settings#EXTRA_SUB_ID} and if so find the subscription with that id.
+     * If not, select default one based on {@link Function} provided.
+     *
+     * @param preferredSubscriptionId preferred subscription id
+     * @param selectionOfDefault when true current subscription is absent
+     */
+    private static SubscriptionInfo getSubscription(Context context, int preferredSubscriptionId,
+            Function<List<SubscriptionAnnotation>, SubscriptionAnnotation> selectionOfDefault) {
+        List<SubscriptionAnnotation> subList =
+                (new SelectableSubscriptions(context, true)).call();
+        Log.d(TAG, "get subId=" + preferredSubscriptionId + " from " + subList);
+        SubscriptionAnnotation currentSubInfo = subList.stream()
+                .filter(SubscriptionAnnotation::isDisplayAllowed)
+                .filter(subAnno -> (subAnno.getSubscriptionId() == preferredSubscriptionId))
+                .findFirst().orElse(null);
+        if ((currentSubInfo == null) && (selectionOfDefault != null)) {
+            currentSubInfo = selectionOfDefault.apply(subList);
+        }
+        return (currentSubInfo == null) ? null : currentSubInfo.getSubInfo();
+    }
+
+    private static boolean isEmbeddedSubscriptionVisible(@NonNull SubscriptionInfo subInfo) {
+        if (subInfo.isEmbedded()
+                && (subInfo.getProfileClass() == PROFILE_CLASS_PROVISIONING
+                || (com.android.internal.telephony.flags.Flags.oemEnabledSatelliteFlag()
+                && subInfo.isOnlyNonTerrestrialNetwork()))) {
+            return false;
+        }
+        return true;
+    }
+
+    /**
+     * Checks if the device is connected to Wi-Fi.
+     *
+     * @param context context
+     * @return {@code true} if connected to Wi-Fi
+     */
+    static boolean isConnectedToWifi(@NonNull Context context) {
+        NetworkCapabilities capabilities = getNetworkCapabilities(context);
+
+        return capabilities != null
+                && capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI);
+    }
+
+    /**
+     * Checks if the device is connected to mobile data provided by a different subId.
+     *
+     * @param context context
+     * @param targetSubId subscription that is going to be deleted
+     * @return {@code true} if connected to mobile data provided by a different subId
+     */
+    @VisibleForTesting
+    static boolean isConnectedToMobileDataWithDifferentSubId(
+            @NonNull Context context, int targetSubId) {
+        NetworkCapabilities capabilities = getNetworkCapabilities(context);
+
+        return capabilities != null
+                && capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)
+                && targetSubId != SubscriptionManager.getActiveDataSubscriptionId();
+    }
+
+    /**
+     * Checks if any subscription carrier use reusable activation codes.
+     *
+     * @param context The context used to retrieve carriers that uses reusable activation codes.
+     * @return {@code true} if any subscription has a matching carrier that uses reusable activation
+     *     codes
+     */
+    static boolean hasSubscriptionWithRacCarrier(@NonNull Context context) {
+        List<SubscriptionInfo> subs = getAvailableSubscriptions(context);
+        final int[] carriersThatUseRac =
+                context.getResources().getIntArray(R.array.config_carrier_use_rac);
+
+        return Arrays.stream(carriersThatUseRac)
+                .anyMatch(cid -> subs.stream().anyMatch(sub -> sub.getCarrierId() == cid));
+    }
+
+    /**
+     * Checks if a carrier use reusable activation codes.
+     *
+     * @param context The context used to retrieve carriers that uses reusable activation codes.
+     * @param carrierId The carrier id to check if it use reusable activation codes.
+     * @return {@code true} if carrier id use reusable activation codes.
+     */
+    @VisibleForTesting
+    static boolean isCarrierRac(@NonNull Context context, int carrierId) {
+        final int[] carriersThatUseRAC =
+                context.getResources().getIntArray(R.array.config_carrier_use_rac);
+
+        return Arrays.stream(carriersThatUseRAC).anyMatch(cid -> cid == carrierId);
+    }
+
+    /**
+     * Check if warning dialog should be presented when erasing all eSIMs.
+     *
+     * @param context Context to check if any sim carrier use RAC and device Wi-Fi connection.
+     * @return {@code true} if dialog should be presented to the user.
+     */
+    public static boolean shouldShowRacDialogWhenErasingAllEsims(@NonNull Context context) {
+        if (sEnableRacDialogForTesting != null) {
+            return sEnableRacDialogForTesting;
+        }
+
+        return !isConnectedToWifi(context) && hasSubscriptionWithRacCarrier(context);
+    }
+
+    /**
+     * Check if warning dialog should be presented when erasing eSIM.
+     *
+     * @param context Context to check if any sim carrier use RAC and device Wi-Fi connection.
+     * @param subId Subscription ID for the single eSIM.
+     * @param carrierId Carrier ID for the single eSIM.
+     * @return {@code true} if dialog should be presented to the user.
+     */
+    @VisibleForTesting
+    static boolean shouldShowRacDialogWhenErasingEsim(
+            @NonNull Context context, int subId, int carrierId) {
+        return isCarrierRac(context, carrierId)
+                && !isConnectedToWifi(context)
+                && !isConnectedToMobileDataWithDifferentSubId(context, subId);
+    }
+
+    /**
+     * Retrieves NetworkCapabilities for the active network.
+     *
+     * @param context context
+     * @return NetworkCapabilities or null if not available
+     */
+    private static NetworkCapabilities getNetworkCapabilities(@NonNull Context context) {
+        ConnectivityManager connectivityManager =
+                context.getSystemService(ConnectivityManager.class);
+        return connectivityManager.getNetworkCapabilities(connectivityManager.getActiveNetwork());
+    }
+
+    /**
+     * Checks if the subscription with the given subId is converted pSIM.
+     *
+     * @param context {@code Context}
+     * @param subId The subscription ID.
+     */
+    static boolean isConvertedPsimSubscription(@NonNull Context context, int subId) {
+        SubscriptionManager subscriptionManager = context.getSystemService(
+                SubscriptionManager.class);
+        List<SubscriptionInfo> allSubInofs = subscriptionManager.getAllSubscriptionInfoList();
+        for (SubscriptionInfo subInfo : allSubInofs) {
+            if (subInfo != null && subInfo.getSubscriptionId() == subId
+                    && isConvertedPsimSubscription(subInfo)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Checks if the subscription is converted pSIM.
+     */
+    public static boolean isConvertedPsimSubscription(@NonNull SubscriptionInfo subInfo) {
+        Log.d(TAG, "isConvertedPsimSubscription: isEmbedded " + subInfo.isEmbedded());
+        Log.d(TAG, "isConvertedPsimSubscription: getTransferStatus " + subInfo.getTransferStatus());
+        return com.android.internal.telephony.flags.Flags.supportPsimToEsimConversion()
+                && !subInfo.isEmbedded()
+                && subInfo.getTransferStatus() == TRANSFER_STATUS_CONVERTED;
     }
 }

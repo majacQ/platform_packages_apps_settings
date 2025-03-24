@@ -4,21 +4,28 @@ import static android.Manifest.permission.ACCESS_COARSE_LOCATION;
 import static android.Manifest.permission.ACCESS_FINE_LOCATION;
 
 import android.content.Context;
+import android.content.Intent;
 import android.location.LocationManager;
 import android.os.UserHandle;
 import android.os.UserManager;
 import android.permission.PermissionControllerManager;
 import android.provider.Settings;
+import android.text.TextUtils;
 
+import androidx.annotation.NonNull;
 import androidx.annotation.VisibleForTesting;
 import androidx.preference.Preference;
+import androidx.preference.PreferenceScreen;
 
 import com.android.settings.R;
 import com.android.settings.Utils;
 import com.android.settings.core.PreferenceControllerMixin;
+import com.android.settingslib.utils.StringUtil;
 
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
 public class AppLocationPermissionPreferenceController extends
@@ -56,11 +63,28 @@ public class AppLocationPermissionPreferenceController extends
             if (mNumTotal == -1 || mNumHasLocation == -1) {
                 return mContext.getString(R.string.location_settings_loading_app_permission_stats);
             }
-            return mContext.getResources().getQuantityString(
-                    R.plurals.location_app_permission_summary_location_on, mNumHasLocation,
-                    mNumHasLocation, mNumTotal);
+            Map<String, Object> arguments = new HashMap<>();
+            arguments.put("count", mNumHasLocation);
+            arguments.put("total", mNumTotal);
+            return StringUtil.getIcuPluralsString(mContext, arguments,
+                    R.string.location_app_permission_summary_location_on);
         } else {
             return mContext.getString(R.string.location_app_permission_summary_location_off);
+        }
+    }
+
+    @Override
+    public void displayPreference(@NonNull PreferenceScreen screen) {
+        super.displayPreference(screen);
+
+        Preference pref = screen.findPreference(getPreferenceKey());
+        if (pref != null) {
+            pref.setIntent(new Intent(Intent.ACTION_MANAGE_PERMISSION_APPS)
+                    .setPackage(mContext.getPackageManager().getPermissionControllerPackageName())
+                    .putExtra(TextUtils.equals(pref.getKey(), "app_level_permissions")
+                                    ? Intent.EXTRA_PERMISSION_NAME
+                                    : Intent.EXTRA_PERMISSION_GROUP_NAME,
+                            "android.permission-group.LOCATION"));
         }
     }
 

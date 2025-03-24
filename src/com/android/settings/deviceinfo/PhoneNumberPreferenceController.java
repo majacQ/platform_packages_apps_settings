@@ -16,16 +16,11 @@
 
 package com.android.settings.deviceinfo;
 
-import static android.content.Context.CLIPBOARD_SERVICE;
-
-import android.content.ClipData;
-import android.content.ClipboardManager;
 import android.content.Context;
 import android.telephony.SubscriptionInfo;
 import android.telephony.SubscriptionManager;
 import android.telephony.TelephonyManager;
 import android.text.TextUtils;
-import android.widget.Toast;
 
 import androidx.annotation.VisibleForTesting;
 import androidx.preference.Preference;
@@ -34,7 +29,7 @@ import androidx.preference.PreferenceScreen;
 
 import com.android.settings.R;
 import com.android.settings.core.BasePreferenceController;
-import com.android.settingslib.DeviceInfoUtils;
+import com.android.settings.network.SubscriptionUtil;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -56,17 +51,16 @@ public class PhoneNumberPreferenceController extends BasePreferenceController {
 
     @Override
     public int getAvailabilityStatus() {
-        return mTelephonyManager.isVoiceCapable() ? AVAILABLE : UNSUPPORTED_ON_DEVICE;
-    }
-
-    @Override
-    public CharSequence getSummary() {
-        return getFirstPhoneNumber();
+        return SubscriptionUtil.isSimHardwareVisible(mContext) ?
+                AVAILABLE : UNSUPPORTED_ON_DEVICE;
     }
 
     @Override
     public void displayPreference(PreferenceScreen screen) {
         super.displayPreference(screen);
+        if (!SubscriptionUtil.isSimHardwareVisible(mContext)) {
+            return;
+        }
         final Preference preference = screen.findPreference(getPreferenceKey());
         final PreferenceCategory category = screen.findPreference(KEY_PREFERENCE_CATEGORY);
         mPreferenceList.add(preference);
@@ -76,9 +70,10 @@ public class PhoneNumberPreferenceController extends BasePreferenceController {
         for (int simSlotNumber = 1; simSlotNumber < mTelephonyManager.getPhoneCount();
                 simSlotNumber++) {
             final Preference multiSimPreference = createNewPreference(screen.getContext());
+            multiSimPreference.setSelectable(false);
+            multiSimPreference.setCopyingEnabled(true);
             multiSimPreference.setOrder(phonePreferenceOrder + simSlotNumber);
             multiSimPreference.setKey(KEY_PHONE_NUMBER + simSlotNumber);
-            multiSimPreference.setSelectable(false);
             category.addPreference(multiSimPreference);
             mPreferenceList.add(multiSimPreference);
         }
@@ -89,7 +84,7 @@ public class PhoneNumberPreferenceController extends BasePreferenceController {
         for (int simSlotNumber = 0; simSlotNumber < mPreferenceList.size(); simSlotNumber++) {
             final Preference simStatusPreference = mPreferenceList.get(simSlotNumber);
             simStatusPreference.setTitle(getPreferenceTitle(simSlotNumber));
-            simStatusPreference.setSummary(getPhoneNumber(simSlotNumber));
+            setPhoneNumber(simSlotNumber);
         }
     }
 
@@ -98,35 +93,15 @@ public class PhoneNumberPreferenceController extends BasePreferenceController {
         return true;
     }
 
-    @Override
-    public void copy() {
-        final ClipboardManager clipboard = (ClipboardManager) mContext.getSystemService(
-                CLIPBOARD_SERVICE);
-        clipboard.setPrimaryClip(ClipData.newPlainText("text", getFirstPhoneNumber()));
-
-        final String toast = mContext.getString(R.string.copyable_slice_toast,
-                mContext.getText(R.string.status_number));
-        Toast.makeText(mContext, toast, Toast.LENGTH_SHORT).show();
-    }
-
-    private CharSequence getFirstPhoneNumber() {
-        final List<SubscriptionInfo> subscriptionInfoList =
-                mSubscriptionManager.getActiveSubscriptionInfoList();
-        if (subscriptionInfoList == null || subscriptionInfoList.isEmpty()) {
-            return mContext.getText(R.string.device_info_default);
-        }
-
-        // For now, We only return first result for slice view.
-        return getFormattedPhoneNumber(subscriptionInfoList.get(0));
-    }
-
-    private CharSequence getPhoneNumber(int simSlot) {
+    private void setPhoneNumber(int simSlot) {
+        final Preference simStatusPreference = mPreferenceList.get(simSlot);
         final SubscriptionInfo subscriptionInfo = getSubscriptionInfo(simSlot);
+        simStatusPreference.setEnabled(subscriptionInfo != null);
         if (subscriptionInfo == null) {
-            return mContext.getText(R.string.device_info_default);
+            simStatusPreference.setSummary(mContext.getString(R.string.device_info_not_available));
+        } else {
+            simStatusPreference.setSummary(getFormattedPhoneNumber(subscriptionInfo));
         }
-
-        return getFormattedPhoneNumber(subscriptionInfo);
     }
 
     private CharSequence getPreferenceTitle(int simSlot) {
@@ -136,7 +111,7 @@ public class PhoneNumberPreferenceController extends BasePreferenceController {
     }
 
     @VisibleForTesting
-    SubscriptionInfo getSubscriptionInfo(int simSlot) {
+    protected SubscriptionInfo getSubscriptionInfo(int simSlot) {
         final List<SubscriptionInfo> subscriptionInfoList =
                 mSubscriptionManager.getActiveSubscriptionInfoList();
         if (subscriptionInfoList != null) {
@@ -150,15 +125,15 @@ public class PhoneNumberPreferenceController extends BasePreferenceController {
     }
 
     @VisibleForTesting
-    CharSequence getFormattedPhoneNumber(SubscriptionInfo subscriptionInfo) {
-        final String phoneNumber = DeviceInfoUtils.getBidiFormattedPhoneNumber(mContext,
+    protected String getFormattedPhoneNumber(SubscriptionInfo subscriptionInfo) {
+        final String phoneNumber = SubscriptionUtil.getBidiFormattedPhoneNumber(mContext,
                 subscriptionInfo);
         return TextUtils.isEmpty(phoneNumber) ? mContext.getString(R.string.device_info_default)
                 : phoneNumber;
     }
 
     @VisibleForTesting
-    Preference createNewPreference(Context context) {
+    protected Preference createNewPreference(Context context) {
         return new Preference(context);
     }
 }

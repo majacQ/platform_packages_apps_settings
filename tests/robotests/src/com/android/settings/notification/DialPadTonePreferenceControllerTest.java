@@ -37,8 +37,13 @@ import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;
+import org.robolectric.annotation.Config;
 
+// LINT.IfChange
 @RunWith(RobolectricTestRunner.class)
+@Config(shadows = {
+        com.android.settings.testutils.shadow.ShadowFragment.class,
+})
 public class DialPadTonePreferenceControllerTest {
 
     @Mock
@@ -119,3 +124,4 @@ public class DialPadTonePreferenceControllerTest {
         assertThat(System.getInt(mContentResolver, System.DTMF_TONE_WHEN_DIALING, 1)).isEqualTo(0);
     }
 }
+// LINT.ThenChange(DialPadTonePreferenceTest.kt)

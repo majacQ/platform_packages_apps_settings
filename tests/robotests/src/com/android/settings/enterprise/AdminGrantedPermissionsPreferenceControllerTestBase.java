@@ -18,11 +18,14 @@ package com.android.settings.enterprise;
 
 import static com.google.common.truth.Truth.assertThat;
 
-import static org.mockito.ArgumentMatchers.anyObject;
-import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.any;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.eq;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import android.app.admin.DevicePolicyManager;
 import android.content.Context;
 
 import androidx.preference.Preference;
@@ -30,6 +33,7 @@ import androidx.preference.Preference;
 import com.android.settings.R;
 import com.android.settings.applications.ApplicationFeatureProvider;
 import com.android.settings.testutils.FakeFeatureFactory;
+import com.android.settingslib.utils.StringUtil;
 
 import org.junit.Before;
 import org.junit.Test;
@@ -61,6 +65,8 @@ public abstract class AdminGrantedPermissionsPreferenceControllerTestBase {
     @Before
     public void setUp() {
         MockitoAnnotations.initMocks(this);
+        doReturn(mock(DevicePolicyManager.class)).when(mContext)
+                .getSystemService(Context.DEVICE_POLICY_SERVICE);
         mFeatureFactory = FakeFeatureFactory.setupForTest();
         mController = createController(true /* async */);
     }
@@ -74,7 +80,9 @@ public abstract class AdminGrantedPermissionsPreferenceControllerTestBase {
             }
         }).when(mFeatureFactory.applicationFeatureProvider)
                 .calculateNumberOfAppsWithAdminGrantedPermissions(eq(mPermissions),
-                        eq(async), anyObject());
+                        eq(async), any());
+        when(mContext.getResources().getString(R.string.enterprise_privacy_number_packages_lower_bound))
+                .thenReturn("Minimum # apps");
     }
 
     @Test
@@ -87,8 +95,8 @@ public abstract class AdminGrantedPermissionsPreferenceControllerTestBase {
         assertThat(preference.isVisible()).isFalse();
 
         setNumberOfPackagesWithAdminGrantedPermissions(20, true /* async */);
-        when(mContext.getResources().getQuantityString(
-                R.plurals.enterprise_privacy_number_packages_lower_bound, 20, 20))
+        when(StringUtil.getIcuPluralsString(mContext, 20,
+                R.string.enterprise_privacy_number_packages_lower_bound))
                 .thenReturn("minimum 20 apps");
         mController.updateState(preference);
         assertThat(preference.getSummary()).isEqualTo("minimum 20 apps");

@@ -22,7 +22,6 @@ import android.content.Context;
 import android.content.DialogInterface;
 import android.os.PersistableBundle;
 import android.telephony.CarrierConfigManager;
-import android.telephony.PhoneStateListener;
 import android.telephony.SubscriptionManager;
 import android.telephony.TelephonyCallback;
 import android.telephony.TelephonyManager;
@@ -32,9 +31,9 @@ import android.util.Log;
 import androidx.annotation.VisibleForTesting;
 import androidx.preference.Preference;
 import androidx.preference.PreferenceScreen;
-import androidx.preference.SwitchPreference;
+import androidx.preference.TwoStatePreference;
 
-import com.android.internal.telephony.util.ArrayUtils;
+import com.android.internal.telephony.flags.Flags;
 import com.android.settings.R;
 import com.android.settings.network.ims.VolteQueryImsState;
 import com.android.settingslib.core.lifecycle.LifecycleObserver;
@@ -56,8 +55,6 @@ public class Enhanced4gBasePreferenceController extends TelephonyTogglePreferenc
     Preference mPreference;
     private PhoneCallStateTelephonyCallback mTelephonyCallback;
     private boolean mShow5gLimitedDialog;
-    boolean mIsNrEnabledFromCarrierConfig;
-    private boolean mHas5gCapability;
     private Integer mCallState;
     private final List<On4gLteUpdateListener> m4gLteListeners;
 
@@ -94,9 +91,6 @@ public class Enhanced4gBasePreferenceController extends TelephonyTogglePreferenc
         mShow5gLimitedDialog = carrierConfig.getBoolean(
                 CarrierConfigManager.KEY_VOLTE_5G_LIMITED_ALERT_DIALOG_BOOL);
 
-        int[] nrAvailabilities = carrierConfig.getIntArray(
-                CarrierConfigManager.KEY_CARRIER_NR_AVAILABILITIES_INT_ARRAY);
-        mIsNrEnabledFromCarrierConfig = !ArrayUtils.isEmpty(nrAvailabilities);
         return this;
     }
 
@@ -113,8 +107,8 @@ public class Enhanced4gBasePreferenceController extends TelephonyTogglePreferenc
         }
 
         final PersistableBundle carrierConfig = getCarrierConfigForSubId(subId);
-        if ((carrierConfig == null)
-                || carrierConfig.getBoolean(CarrierConfigManager.KEY_HIDE_ENHANCED_4G_LTE_BOOL)) {
+        if (!CarrierConfigManager.isConfigForIdentifiedCarrier(carrierConfig) ||
+                carrierConfig.getBoolean(CarrierConfigManager.KEY_HIDE_ENHANCED_4G_LTE_BOOL)) {
             return CONDITIONALLY_UNAVAILABLE;
         }
 
@@ -153,7 +147,7 @@ public class Enhanced4gBasePreferenceController extends TelephonyTogglePreferenc
         if (preference == null) {
             return;
         }
-        final SwitchPreference switchPreference = (SwitchPreference) preference;
+        final TwoStatePreference switchPreference = (TwoStatePreference) preference;
 
         final VolteQueryImsState queryState = queryImsState(mSubId);
         switchPreference.setEnabled(isUserControlAllowed(getCarrierConfigForSubId(mSubId))
@@ -235,13 +229,18 @@ public class Enhanced4gBasePreferenceController extends TelephonyTogglePreferenc
             }
             // assign current call state so that it helps to show correct preference state even
             // before first onCallStateChanged() by initial registration.
-            mCallState = mTelephonyManager.getCallState(subId);
+            if (Flags.enforceTelephonyFeatureMappingForPublicApis()) {
+                try {
+                    mCallState = mTelephonyManager.getCallState(subId);
+                } catch (UnsupportedOperationException e) {
+                    // Device doesn't support FEATURE_TELEPHONY_CALLING
+                    mCallState = TelephonyManager.CALL_STATE_IDLE;
+                }
+            } else {
+                mCallState = mTelephonyManager.getCallState(subId);
+            }
             mTelephonyManager.registerTelephonyCallback(
                     mContext.getMainExecutor(), mTelephonyCallback);
-
-            final long supportedRadioBitmask = mTelephonyManager.getSupportedRadioAccessFamily();
-            mHas5gCapability =
-                    (supportedRadioBitmask & TelephonyManager.NETWORK_TYPE_BITMASK_NR) > 0;
         }
 
         public void unregister() {
@@ -260,8 +259,7 @@ public class Enhanced4gBasePreferenceController extends TelephonyTogglePreferenc
     }
 
     private boolean isDialogNeeded() {
-        Log.d(TAG, "Has5gCapability:" + mHas5gCapability);
-        return mShow5gLimitedDialog && mHas5gCapability && mIsNrEnabledFromCarrierConfig;
+        return mShow5gLimitedDialog && new NrRepository(mContext).isNrAvailable(mSubId);
     }
 
     private void show5gLimitedDialog(ImsMmTelManager imsMmTelManager) {

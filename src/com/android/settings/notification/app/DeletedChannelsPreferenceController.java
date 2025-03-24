@@ -16,6 +16,8 @@
 
 package com.android.settings.notification.app;
 
+import static com.android.server.notification.Flags.notificationHideUnusedChannels;
+
 import android.content.Context;
 
 import androidx.preference.Preference;
@@ -23,6 +25,7 @@ import androidx.preference.Preference;
 import com.android.settings.R;
 import com.android.settings.core.PreferenceControllerMixin;
 import com.android.settings.notification.NotificationBackend;
+import com.android.settingslib.utils.StringUtil;
 
 public class DeletedChannelsPreferenceController extends NotificationPreferenceController
         implements PreferenceControllerMixin {
@@ -43,6 +46,9 @@ public class DeletedChannelsPreferenceController extends NotificationPreferenceC
         if (!super.isAvailable()) {
             return false;
         }
+        if (notificationHideUnusedChannels()) {
+            return false;
+        }
         // only visible on app screen
         if (mChannel != null || hasValidGroup()) {
             return false;
@@ -59,8 +65,8 @@ public class DeletedChannelsPreferenceController extends NotificationPreferenceC
     public void updateState(Preference preference) {
         if (mAppRow != null) {
             int deletedChannelCount = mBackend.getDeletedChannelCount(mAppRow.pkg, mAppRow.uid);
-            preference.setTitle(mContext.getResources().getQuantityString(
-                    R.plurals.deleted_channels, deletedChannelCount, deletedChannelCount));
+            preference.setTitle(StringUtil.getIcuPluralsString(mContext, deletedChannelCount,
+                    R.string.deleted_channels));
         }
         preference.setSelectable(false);
     }

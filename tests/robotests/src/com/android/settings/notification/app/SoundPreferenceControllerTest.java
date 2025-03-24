@@ -183,20 +183,6 @@ public class SoundPreferenceControllerTest {
     }
 
     @Test
-    public void testUpdateState_notBlockable() {
-        NotificationBackend.AppRow appRow = new NotificationBackend.AppRow();
-        NotificationChannel channel = mock(NotificationChannel.class);
-        when(channel.isImportanceLockedByOEM()).thenReturn(true);
-        mController.onResume(appRow, channel, null, null, null, null, null);
-
-        AttributeSet attributeSet = Robolectric.buildAttributeSet().build();
-        Preference pref = new NotificationSoundPreference(mContext, attributeSet);
-        mController.updateState(pref);
-
-        assertTrue(pref.isEnabled());
-    }
-
-    @Test
     public void testUpdateState_configurable() {
         Uri sound = Settings.System.DEFAULT_ALARM_ALERT_URI;
         NotificationBackend.AppRow appRow = new NotificationBackend.AppRow();
@@ -301,6 +287,26 @@ public class SoundPreferenceControllerTest {
         NotificationChannel channel = new NotificationChannel("", "", IMPORTANCE_HIGH);
         channel.setSound(null, new AudioAttributes.Builder().setUsage(
                 AudioAttributes.USAGE_UNKNOWN).build());
+        mController.onResume(appRow, channel, null, null, null, null, null);
+
+        AttributeSet attributeSet = Robolectric.buildAttributeSet().build();
+        NotificationSoundPreference pref =
+                spy(new NotificationSoundPreference(mContext, attributeSet));
+        pref.setKey(mController.getPreferenceKey());
+        mController.handlePreferenceTreeClick(pref);
+
+        ArgumentCaptor<Intent> intentArgumentCaptor = ArgumentCaptor.forClass(Intent.class);
+        verify(pref, times(1)).onPrepareRingtonePickerIntent(intentArgumentCaptor.capture());
+        assertEquals(RingtoneManager.TYPE_NOTIFICATION,
+                intentArgumentCaptor.getValue().getIntExtra(
+                        RingtoneManager.EXTRA_RINGTONE_TYPE, 0));
+    }
+
+    @Test
+    public void testOnPreferenceTreeClick_noAudioAttributes() {
+        NotificationBackend.AppRow appRow = new NotificationBackend.AppRow();
+        NotificationChannel channel = new NotificationChannel("", "", IMPORTANCE_HIGH);
+        channel.setSound(null, null);
         mController.onResume(appRow, channel, null, null, null, null, null);
 
         AttributeSet attributeSet = Robolectric.buildAttributeSet().build();

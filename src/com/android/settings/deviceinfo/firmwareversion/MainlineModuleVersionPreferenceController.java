@@ -28,6 +28,7 @@ import androidx.annotation.VisibleForTesting;
 import androidx.preference.Preference;
 
 import com.android.settings.core.BasePreferenceController;
+import com.android.settings.flags.Flags;
 
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
@@ -38,11 +39,8 @@ import java.util.Locale;
 import java.util.Optional;
 import java.util.TimeZone;
 
+// LINT.IfChange
 public class MainlineModuleVersionPreferenceController extends BasePreferenceController {
-
-    private static final String TAG = "MainlineModuleControl";
-    private static final List<String> VERSION_NAME_DATE_PATTERNS = Arrays.asList("yyyy-MM-dd",
-            "yyyy-MM");
 
     @VisibleForTesting
     static final Intent MODULE_UPDATE_INTENT =
@@ -51,6 +49,10 @@ public class MainlineModuleVersionPreferenceController extends BasePreferenceCon
     static final Intent MODULE_UPDATE_V2_INTENT =
             new Intent("android.settings.MODULE_UPDATE_VERSIONS");
 
+    private static final String TAG = "MainlineModuleControl";
+    private static final List<String> VERSION_NAME_DATE_PATTERNS = Arrays.asList("yyyy-MM-dd",
+            "yyyy-MM");
+
     private final PackageManager mPackageManager;
 
     private String mModuleVersion;
@@ -58,6 +60,12 @@ public class MainlineModuleVersionPreferenceController extends BasePreferenceCon
     public MainlineModuleVersionPreferenceController(Context context, String key) {
         super(context, key);
         mPackageManager = mContext.getPackageManager();
+        if (Flags.mainlineModuleExplicitIntent()) {
+            String packageName = mContext
+                    .getString(com.android.settings.R.string.config_mainline_module_update_package);
+            MODULE_UPDATE_INTENT.setPackage(packageName);
+            MODULE_UPDATE_V2_INTENT.setPackage(packageName);
+        }
         initModules();
     }
 
@@ -73,7 +81,6 @@ public class MainlineModuleVersionPreferenceController extends BasePreferenceCon
             try {
                 mModuleVersion =
                         mPackageManager.getPackageInfo(moduleProvider, 0 /* flags */).versionName;
-                return;
             } catch (PackageManager.NameNotFoundException e) {
                 Log.e(TAG, "Failed to get mainline version.", e);
                 mModuleVersion = null;
@@ -117,7 +124,8 @@ public class MainlineModuleVersionPreferenceController extends BasePreferenceCon
             return mModuleVersion;
         }
 
-        return DateFormat.getLongDateFormat(mContext).format(parsedDate.get());
+        String format = DateFormat.getBestDateTimePattern(Locale.getDefault(), "dMMMMyyyy");
+        return DateFormat.format(format, parsedDate.get());
     }
 
     private Optional<Date> parseDateFromVersionName(String text) {
@@ -134,3 +142,4 @@ public class MainlineModuleVersionPreferenceController extends BasePreferenceCon
         return Optional.empty();
     }
 }
+// LINT.ThenChange(MainlineModuleVersionPreference.kt)

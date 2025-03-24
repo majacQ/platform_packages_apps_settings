@@ -16,13 +16,17 @@
 
 package com.android.settings.sim;
 
+import static android.telephony.SubscriptionManager.PROFILE_CLASS_PROVISIONING;
+
 import android.app.Activity;
 import android.app.Dialog;
 import android.app.settings.SettingsEnums;
+import android.content.Context;
 import android.content.DialogInterface;
 import android.os.Bundle;
 import android.telephony.SubscriptionInfo;
 import android.telephony.SubscriptionManager;
+import android.telephony.TelephonyManager;
 import android.util.Log;
 
 import androidx.annotation.NonNull;
@@ -30,12 +34,13 @@ import androidx.annotation.Nullable;
 import androidx.annotation.VisibleForTesting;
 import androidx.appcompat.app.AlertDialog;
 
+import com.android.internal.telephony.flags.Flags;
 import com.android.settings.R;
 import com.android.settings.network.SubscriptionUtil;
 
 /**
- * Presents a dialog asking the user if they want to update all services to use a given "preferred"
- * SIM. Typically this would be used in a case where a device goes from having multiple SIMs down to
+ * After androidV, presents a dialog asking the user if they want to update the mobile data.
+ * Typically this would be used in a case where a device goes from having multiple SIMs down to
  * only one.
  */
 public class PreferredSimDialogFragment extends SimDialogFragment implements
@@ -45,7 +50,7 @@ public class PreferredSimDialogFragment extends SimDialogFragment implements
     public static PreferredSimDialogFragment newInstance() {
         final PreferredSimDialogFragment fragment = new PreferredSimDialogFragment();
         final Bundle args = initArguments(SimDialogActivity.PREFERRED_PICK,
-                R.string.sim_preferred_title);
+                R.string.select_specific_sim_for_data_title);
         fragment.setArguments(args);
         return fragment;
     }
@@ -54,7 +59,6 @@ public class PreferredSimDialogFragment extends SimDialogFragment implements
     @Override
     public Dialog onCreateDialog(@Nullable Bundle savedInstanceState) {
         final AlertDialog dialog = new AlertDialog.Builder(getContext())
-                .setTitle(getTitleResId())
                 .setPositiveButton(R.string.yes, this)
                 .setNegativeButton(R.string.no, null)
                 .create();
@@ -84,19 +88,60 @@ public class PreferredSimDialogFragment extends SimDialogFragment implements
     private void updateDialog(AlertDialog dialog) {
         Log.d(TAG, "Dialog updated, dismiss status: " + mWasDismissed);
 
-        final SubscriptionInfo info = getPreferredSubscription();
         if (mWasDismissed) {
             return;
         }
-        if (info == null) {
-            dismiss();
+
+        if (dialog == null) {
+            dismiss("Dialog is null.");
             return;
         }
+        Context context = getContext();
+        if (context == null) {
+            dismiss("getContext is null.");
+            return;
+        }
+
+        final SubscriptionInfo info = getPreferredSubscription();
+        if (info == null || (info.isEmbedded()
+            && (info.getProfileClass() == PROFILE_CLASS_PROVISIONING
+                || (Flags.oemEnabledSatelliteFlag() && info.isOnlyNonTerrestrialNetwork())))) {
+            dismiss("SubscriptionInfo is null or other esim's cases.");
+            return;
+        }
+        Log.d(TAG, "SubscriptionInfo: " + info);
+        TelephonyManager telephonyManager = context.getSystemService(TelephonyManager.class);
+        if (telephonyManager == null) {
+            dismiss("TelephonyManager is null.");
+            return;
+        }
+        telephonyManager = telephonyManager.createForSubscriptionId(info.getSubscriptionId());
+        if (telephonyManager.isDataEnabledForReason(TelephonyManager.DATA_ENABLED_REASON_USER)) {
+            dismiss("mobile data is on.");
+            final SimDialogActivity activity = (SimDialogActivity) getActivity();
+            if (activity != null) {
+                activity.finish();
+            }
+            return;
+        }
+
+        final CharSequence simName =
+                SubscriptionUtil.getUniqueSubscriptionDisplayName(info, context);
+        final String title =
+                context.getString(
+                        getTitleResId(),
+                        simName);
         final String message =
-                getContext().getString(
+                context.getString(
                         R.string.sim_preferred_message,
-                        SubscriptionUtil.getUniqueSubscriptionDisplayName(info, getContext()));
+                        simName);
+        dialog.setTitle(title);
         dialog.setMessage(message);
+    }
+
+    private void dismiss(String log) {
+        Log.d(TAG, log);
+        dismiss();
     }
 
     @Override

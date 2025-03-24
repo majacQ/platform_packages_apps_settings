@@ -38,6 +38,7 @@ import com.android.settings.R;
 import com.android.settingslib.core.AbstractPreferenceController;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
@@ -113,11 +114,11 @@ public class ZenModeEventRuleSettings extends ZenModeRuleSettingsBase {
 
         CharSequence[] entriesArr = entries.toArray(new CharSequence[entries.size()]);
         CharSequence[] valuesArr = values.toArray(new CharSequence[values.size()]);
-        if (!Objects.equals(mCalendar.getEntries(), entriesArr)) {
+        if (!Arrays.equals(mCalendar.getEntries(), entriesArr)) {
             mCalendar.setEntries(entriesArr);
         }
 
-        if (!Objects.equals(mCalendar.getEntryValues(), valuesArr)) {
+        if (!Arrays.equals(mCalendar.getEntryValues(), valuesArr)) {
             mCalendar.setEntryValues(valuesArr);
         }
     }
@@ -137,7 +138,7 @@ public class ZenModeEventRuleSettings extends ZenModeRuleSettingsBase {
                 mEvent.userId = Integer.parseInt(key[0]);
                 mEvent.calendarId = key[1].equals("") ? null : Long.parseLong(key[1]);
                 mEvent.calName = key[2].equals("") ? null : key[2];
-                updateRule(ZenModeConfig.toEventConditionId(mEvent));
+                updateEventRule(mEvent);
                 return true;
             }
         });
@@ -159,7 +160,7 @@ public class ZenModeEventRuleSettings extends ZenModeRuleSettingsBase {
                 final int reply = Integer.parseInt((String) newValue);
                 if (reply == mEvent.reply) return false;
                 mEvent.reply = reply;
-                updateRule(ZenModeConfig.toEventConditionId(mEvent));
+                updateEventRule(mEvent);
                 return true;
             }
         });

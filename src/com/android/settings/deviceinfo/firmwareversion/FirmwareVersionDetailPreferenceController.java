@@ -28,13 +28,12 @@ import android.util.Log;
 import androidx.annotation.VisibleForTesting;
 import androidx.preference.Preference;
 
-import com.android.settings.R;
 import com.android.settings.Utils;
 import com.android.settings.core.BasePreferenceController;
-import com.android.settings.slices.Sliceable;
 import com.android.settingslib.RestrictedLockUtils;
 import com.android.settingslib.RestrictedLockUtilsInternal;
 
+// LINT.IfChange
 public class FirmwareVersionDetailPreferenceController extends BasePreferenceController {
 
     private static final String TAG = "firmwareDialogCtrl";
@@ -75,7 +74,7 @@ public class FirmwareVersionDetailPreferenceController extends BasePreferenceCon
 
     @Override
     public CharSequence getSummary() {
-        return Build.VERSION.RELEASE_OR_CODENAME;
+        return Build.VERSION.RELEASE_OR_PREVIEW_DISPLAY;
     }
 
     @Override
@@ -100,7 +99,8 @@ public class FirmwareVersionDetailPreferenceController extends BasePreferenceCon
 
             final Intent intent = new Intent(Intent.ACTION_MAIN)
                     .setClassName(
-                            "android", com.android.internal.app.PlatLogoActivity.class.getName());
+                            "android", com.android.internal.app.PlatLogoActivity.class.getName())
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             try {
                 mContext.startActivity(intent);
             } catch (Exception e) {
@@ -125,10 +125,5 @@ public class FirmwareVersionDetailPreferenceController extends BasePreferenceCon
         mFunDisallowedBySystem = RestrictedLockUtilsInternal.hasBaseUserRestriction(
                 mContext, UserManager.DISALLOW_FUN, UserHandle.myUserId());
     }
-
-    @Override
-    public void copy() {
-        Sliceable.setCopyContent(mContext, getSummary(),
-                mContext.getText(R.string.firmware_version));
-    }
 }
+// LINT.ThenChange(FirmwareVersionDetailPreference.kt)

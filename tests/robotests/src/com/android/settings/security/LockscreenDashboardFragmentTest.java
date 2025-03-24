@@ -23,6 +23,7 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import android.content.Context;
@@ -67,6 +68,7 @@ public class LockscreenDashboardFragmentTest {
                 .thenReturn(mLockPatternUtils);
         mContext = RuntimeEnvironment.application;
         mTestFragment = spy(new TestFragment());
+        doReturn(mContext).when(mTestFragment).getContext();
     }
 
     @Test
@@ -87,7 +89,11 @@ public class LockscreenDashboardFragmentTest {
                 AmbientDisplayAlwaysOnPreferenceController.class);
 
         mTestFragment.onAttach(mContext);
-        verify(controller).setConfig(any());
+        if (mTestFragment.isCatalystEnabled()) {
+            verifyNoInteractions(controller);
+        } else {
+            verify(controller).setConfig(any());
+        }
     }
 
     @Test
@@ -129,6 +135,14 @@ public class LockscreenDashboardFragmentTest {
         assertThat(LockscreenDashboardFragment.SEARCH_INDEX_DATA_PROVIDER
                 .getNonIndexableKeys(mContext))
                 .doesNotContain("security_lockscreen_settings_screen");
+    }
+
+    @Test
+    public void controlsSettings() {
+        mTestFragment.onAttach(mContext);
+        assertThat(mTestFragment.mControlsContentObserver).isNotNull();
+        mTestFragment.onDetach();
+        assertThat(mTestFragment.mControlsContentObserver).isNull();
     }
 
     public static class TestFragment extends LockscreenDashboardFragment {

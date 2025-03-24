@@ -29,6 +29,7 @@ import android.util.Log;
 
 import androidx.annotation.VisibleForTesting;
 
+import com.android.internal.telephony.flags.Flags;
 import com.android.settings.network.GlobalSettingsChangeListener;
 import com.android.settings.network.ProxySubscriptionManager;
 import com.android.settings.overlay.FeatureFactory;
@@ -67,7 +68,7 @@ public class AirplaneModeEnabler extends GlobalSettingsChangeListener {
         super(context, Settings.Global.AIRPLANE_MODE_ON);
 
         mContext = context;
-        mMetricsFeatureProvider = FeatureFactory.getFactory(context).getMetricsFeatureProvider();
+        mMetricsFeatureProvider = FeatureFactory.getFeatureFactory().getMetricsFeatureProvider();
         mOnAirplaneModeChangedListener = listener;
 
         mTelephonyManager = context.getSystemService(TelephonyManager.class);
@@ -146,20 +147,56 @@ public class AirplaneModeEnabler extends GlobalSettingsChangeListener {
      * @return any subscription within device is under ECM mode
      */
     public boolean isInEcmMode() {
-        if (mTelephonyManager.getEmergencyCallbackMode()) {
-            return true;
+        return isInEcmMode(mContext, mTelephonyManager);
+    }
+
+    /**
+     * Check the status of ECM mode
+     *
+     * @param context Caller's {@link Context}
+     * @param telephonyManager The default {@link TelephonyManager}
+     *
+     * @return any subscription within device is under ECM mode
+     */
+    public static boolean isInEcmMode(Context context, TelephonyManager telephonyManager) {
+        if (context == null || telephonyManager == null) {
+            return false;
+        }
+        if (Flags.enforceTelephonyFeatureMappingForPublicApis()) {
+            try {
+                if (telephonyManager.getEmergencyCallbackMode()) {
+                    return true;
+                }
+            } catch (UnsupportedOperationException e) {
+                // Device doesn't support FEATURE_TELEPHONY_CALLING
+                // Ignore exception, device is not in ECM mode.
+            }
+        } else {
+            if (telephonyManager.getEmergencyCallbackMode()) {
+                return true;
+            }
         }
         final List<SubscriptionInfo> subInfoList =
-                ProxySubscriptionManager.getInstance(mContext).getActiveSubscriptionsInfo();
+                ProxySubscriptionManager.getInstance(context).getActiveSubscriptionsInfo();
         if (subInfoList == null) {
             return false;
         }
         for (SubscriptionInfo subInfo : subInfoList) {
-            final TelephonyManager telephonyManager =
-                    mTelephonyManager.createForSubscriptionId(subInfo.getSubscriptionId());
-            if (telephonyManager != null) {
-                if (telephonyManager.getEmergencyCallbackMode()) {
-                    return true;
+            final TelephonyManager telephonyManagerForSubId =
+                    telephonyManager.createForSubscriptionId(subInfo.getSubscriptionId());
+            if (telephonyManagerForSubId != null) {
+                if (!Flags.enforceTelephonyFeatureMappingForPublicApis()) {
+                    if (telephonyManagerForSubId.getEmergencyCallbackMode()) {
+                        return true;
+                    }
+                } else {
+                    try {
+                        if (telephonyManagerForSubId.getEmergencyCallbackMode()) {
+                            return true;
+                        }
+                    } catch (UnsupportedOperationException e) {
+                        // Ignore exception, device is not in ECM mode.
+                    }
                 }
             }
         }

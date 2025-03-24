@@ -22,7 +22,7 @@ import android.provider.Settings;
 
 import androidx.annotation.VisibleForTesting;
 import androidx.preference.Preference;
-import androidx.preference.SwitchPreference;
+import androidx.preference.TwoStatePreference;
 
 import com.android.settings.core.PreferenceControllerMixin;
 import com.android.settingslib.development.DeveloperOptionsPreferenceController;
@@ -38,10 +38,6 @@ public class NotificationChannelWarningsPreferenceController extends
     final static int SETTING_VALUE_ON = 1;
     @VisibleForTesting
     final static int SETTING_VALUE_OFF = 0;
-    @VisibleForTesting
-    final static int DEBUGGING_ENABLED = 1;
-    @VisibleForTesting
-    final static int DEBUGGING_DISABLED = 0;
 
     public NotificationChannelWarningsPreferenceController(Context context) {
         super(context);
@@ -64,10 +60,9 @@ public class NotificationChannelWarningsPreferenceController extends
 
     @Override
     public void updateState(Preference preference) {
-        final int defaultWarningEnabled = isDebuggable() ? DEBUGGING_ENABLED : DEBUGGING_DISABLED;
         final int mode = Settings.Global.getInt(mContext.getContentResolver(),
-                Settings.Global.SHOW_NOTIFICATION_CHANNEL_WARNINGS, defaultWarningEnabled);
-        ((SwitchPreference) mPreference).setChecked(mode != SETTING_VALUE_OFF);
+                Settings.Global.SHOW_NOTIFICATION_CHANNEL_WARNINGS, 0);
+        ((TwoStatePreference) mPreference).setChecked(mode != SETTING_VALUE_OFF);
     }
 
     @Override
@@ -75,7 +70,7 @@ public class NotificationChannelWarningsPreferenceController extends
         super.onDeveloperOptionsSwitchDisabled();
         Settings.Global.putInt(mContext.getContentResolver(),
                 Settings.Global.SHOW_NOTIFICATION_CHANNEL_WARNINGS, SETTING_VALUE_OFF);
-        ((SwitchPreference) mPreference).setChecked(false);
+        ((TwoStatePreference) mPreference).setChecked(false);
     }
 
     @VisibleForTesting

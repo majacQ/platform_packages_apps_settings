@@ -16,40 +16,38 @@
 
 package com.android.settings.fuelgauge.batterytip.actions;
 
+import android.app.Activity;
 import android.app.settings.SettingsEnums;
 
 import androidx.fragment.app.Fragment;
 
 import com.android.settings.R;
-import com.android.settings.SettingsActivity;
 import com.android.settings.core.SubSettingLauncher;
 import com.android.settings.fuelgauge.SmartBatterySettings;
 import com.android.settingslib.core.instrumentation.Instrumentable;
 
 public class SmartBatteryAction extends BatteryTipAction {
-    private SettingsActivity mSettingsActivity;
+    private Activity mActivity;
     private Fragment mFragment;
 
-    public SmartBatteryAction(SettingsActivity settingsActivity, Fragment fragment) {
-        super(settingsActivity.getApplicationContext());
-        mSettingsActivity = settingsActivity;
+    public SmartBatteryAction(Activity activity, Fragment fragment) {
+        super(activity.getApplicationContext());
+        mActivity = activity;
         mFragment = fragment;
     }
 
-    /**
-     * Handle the action when user clicks positive button
-     */
+    /** Handle the action when user clicks positive button */
     @Override
     public void handlePositiveAction(int metricsKey) {
-        mMetricsFeatureProvider.action(mContext,
-                SettingsEnums.ACTION_TIP_OPEN_SMART_BATTERY, metricsKey);
-        new SubSettingLauncher(mSettingsActivity)
-                .setSourceMetricsCategory(mFragment instanceof Instrumentable
-                        ? ((Instrumentable) mFragment).getMetricsCategory()
-                        : Instrumentable.METRICS_CATEGORY_UNKNOWN)
+        mMetricsFeatureProvider.action(
+                mContext, SettingsEnums.ACTION_TIP_OPEN_SMART_BATTERY, metricsKey);
+        new SubSettingLauncher(mActivity)
+                .setSourceMetricsCategory(
+                        mFragment instanceof Instrumentable
+                                ? ((Instrumentable) mFragment).getMetricsCategory()
+                                : Instrumentable.METRICS_CATEGORY_UNKNOWN)
                 .setDestination(SmartBatterySettings.class.getName())
                 .setTitleRes(R.string.smart_battery_manager_title)
                 .launch();
-
     }
 }

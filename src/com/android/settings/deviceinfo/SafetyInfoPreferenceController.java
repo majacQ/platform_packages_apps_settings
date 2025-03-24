@@ -18,6 +18,9 @@ package com.android.settings.deviceinfo;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.text.TextUtils;
+
+import androidx.preference.Preference;
 
 import com.android.settings.core.PreferenceControllerMixin;
 import com.android.settingslib.core.AbstractPreferenceController;
@@ -26,7 +29,8 @@ public class SafetyInfoPreferenceController extends AbstractPreferenceController
         PreferenceControllerMixin {
 
     private static final Intent INTENT_PROBE =
-            new Intent("android.settings.SHOW_SAFETY_AND_REGULATORY_INFO");
+            new Intent("android.settings.SHOW_SAFETY_AND_REGULATORY_INFO")
+                    .setPackage("com.android.safetyregulatoryinfo");
 
     private final PackageManager mPackageManager;
 
@@ -43,5 +47,17 @@ public class SafetyInfoPreferenceController extends AbstractPreferenceController
     @Override
     public String getPreferenceKey() {
         return "safety_info";
+    }
+
+    @Override
+    public boolean handlePreferenceTreeClick(Preference preference) {
+        if (!TextUtils.equals(preference.getKey(), getPreferenceKey())) {
+            return false;
+        }
+
+        final Intent intent = new Intent(INTENT_PROBE);
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        mContext.startActivity(intent);
+        return true;
     }
 }

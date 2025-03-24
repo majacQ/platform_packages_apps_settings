@@ -18,11 +18,14 @@ package com.android.settings.notification;
 
 import static android.app.admin.DevicePolicyManager.KEYGUARD_DISABLE_SECURE_NOTIFICATIONS;
 import static android.app.admin.DevicePolicyManager.KEYGUARD_DISABLE_UNREDACTED_NOTIFICATIONS;
+import static android.app.admin.DevicePolicyResources.Strings.Settings.LOCK_SCREEN_HIDE_WORK_NOTIFICATION_CONTENT;
+import static android.app.admin.DevicePolicyResources.Strings.Settings.LOCK_SCREEN_SHOW_WORK_NOTIFICATION_CONTENT;
 import static android.provider.Settings.Secure.LOCK_SCREEN_ALLOW_PRIVATE_NOTIFICATIONS;
 import static android.provider.Settings.Secure.LOCK_SCREEN_SHOW_NOTIFICATIONS;
 
 import static com.android.settingslib.RestrictedLockUtils.EnforcedAdmin;
 
+import android.app.admin.DevicePolicyManager;
 import android.app.settings.SettingsEnums;
 import android.content.Context;
 import android.content.Intent;
@@ -115,6 +118,7 @@ public class RedactionInterstitial extends SettingsActivity {
         @Override
         public void onViewCreated(View view, Bundle savedInstanceState) {
             super.onViewCreated(view, savedInstanceState);
+            DevicePolicyManager devicePolicyManager = getSystemService(DevicePolicyManager.class);
             mRadioGroup = (RadioGroup) view.findViewById(R.id.radio_group);
             mShowAllButton = (RestrictedRadioButton) view.findViewById(R.id.show_all);
             mRedactSensitiveButton =
@@ -126,9 +130,15 @@ public class RedactionInterstitial extends SettingsActivity {
             if (UserManager.get(getContext()).isManagedProfile(mUserId)) {
                 ((TextView) view.findViewById(R.id.sud_layout_description))
                         .setText(R.string.lock_screen_notifications_interstitial_message_profile);
-                mShowAllButton.setText(R.string.lock_screen_notifications_summary_show_profile);
+                mShowAllButton.setText(devicePolicyManager
+                        .getResources().getString(LOCK_SCREEN_SHOW_WORK_NOTIFICATION_CONTENT,
+                                () -> getString(
+                                        R.string.lock_screen_notifications_summary_show_profile)));
                 mRedactSensitiveButton
-                        .setText(R.string.lock_screen_notifications_summary_hide_profile);
+                        .setText(devicePolicyManager.getResources().getString(
+                                LOCK_SCREEN_HIDE_WORK_NOTIFICATION_CONTENT,
+                                () -> getString(
+                                        R.string.lock_screen_notifications_summary_hide_profile)));
 
                 ((RadioButton) view.findViewById(R.id.hide_all)).setVisibility(View.GONE);
             }
@@ -140,7 +150,7 @@ public class RedactionInterstitial extends SettingsActivity {
                             .setText(R.string.app_notifications_dialog_done)
                             .setListener(this::onDoneButtonClicked)
                             .setButtonType(FooterButton.ButtonType.NEXT)
-                            .setTheme(R.style.SudGlifButton_Primary)
+                            .setTheme(com.google.android.setupdesign.R.style.SudGlifButton_Primary)
                             .build()
             );
         }
@@ -179,13 +189,16 @@ public class RedactionInterstitial extends SettingsActivity {
         }
 
         private void loadFromSettings() {
+            final boolean showUnRedactedDefault = getContext().getResources().getBoolean(
+                    R.bool.default_allow_sensitive_lockscreen_content);
             final boolean managedProfile = UserManager.get(getContext()).isManagedProfile(mUserId);
             // Hiding all notifications is device-wide setting, managed profiles can only set
             // whether their notifications are show in full or redacted.
             final boolean showNotifications = managedProfile || Settings.Secure.getIntForUser(
                     getContentResolver(), LOCK_SCREEN_SHOW_NOTIFICATIONS, 0, mUserId) != 0;
             final boolean showUnredacted = Settings.Secure.getIntForUser(
-                    getContentResolver(), LOCK_SCREEN_ALLOW_PRIVATE_NOTIFICATIONS, 1, mUserId) != 0;
+                    getContentResolver(), LOCK_SCREEN_ALLOW_PRIVATE_NOTIFICATIONS,
+                    showUnRedactedDefault ? 1 : 0, mUserId) != 0;
 
             int checkedButtonId = R.id.hide_all;
             if (showNotifications) {

@@ -50,6 +50,7 @@ import android.content.Context;
 import android.database.Cursor;
 import android.database.MatrixCursor;
 import android.net.Uri;
+import android.os.Build;
 import android.provider.SearchIndexableResource;
 import android.provider.SearchIndexablesContract;
 import android.provider.SearchIndexablesProvider;
@@ -173,7 +174,7 @@ public class SettingsSearchIndexablesProvider extends SearchIndexablesProvider {
     public Cursor queryDynamicRawData(String[] projection) {
         final Context context = getContext();
         final List<SearchIndexableRaw> rawList = new ArrayList<>();
-        final Collection<SearchIndexableData> bundles = FeatureFactory.getFactory(context)
+        final Collection<SearchIndexableData> bundles = FeatureFactory.getFeatureFactory()
                 .getSearchFeatureProvider().getSearchIndexableResources().getProviderValues();
 
         for (SearchIndexableData bundle : bundles) {
@@ -200,8 +201,8 @@ public class SettingsSearchIndexablesProvider extends SearchIndexablesProvider {
         final MatrixCursor cursor = new MatrixCursor(SITE_MAP_COLUMNS);
         final Context context = getContext();
         // Loop through all IA categories and pages and build additional SiteMapPairs
-        final List<DashboardCategory> categories = FeatureFactory.getFactory(context)
-                .getDashboardFeatureProvider(context).getAllCategories();
+        final List<DashboardCategory> categories = FeatureFactory.getFeatureFactory()
+                .getDashboardFeatureProvider().getAllCategories();
         for (DashboardCategory category : categories) {
             // Use the category key to look up parent (which page hosts this key)
             final String parentClass = CATEGORY_KEY_TO_PARENT_MAP.get(category.key);
@@ -271,7 +272,7 @@ public class SettingsSearchIndexablesProvider extends SearchIndexablesProvider {
     }
 
     private List<String> getNonIndexableKeysFromProvider(Context context) {
-        final Collection<SearchIndexableData> bundles = FeatureFactory.getFactory(context)
+        final Collection<SearchIndexableData> bundles = FeatureFactory.getFeatureFactory()
                 .getSearchFeatureProvider().getSearchIndexableResources().getProviderValues();
 
         final List<String> nonIndexableKeys = new ArrayList<>();
@@ -283,17 +284,16 @@ public class SettingsSearchIndexablesProvider extends SearchIndexablesProvider {
             try {
                 providerNonIndexableKeys = provider.getNonIndexableKeys(context);
             } catch (Exception e) {
+                String msg = "Error trying to get non-indexable keys from: "
+                        + bundle.getTargetClass().getName();
                 // Catch a generic crash. In the absence of the catch, the background thread will
                 // silently fail anyway, so we aren't losing information by catching the exception.
-                // We crash when the system property exists so that we can test if crashes need to
-                // be fixed.
-                // The gain is that if there is a crash in a specific controller, we don't lose all
-                // non-indexable keys, but we can still find specific crashes in development.
-                if (System.getProperty(SYSPROP_CRASH_ON_ERROR) != null) {
-                    throw new RuntimeException(e);
+                // We crash on debuggable build or when the system property exists, so that we can
+                // test if crashes need to be fixed.
+                if (Build.IS_DEBUGGABLE || System.getProperty(SYSPROP_CRASH_ON_ERROR) != null) {
+                    throw new RuntimeException(msg, e);
                 }
-                Log.e(TAG, "Error trying to get non-indexable keys from: "
-                        + bundle.getTargetClass().getName(), e);
+                Log.e(TAG, msg, e);
                 continue;
             }
 
@@ -322,7 +322,7 @@ public class SettingsSearchIndexablesProvider extends SearchIndexablesProvider {
     }
 
     private List<SearchIndexableResource> getSearchIndexableResourcesFromProvider(Context context) {
-        final Collection<SearchIndexableData> bundles = FeatureFactory.getFactory(context)
+        final Collection<SearchIndexableData> bundles = FeatureFactory.getFeatureFactory()
                 .getSearchFeatureProvider().getSearchIndexableResources().getProviderValues();
         List<SearchIndexableResource> resourceList = new ArrayList<>();
 
@@ -348,7 +348,7 @@ public class SettingsSearchIndexablesProvider extends SearchIndexablesProvider {
     }
 
     private List<SearchIndexableRaw> getSearchIndexableRawFromProvider(Context context) {
-        final Collection<SearchIndexableData> bundles = FeatureFactory.getFactory(context)
+        final Collection<SearchIndexableData> bundles = FeatureFactory.getFeatureFactory()
                 .getSearchFeatureProvider().getSearchIndexableResources().getProviderValues();
         final List<SearchIndexableRaw> rawList = new ArrayList<>();
 
@@ -365,7 +365,6 @@ public class SettingsSearchIndexablesProvider extends SearchIndexablesProvider {
                 // The classname and intent information comes from the PreIndexData
                 // This will be more clear when provider conversion is done at PreIndex time.
                 raw.className = bundle.getTargetClass().getName();
-
             }
             rawList.addAll(providerRaws);
         }
@@ -393,7 +392,7 @@ public class SettingsSearchIndexablesProvider extends SearchIndexablesProvider {
     @VisibleForTesting
     List<SearchIndexableRaw> getInjectionIndexableRawData(Context context) {
         final DashboardFeatureProvider dashboardFeatureProvider =
-                FeatureFactory.getFactory(context).getDashboardFeatureProvider(context);
+                FeatureFactory.getFeatureFactory().getDashboardFeatureProvider();
         final List<SearchIndexableRaw> rawList = new ArrayList<>();
         final String currentPackageName = context.getPackageName();
         for (DashboardCategory category : dashboardFeatureProvider.getAllCategories()) {
@@ -455,7 +454,7 @@ public class SettingsSearchIndexablesProvider extends SearchIndexablesProvider {
             // Skip Settings injected items because they should be indexed in the sub-pages.
             return false;
         }
-        return true;
+        return tile.isSearchable();
     }
 
     private static Object[] createIndexableRawColumnObjects(SearchIndexableRaw raw) {

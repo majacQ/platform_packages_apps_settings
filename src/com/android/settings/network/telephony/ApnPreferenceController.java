@@ -32,6 +32,7 @@ import androidx.preference.Preference;
 import androidx.preference.PreferenceScreen;
 
 import com.android.settings.SettingsActivity;
+import com.android.settings.network.CarrierConfigCache;
 import com.android.settings.network.apn.ApnSettings;
 import com.android.settingslib.RestrictedLockUtilsInternal;
 import com.android.settingslib.RestrictedPreference;
@@ -46,19 +47,19 @@ public class ApnPreferenceController extends TelephonyBasePreferenceController i
         LifecycleObserver, OnStart, OnStop {
 
     @VisibleForTesting
-    CarrierConfigManager mCarrierConfigManager;
+    CarrierConfigCache mCarrierConfigCache;
     private Preference mPreference;
     private DpcApnEnforcedObserver mDpcApnEnforcedObserver;
 
     public ApnPreferenceController(Context context, String key) {
         super(context, key);
-        mCarrierConfigManager = context.getSystemService(CarrierConfigManager.class);
+        mCarrierConfigCache = CarrierConfigCache.getInstance(context);
         mDpcApnEnforcedObserver = new DpcApnEnforcedObserver(new Handler(Looper.getMainLooper()));
     }
 
     @Override
     public int getAvailabilityStatus(int subId) {
-        final PersistableBundle carrierConfig = mCarrierConfigManager.getConfigForSubId(subId);
+        final PersistableBundle carrierConfig = mCarrierConfigCache.getConfigForSubId(subId);
         final boolean isCdmaApn = MobileNetworkUtils.isCdmaOptions(mContext, subId)
                 && carrierConfig != null
                 && carrierConfig.getBoolean(CarrierConfigManager.KEY_SHOW_APN_SETTING_CDMA_BOOL);
@@ -107,6 +108,7 @@ public class ApnPreferenceController extends TelephonyBasePreferenceController i
         if (getPreferenceKey().equals(preference.getKey())) {
             // This activity runs in phone process, we must use intent to start
             final Intent intent = new Intent(Settings.ACTION_APN_SETTINGS);
+            intent.setPackage(mContext.getPackageName());
             // This will setup the Home and Search affordance
             intent.putExtra(SettingsActivity.EXTRA_SHOW_FRAGMENT_AS_SUBSETTING, true);
             intent.putExtra(ApnSettings.SUB_ID, mSubId);

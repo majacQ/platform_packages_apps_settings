@@ -31,27 +31,27 @@ import com.android.settings.core.InstrumentedPreferenceFragment;
 import com.android.settings.fuelgauge.batterytip.AppInfo;
 import com.android.settings.fuelgauge.batterytip.BatteryTipUtils;
 import com.android.settings.overlay.FeatureFactory;
+import com.android.settingslib.utils.StringUtil;
 
 import java.util.List;
 
-/**
- * Controller to change and update the smart battery toggle
- */
+/** Controller to change and update the smart battery toggle */
 public class RestrictAppPreferenceController extends BasePreferenceController {
-    @VisibleForTesting
-    static final String KEY_RESTRICT_APP = "restricted_app";
+    @VisibleForTesting static final String KEY_RESTRICT_APP = "restricted_app";
 
-    @VisibleForTesting
-    List<AppInfo> mAppInfos;
+    @VisibleForTesting List<AppInfo> mAppInfos;
     private AppOpsManager mAppOpsManager;
     private InstrumentedPreferenceFragment mPreferenceFragment;
     private UserManager mUserManager;
+    private boolean mEnableAppBatteryUsagePage;
 
     public RestrictAppPreferenceController(Context context) {
         super(context, KEY_RESTRICT_APP);
         mAppOpsManager = (AppOpsManager) context.getSystemService(Context.APP_OPS_SERVICE);
         mUserManager = context.getSystemService(UserManager.class);
         mAppInfos = BatteryTipUtils.getRestrictedAppsList(mAppOpsManager, mUserManager);
+        mEnableAppBatteryUsagePage =
+                mContext.getResources().getBoolean(R.bool.config_app_battery_usage_list_enabled);
     }
 
     public RestrictAppPreferenceController(InstrumentedPreferenceFragment preferenceFragment) {
@@ -61,7 +61,9 @@ public class RestrictAppPreferenceController extends BasePreferenceController {
 
     @Override
     public int getAvailabilityStatus() {
-        return mAppInfos.size() > 0 ? AVAILABLE : CONDITIONALLY_UNAVAILABLE;
+        return mAppInfos.size() > 0 && !mEnableAppBatteryUsagePage
+                ? AVAILABLE
+                : CONDITIONALLY_UNAVAILABLE;
     }
 
     @Override
@@ -72,18 +74,17 @@ public class RestrictAppPreferenceController extends BasePreferenceController {
         // Fragment change RestrictedAppsList after onPause(), UI needs to be updated in onResume()
         preference.setVisible(num > 0);
         preference.setSummary(
-                mContext.getResources().getQuantityString(R.plurals.restricted_app_summary, num,
-                        num));
+                StringUtil.getIcuPluralsString(mContext, num, R.string.restricted_app_summary));
     }
 
     @Override
     public boolean handlePreferenceTreeClick(Preference preference) {
         if (getPreferenceKey().equals(preference.getKey())) {
             // start fragment
-            RestrictedAppDetails.startRestrictedAppDetails(mPreferenceFragment,
-                    mAppInfos);
-            FeatureFactory.getFactory(mContext).getMetricsFeatureProvider()
-                    .action(mContext, SettingsEnums.OPEN_APP_RESTRICTED_LIST);
+            RestrictedAppDetails.startRestrictedAppDetails(mPreferenceFragment, mAppInfos);
+            FeatureFactory.getFeatureFactory()
+                    .getMetricsFeatureProvider()
+                    .action(mContext, SettingsEnums.ACTION_APP_RESTRICTED_LIST_MANAGED);
             return true;
         }
 

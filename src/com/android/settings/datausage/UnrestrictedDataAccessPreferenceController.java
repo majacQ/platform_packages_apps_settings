@@ -13,7 +13,7 @@
  */
 package com.android.settings.datausage;
 
-import static com.android.settingslib.RestrictedLockUtilsInternal.checkIfMeteredDataRestricted;
+import static com.android.settingslib.RestrictedLockUtilsInternal.checkIfMeteredDataUsageUserControlDisabled;
 
 import android.app.Application;
 import android.app.settings.SettingsEnums;
@@ -29,6 +29,7 @@ import com.android.settings.applications.AppStateBaseBridge;
 import com.android.settings.core.BasePreferenceController;
 import com.android.settings.dashboard.DashboardFragment;
 import com.android.settings.overlay.FeatureFactory;
+import com.android.settingslib.applications.AppUtils;
 import com.android.settingslib.applications.ApplicationsState;
 import com.android.settingslib.applications.ApplicationsState.AppEntry;
 import com.android.settingslib.applications.ApplicationsState.AppFilter;
@@ -90,7 +91,7 @@ public class UnrestrictedDataAccessPreferenceController extends BasePreferenceCo
 
     @Override
     public void onStart() {
-        mDataUsageBridge.resume();
+        mDataUsageBridge.resume(true /* forceLoadAllApps */);
     }
 
     @Override
@@ -125,6 +126,10 @@ public class UnrestrictedDataAccessPreferenceController extends BasePreferenceCo
             return;
         }
 
+        // Preload top visible icons of app list.
+        AppUtils.preloadTopIcons(mContext, apps,
+                mContext.getResources().getInteger(R.integer.config_num_visible_app_icons));
+
         // Create apps key set for removing useless preferences
         final Set<String> appsKeySet = new TreeSet<>();
         // Add or update preferences
@@ -144,8 +149,9 @@ public class UnrestrictedDataAccessPreferenceController extends BasePreferenceCo
                 preference.setOnPreferenceChangeListener(this);
                 mScreen.addPreference(preference);
             } else {
-                preference.setDisabledByAdmin(checkIfMeteredDataRestricted(mContext,
+                preference.setDisabledByAdmin(checkIfMeteredDataUsageUserControlDisabled(mContext,
                         entry.info.packageName, UserHandle.getUserId(entry.info.uid)));
+                preference.checkEcmRestrictionAndSetDisabled(entry.info.packageName);
                 preference.updateState();
             }
             preference.setOrder(i);
@@ -189,7 +195,9 @@ public class UnrestrictedDataAccessPreferenceController extends BasePreferenceCo
             logSpecialPermissionChange(allowlisted, accessPreference.getEntry().info.packageName);
             mDataSaverBackend.setIsAllowlisted(accessPreference.getEntry().info.uid,
                     accessPreference.getEntry().info.packageName, allowlisted);
-            accessPreference.getDataUsageState().isDataSaverAllowlisted = allowlisted;
+            if (accessPreference.getDataUsageState() != null) {
+                accessPreference.getDataUsageState().isDataSaverAllowlisted = allowlisted;
+            }
             return true;
         }
         return false;
@@ -226,7 +234,7 @@ public class UnrestrictedDataAccessPreferenceController extends BasePreferenceCo
     void logSpecialPermissionChange(boolean allowlisted, String packageName) {
         final int logCategory = allowlisted ? SettingsEnums.APP_SPECIAL_PERMISSION_UNL_DATA_ALLOW
                 : SettingsEnums.APP_SPECIAL_PERMISSION_UNL_DATA_DENY;
-        FeatureFactory.getFactory(mContext).getMetricsFeatureProvider().action(mContext,
+        FeatureFactory.getFeatureFactory().getMetricsFeatureProvider().action(mContext,
                 logCategory, packageName);
     }
 

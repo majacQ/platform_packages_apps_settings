@@ -30,10 +30,10 @@ import android.view.ViewGroup;
 import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 import android.widget.CheckedTextView;
-import android.widget.ImageView;
 import android.widget.ListAdapter;
 import android.widget.ListView;
 
+import androidx.annotation.NonNull;
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AlertDialog.Builder;
 import androidx.preference.ListPreferenceDialogFragmentCompat;
@@ -41,11 +41,14 @@ import androidx.preference.PreferenceViewHolder;
 
 import com.android.settingslib.RestrictedLockUtils;
 import com.android.settingslib.RestrictedPreferenceHelper;
+import com.android.settingslib.RestrictedPreferenceHelperProvider;
 
 import java.util.ArrayList;
 import java.util.List;
 
-public class RestrictedListPreference extends CustomListPreference {
+public class RestrictedListPreference extends CustomListPreference implements
+        RestrictedPreferenceHelperProvider {
+
     private final RestrictedPreferenceHelper mHelper;
     private final List<RestrictedItem> mRestrictedItems = new ArrayList<>();
     private boolean mRequiresActiveUnlockedProfile = false;
@@ -53,7 +56,6 @@ public class RestrictedListPreference extends CustomListPreference {
 
     public RestrictedListPreference(Context context, AttributeSet attrs) {
         super(context, attrs);
-        setWidgetLayoutResource(R.layout.restricted_icon);
         mHelper = new RestrictedPreferenceHelper(context, this, attrs);
     }
 
@@ -64,13 +66,14 @@ public class RestrictedListPreference extends CustomListPreference {
     }
 
     @Override
+    public @NonNull RestrictedPreferenceHelper getRestrictedPreferenceHelper() {
+        return mHelper;
+    }
+
+    @Override
     public void onBindViewHolder(PreferenceViewHolder holder) {
         super.onBindViewHolder(holder);
         mHelper.onBindViewHolder(holder);
-        final View restrictedIcon = holder.findViewById(R.id.restricted_icon);
-        if (restrictedIcon != null) {
-            restrictedIcon.setVisibility(isDisabledByAdmin() ? View.VISIBLE : View.GONE);
-        }
     }
 
     @Override
@@ -187,11 +190,9 @@ public class RestrictedListPreference extends CustomListPreference {
             View root = super.getView(position, convertView, parent);
             CharSequence entry = getItem(position);
             CheckedTextView text = (CheckedTextView) root.findViewById(R.id.text1);
-            ImageView padlock = (ImageView) root.findViewById(R.id.restricted_lock_icon);
             if (isRestrictedForEntry(entry)) {
                 text.setEnabled(false);
                 text.setChecked(false);
-                padlock.setVisibility(View.VISIBLE);
             } else {
                 if (mSelectedIndex != -1) {
                     text.setChecked(position == mSelectedIndex);
@@ -199,7 +200,6 @@ public class RestrictedListPreference extends CustomListPreference {
                 if (!text.isEnabled()) {
                     text.setEnabled(true);
                 }
-                padlock.setVisibility(View.GONE);
             }
             return root;
         }

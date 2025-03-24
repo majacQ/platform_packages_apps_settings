@@ -16,6 +16,7 @@
 
 package com.android.settings.datetime.timezone;
 
+import android.content.res.Configuration;
 import android.os.Bundle;
 import android.view.LayoutInflater;
 import android.view.Menu;
@@ -97,7 +98,7 @@ public abstract class BaseTimeZonePicker extends InstrumentedFragment
                 LinearLayoutManager.VERTICAL, /* reverseLayout */ false));
         mRecyclerView.setAdapter(mAdapter);
         mAppBarLayout = getActivity().findViewById(R.id.app_bar);
-        disableToolBarScrollableBehavior();
+        autoSetCollapsingToolbarLayoutScrolling();
 
         // Initialize TimeZoneDataLoader only when mRecyclerView is ready to avoid race
         // during onDateLoaderReady callback.
@@ -136,6 +137,7 @@ public abstract class BaseTimeZonePicker extends InstrumentedFragment
 
             mSearchView.setQueryHint(getText(mSearchHintResId));
             mSearchView.setOnQueryTextListener(this);
+            mSearchView.setMaxWidth(Integer.MAX_VALUE);
 
             if (mDefaultExpandSearch) {
                 searchMenuItem.expandActionView();
@@ -162,7 +164,9 @@ public abstract class BaseTimeZonePicker extends InstrumentedFragment
     @Override
     public boolean onMenuItemActionExpand(MenuItem item) {
         // To prevent a large space on tool bar.
-        mAppBarLayout.setExpanded(false /*expanded*/, false /*animate*/);
+        if (mAppBarLayout != null) {
+            mAppBarLayout.setExpanded(false /*expanded*/, false /*animate*/);
+        }
         // To prevent user can expand the collapsing tool bar view.
         ViewCompat.setNestedScrollingEnabled(mRecyclerView, false);
         return true;
@@ -171,7 +175,9 @@ public abstract class BaseTimeZonePicker extends InstrumentedFragment
     @Override
     public boolean onMenuItemActionCollapse(MenuItem item) {
         // We keep the collapsed status after user cancel the search function.
-        mAppBarLayout.setExpanded(false /*expanded*/, false /*animate*/);
+        if (mAppBarLayout != null) {
+            mAppBarLayout.setExpanded(false /*expanded*/, false /*animate*/);
+        }
         ViewCompat.setNestedScrollingEnabled(mRecyclerView, true);
         return true;
     }
@@ -193,7 +199,11 @@ public abstract class BaseTimeZonePicker extends InstrumentedFragment
         void onListItemClick(T item);
     }
 
-    private void disableToolBarScrollableBehavior() {
+    private void autoSetCollapsingToolbarLayoutScrolling() {
+        if (mAppBarLayout == null) {
+            return;
+        }
+
         CoordinatorLayout.LayoutParams params =
                 (CoordinatorLayout.LayoutParams) mAppBarLayout.getLayoutParams();
         AppBarLayout.Behavior behavior = new AppBarLayout.Behavior();
@@ -201,7 +211,8 @@ public abstract class BaseTimeZonePicker extends InstrumentedFragment
                 new AppBarLayout.Behavior.DragCallback() {
                     @Override
                     public boolean canDrag(@NonNull AppBarLayout appBarLayout) {
-                        return false;
+                        return appBarLayout.getResources().getConfiguration().orientation
+                                == Configuration.ORIENTATION_LANDSCAPE;
                     }
                 });
         params.setBehavior(behavior);

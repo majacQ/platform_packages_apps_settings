@@ -17,30 +17,62 @@
 package com.android.settings.accessibility;
 
 import static android.provider.Settings.Secure.ACCESSIBILITY_BUTTON_MODE_FLOATING_MENU;
+import static android.view.WindowInsets.Type.displayCutout;
+import static android.view.WindowInsets.Type.systemBars;
 import static android.view.WindowManagerPolicyConstants.NAV_BAR_MODE_GESTURAL;
+
+import static com.android.internal.accessibility.common.ShortcutConstants.UserShortcutType.DEFAULT;
+import static com.android.internal.accessibility.common.ShortcutConstants.UserShortcutType.GESTURE;
+import static com.android.internal.accessibility.common.ShortcutConstants.UserShortcutType.HARDWARE;
+import static com.android.internal.accessibility.common.ShortcutConstants.UserShortcutType.QUICK_SETTINGS;
+import static com.android.internal.accessibility.common.ShortcutConstants.UserShortcutType.SOFTWARE;
+import static com.android.internal.accessibility.common.ShortcutConstants.UserShortcutType.TRIPLETAP;
+import static com.android.internal.accessibility.common.ShortcutConstants.UserShortcutType.TWOFINGER_DOUBLETAP;
 
 import android.accessibilityservice.AccessibilityServiceInfo;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.res.Resources;
+import android.graphics.Insets;
+import android.graphics.Rect;
+import android.icu.text.CaseMap;
 import android.os.Build;
+import android.os.UserHandle;
 import android.provider.Settings;
 import android.text.TextUtils;
 import android.util.TypedValue;
+import android.view.WindowManager;
+import android.view.WindowMetrics;
 import android.view.accessibility.AccessibilityManager;
 
 import androidx.annotation.IntDef;
 import androidx.annotation.NonNull;
+import androidx.annotation.StringRes;
 import androidx.annotation.VisibleForTesting;
 
+import com.android.internal.accessibility.common.ShortcutConstants.UserShortcutType;
+import com.android.internal.accessibility.util.ShortcutUtils;
 import com.android.settings.R;
+import com.android.settings.utils.LocaleUtils;
 
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
-import java.util.StringJoiner;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Locale;
 
 /** Provides utility methods to accessibility settings only. */
-final class AccessibilityUtil {
+public final class AccessibilityUtil {
+    // LINT.IfChange(shortcut_type_ui_order)
+    static final int[] SHORTCUTS_ORDER_IN_UI = {
+            QUICK_SETTINGS,
+            SOFTWARE, // FAB displays before gesture. Navbar displays without gesture.
+            GESTURE,
+            HARDWARE,
+            TWOFINGER_DOUBLETAP,
+            TRIPLETAP
+    };
+    // LINT.ThenChange(/res/xml/accessibility_edit_shortcuts.xml:shortcut_type_ui_order)
 
     private AccessibilityUtil(){}
 
@@ -73,30 +105,14 @@ final class AccessibilityUtil {
             new TextUtils.SimpleStringSplitter(COMPONENT_NAME_SEPARATOR);
 
     /**
-     * Annotation for different user shortcut type UI type.
+     * Denotes the quick setting tooltip type.
      *
-     * {@code EMPTY} for displaying default value.
-     * {@code SOFTWARE} for displaying specifying the accessibility services or features which
-     * choose accessibility button in the navigation bar as preferred shortcut.
-     * {@code HARDWARE} for displaying specifying the accessibility services or features which
-     * choose accessibility shortcut as preferred shortcut.
-     * {@code TRIPLETAP} for displaying specifying magnification to be toggled via quickly
-     * tapping screen 3 times as preferred shortcut.
+     * {@code GUIDE_TO_EDIT} for QS tiles that need to be added by editing.
+     * {@code GUIDE_TO_DIRECT_USE} for QS tiles that have been auto-added already.
      */
-    @Retention(RetentionPolicy.SOURCE)
-    @IntDef({
-            UserShortcutType.EMPTY,
-            UserShortcutType.SOFTWARE,
-            UserShortcutType.HARDWARE,
-            UserShortcutType.TRIPLETAP,
-    })
-
-    /** Denotes the user shortcut type. */
-    public @interface UserShortcutType {
-        int EMPTY = 0;
-        int SOFTWARE = 1; // 1 << 0
-        int HARDWARE = 2; // 1 << 1
-        int TRIPLETAP = 4; // 1 << 2
+    public @interface QuickSettingsTooltipType {
+        int GUIDE_TO_EDIT = 0;
+        int GUIDE_TO_DIRECT_USE = 1;
     }
 
     /** Denotes the accessibility enabled status */
@@ -107,15 +123,15 @@ final class AccessibilityUtil {
     }
 
     /**
-     * Return On/Off string according to the setting which specifies the integer value 1 or 0. This
+     * Returns On/Off string according to the setting which specifies the integer value 1 or 0. This
      * setting is defined in the secure system settings {@link android.provider.Settings.Secure}.
      */
-    static CharSequence getSummary(Context context, String settingsSecureKey) {
-        final boolean enabled = Settings.Secure.getInt(context.getContentResolver(),
+    static CharSequence getSummary(
+            Context context, String settingsSecureKey, @StringRes int enabledString,
+            @StringRes int disabledString) {
+        boolean enabled = Settings.Secure.getInt(context.getContentResolver(),
                 settingsSecureKey, State.OFF) == State.ON;
-        final int resId = enabled ? R.string.accessibility_feature_state_on
-                : R.string.accessibility_feature_state_off;
-        return context.getResources().getText(resId);
+        return context.getResources().getText(enabled ? enabledString : disabledString);
     }
 
     /**
@@ -139,8 +155,8 @@ final class AccessibilityUtil {
 
     /** Determines if a gesture navigation bar is being used. */
     public static boolean isGestureNavigateEnabled(Context context) {
-        return context.getResources().getInteger(
-                com.android.internal.R.integer.config_navBarInteractionMode)
+        return Settings.Secure.getInt(context.getContentResolver(),
+                Settings.Secure.NAVIGATION_MODE, -1)
                 == NAV_BAR_MODE_GESTURAL;
     }
 
@@ -179,100 +195,6 @@ final class AccessibilityUtil {
     }
 
     /**
-     * Opts in component name into multiple {@code shortcutTypes} colon-separated string in
-     * Settings.
-     *
-     * @param context The current context.
-     * @param shortcutTypes  A combination of {@link UserShortcutType}.
-     * @param componentName The component name that need to be opted in Settings.
-     */
-    static void optInAllValuesToSettings(Context context, int shortcutTypes,
-            @NonNull ComponentName componentName) {
-        if ((shortcutTypes & UserShortcutType.SOFTWARE) == UserShortcutType.SOFTWARE) {
-            optInValueToSettings(context, UserShortcutType.SOFTWARE, componentName);
-        }
-        if (((shortcutTypes & UserShortcutType.HARDWARE) == UserShortcutType.HARDWARE)) {
-            optInValueToSettings(context, UserShortcutType.HARDWARE, componentName);
-        }
-    }
-
-    /**
-     * Opts in component name into {@code shortcutType} colon-separated string in Settings.
-     *
-     * @param context The current context.
-     * @param shortcutType The preferred shortcut type user selected.
-     * @param componentName The component name that need to be opted in Settings.
-     */
-    @VisibleForTesting
-    static void optInValueToSettings(Context context, @UserShortcutType int shortcutType,
-            @NonNull ComponentName componentName) {
-        final String targetKey = convertKeyFromSettings(shortcutType);
-        final String targetString = Settings.Secure.getString(context.getContentResolver(),
-                targetKey);
-
-        if (hasValueInSettings(context, shortcutType, componentName)) {
-            return;
-        }
-
-        final StringJoiner joiner = new StringJoiner(String.valueOf(COMPONENT_NAME_SEPARATOR));
-        if (!TextUtils.isEmpty(targetString)) {
-            joiner.add(targetString);
-        }
-        joiner.add(componentName.flattenToString());
-
-        Settings.Secure.putString(context.getContentResolver(), targetKey, joiner.toString());
-    }
-
-    /**
-     * Opts out component name into multiple {@code shortcutTypes} colon-separated string in
-     * Settings.
-     *
-     * @param context The current context.
-     * @param shortcutTypes A combination of {@link UserShortcutType}.
-     * @param componentName The component name that need to be opted out from Settings.
-     */
-    static void optOutAllValuesFromSettings(Context context, int shortcutTypes,
-            @NonNull ComponentName componentName) {
-        if ((shortcutTypes & UserShortcutType.SOFTWARE) == UserShortcutType.SOFTWARE) {
-            optOutValueFromSettings(context, UserShortcutType.SOFTWARE, componentName);
-        }
-        if (((shortcutTypes & UserShortcutType.HARDWARE) == UserShortcutType.HARDWARE)) {
-            optOutValueFromSettings(context, UserShortcutType.HARDWARE, componentName);
-        }
-    }
-
-    /**
-     * Opts out component name into {@code shortcutType} colon-separated string in Settings.
-     *
-     * @param context The current context.
-     * @param shortcutType The preferred shortcut type user selected.
-     * @param componentName The component name that need to be opted out from Settings.
-     */
-    @VisibleForTesting
-    static void optOutValueFromSettings(Context context, @UserShortcutType int shortcutType,
-            @NonNull ComponentName componentName) {
-        final StringJoiner joiner = new StringJoiner(String.valueOf(COMPONENT_NAME_SEPARATOR));
-        final String targetKey = convertKeyFromSettings(shortcutType);
-        final String targetString = Settings.Secure.getString(context.getContentResolver(),
-                targetKey);
-
-        if (TextUtils.isEmpty(targetString)) {
-            return;
-        }
-
-        sStringColonSplitter.setString(targetString);
-        while (sStringColonSplitter.hasNext()) {
-            final String name = sStringColonSplitter.next();
-            if (TextUtils.isEmpty(name) || (componentName.flattenToString()).equals(name)) {
-                continue;
-            }
-            joiner.add(name);
-        }
-
-        Settings.Secure.putString(context.getContentResolver(), targetKey, joiner.toString());
-    }
-
-    /**
      * Returns if component name existed in one of {@code shortcutTypes} string in Settings.
      *
      * @param context The current context.
@@ -282,14 +204,18 @@ final class AccessibilityUtil {
      */
     static boolean hasValuesInSettings(Context context, int shortcutTypes,
             @NonNull ComponentName componentName) {
-        boolean exist = false;
-        if ((shortcutTypes & UserShortcutType.SOFTWARE) == UserShortcutType.SOFTWARE) {
-            exist = hasValueInSettings(context, UserShortcutType.SOFTWARE, componentName);
+        for (int shortcutType : AccessibilityUtil.SHORTCUTS_ORDER_IN_UI) {
+            if (!android.provider.Flags.a11yStandaloneGestureEnabled()) {
+                if ((shortcutType & GESTURE) == GESTURE) {
+                    continue;
+                }
+            }
+            if ((shortcutTypes & shortcutType) == shortcutType
+                    && hasValueInSettings(context, shortcutType, componentName)) {
+                return true;
+            }
         }
-        if (((shortcutTypes & UserShortcutType.HARDWARE) == UserShortcutType.HARDWARE)) {
-            exist |= hasValueInSettings(context, UserShortcutType.HARDWARE, componentName);
-        }
-        return exist;
+        return false;
     }
 
     /**
@@ -299,27 +225,19 @@ final class AccessibilityUtil {
      * @param shortcutType The preferred shortcut type user selected.
      * @param componentName The component name that need to be checked existed in Settings.
      * @return {@code true} if componentName existed in Settings.
+     *
+     * @deprecated use
+     * {@link ShortcutUtils#isShortcutContained(Context, int, String)} instead.
+     *
+     * (TODO 367414968: finish removal.)
      */
+    @Deprecated
     @VisibleForTesting
     static boolean hasValueInSettings(Context context, @UserShortcutType int shortcutType,
             @NonNull ComponentName componentName) {
-        final String targetKey = convertKeyFromSettings(shortcutType);
-        final String targetString = Settings.Secure.getString(context.getContentResolver(),
-                targetKey);
-
-        if (TextUtils.isEmpty(targetString)) {
-            return false;
-        }
-
-        sStringColonSplitter.setString(targetString);
-
-        while (sStringColonSplitter.hasNext()) {
-            final String name = sStringColonSplitter.next();
-            if ((componentName.flattenToString()).equals(name)) {
-                return true;
-            }
-        }
-        return false;
+        return ShortcutUtils.getShortcutTargetsFromSettings(
+                context, shortcutType, UserHandle.myUserId()
+        ).contains(componentName.flattenToString());
     }
 
     /**
@@ -332,13 +250,18 @@ final class AccessibilityUtil {
      */
     static int getUserShortcutTypesFromSettings(Context context,
             @NonNull ComponentName componentName) {
-        int shortcutTypes = UserShortcutType.EMPTY;
-        if (hasValuesInSettings(context, UserShortcutType.SOFTWARE, componentName)) {
-            shortcutTypes |= UserShortcutType.SOFTWARE;
+        int shortcutTypes = DEFAULT;
+        for (int shortcutType : AccessibilityUtil.SHORTCUTS_ORDER_IN_UI) {
+            if (!android.provider.Flags.a11yStandaloneGestureEnabled()) {
+                if ((shortcutType & GESTURE) == GESTURE) {
+                    continue;
+                }
+            }
+            if (hasValueInSettings(context, shortcutType, componentName)) {
+                shortcutTypes |= shortcutType;
+            }
         }
-        if (hasValuesInSettings(context, UserShortcutType.HARDWARE, componentName)) {
-            shortcutTypes |= UserShortcutType.HARDWARE;
-        }
+
         return shortcutTypes;
     }
 
@@ -347,19 +270,15 @@ final class AccessibilityUtil {
      *
      * @param shortcutType The shortcut type.
      * @return Mapping key in Settings.
+     *
+     * @deprecated use
+     * {@link ShortcutUtils#convertToKey(int)} instead.
+     *
+     * (TODO 367414968: finish removal.)
      */
+    @Deprecated
     static String convertKeyFromSettings(@UserShortcutType int shortcutType) {
-        switch (shortcutType) {
-            case UserShortcutType.SOFTWARE:
-                return Settings.Secure.ACCESSIBILITY_BUTTON_TARGETS;
-            case UserShortcutType.HARDWARE:
-                return Settings.Secure.ACCESSIBILITY_SHORTCUT_TARGET_SERVICE;
-            case UserShortcutType.TRIPLETAP:
-                return Settings.Secure.ACCESSIBILITY_DISPLAY_MAGNIFICATION_ENABLED;
-            default:
-                throw new IllegalArgumentException(
-                        "Unsupported userShortcutType " + shortcutType);
-        }
+        return ShortcutUtils.convertToKey(shortcutType);
     }
 
     /**
@@ -391,11 +310,97 @@ final class AccessibilityUtil {
     }
 
     /**
+     * Gets the bounds of the display window excluding the insets of the system bar and display
+     * cut out.
+     *
+     * @param context the current context.
+     * @return the bounds of the display window.
+     */
+    public static Rect getDisplayBounds(Context context) {
+        final WindowManager windowManager = context.getSystemService(WindowManager.class);
+        final WindowMetrics metrics = windowManager.getCurrentWindowMetrics();
+
+        final Rect displayBounds = metrics.getBounds();
+        final Insets displayInsets = metrics.getWindowInsets().getInsetsIgnoringVisibility(
+                systemBars() | displayCutout());
+        displayBounds.inset(displayInsets);
+
+        return displayBounds;
+    }
+
+    /**
      * Indicates if the accessibility service belongs to a system App.
      * @param info AccessibilityServiceInfo
      * @return {@code true} if the App is a system App.
      */
     public static boolean isSystemApp(@NonNull AccessibilityServiceInfo info) {
         return info.getResolveInfo().serviceInfo.applicationInfo.isSystemApp();
+    }
+
+    /**
+     * Bypasses the timeout restriction if volume key shortcut assigned.
+     *
+     * @param context the current context.
+     */
+    public static void skipVolumeShortcutDialogTimeoutRestriction(Context context) {
+        Settings.Secure.putInt(context.getContentResolver(),
+                Settings.Secure.SKIP_ACCESSIBILITY_SHORTCUT_DIALOG_TIMEOUT_RESTRICTION, /*
+                    true */ 1);
+    }
+
+    /**
+     * Assembles a localized string describing the provided shortcut types.
+     */
+    public static CharSequence getShortcutSummaryList(Context context, int shortcutTypes) {
+        final List<CharSequence> list = new ArrayList<>();
+
+        for (int shortcutType : AccessibilityUtil.SHORTCUTS_ORDER_IN_UI) {
+            if (!android.provider.Flags.a11yStandaloneGestureEnabled()
+                    && (shortcutType & GESTURE) == GESTURE) {
+                continue;
+            }
+            if (!com.android.server.accessibility.Flags
+                    .enableMagnificationMultipleFingerMultipleTapGesture()
+                    && (shortcutType & TWOFINGER_DOUBLETAP) == TWOFINGER_DOUBLETAP) {
+                continue;
+            }
+
+            if ((shortcutTypes & shortcutType) == shortcutType) {
+                list.add(switch (shortcutType) {
+                    case QUICK_SETTINGS -> context.getText(
+                            R.string.accessibility_feature_shortcut_setting_summary_quick_settings);
+                    case SOFTWARE -> getSoftwareShortcutSummary(context);
+                    case GESTURE -> context.getText(
+                            R.string.accessibility_shortcut_edit_summary_software_gesture);
+                    case HARDWARE -> context.getText(
+                            R.string.accessibility_shortcut_hardware_keyword);
+                    case TWOFINGER_DOUBLETAP -> context.getString(
+                            R.string.accessibility_shortcut_two_finger_double_tap_keyword, 2);
+                    case TRIPLETAP -> context.getText(
+                            R.string.accessibility_shortcut_triple_tap_keyword);
+                    default -> "";
+                });
+            }
+        }
+
+        list.sort(CharSequence::compare);
+        return CaseMap.toTitle().wholeString().noLowercase().apply(Locale.getDefault(), /* iter= */
+                null, LocaleUtils.getConcatenatedString(list));
+    }
+
+    @VisibleForTesting
+    static CharSequence getSoftwareShortcutSummary(Context context) {
+        if (android.provider.Flags.a11yStandaloneGestureEnabled()) {
+            return context.getText(R.string.accessibility_shortcut_edit_summary_software);
+        }
+        int resId;
+        if (AccessibilityUtil.isFloatingMenuEnabled(context)) {
+            resId = R.string.accessibility_shortcut_edit_summary_software;
+        } else if (AccessibilityUtil.isGestureNavigateEnabled(context)) {
+            resId = R.string.accessibility_shortcut_edit_summary_software_gesture;
+        } else {
+            resId = R.string.accessibility_shortcut_edit_summary_software;
+        }
+        return context.getText(resId);
     }
 }

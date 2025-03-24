@@ -20,8 +20,11 @@ import static android.provider.Settings.Secure.SYSTEM_NAVIGATION_KEYS_ENABLED;
 
 import static com.google.common.truth.Truth.assertThat;
 
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import android.app.admin.DevicePolicyManager;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
@@ -55,6 +58,8 @@ public class SwipeToNotificationPreferenceControllerTest {
     @Before
     public void setUp() {
         MockitoAnnotations.initMocks(this);
+        doReturn(mock(DevicePolicyManager.class)).when(mContext)
+                .getSystemService(Context.DEVICE_POLICY_SERVICE);
         mController = new SwipeToNotificationPreferenceController(mContext, KEY_SWIPE_DOWN);
         when(mContext.getPackageManager()).thenReturn(mPackageManager);
         when(mContext.getSystemService(Context.FINGERPRINT_SERVICE))
@@ -140,7 +145,7 @@ public class SwipeToNotificationPreferenceControllerTest {
                 .thenReturn(true);
         // No stored value in shared preferences if not visited yet.
         final Context context = RuntimeEnvironment.application;
-        final SharedPreferences prefs = new SuggestionFeatureProviderImpl(context)
+        final SharedPreferences prefs = new SuggestionFeatureProviderImpl()
                 .getSharedPrefs(context);
 
         assertThat(SwipeToNotificationPreferenceController.isSuggestionComplete(mContext, prefs))
@@ -156,7 +161,7 @@ public class SwipeToNotificationPreferenceControllerTest {
                 .thenReturn(true);
         // No stored value in shared preferences if not visited yet.
         final Context context = RuntimeEnvironment.application;
-        final SharedPreferences prefs = new SuggestionFeatureProviderImpl(context)
+        final SharedPreferences prefs = new SuggestionFeatureProviderImpl()
                 .getSharedPrefs(context);
         prefs.edit()
                 .putBoolean(SwipeToNotificationSettings.PREF_KEY_SUGGESTION_COMPLETE, true)

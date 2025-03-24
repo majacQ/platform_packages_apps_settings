@@ -18,41 +18,43 @@ package com.android.settings.search;
 
 import static com.google.common.truth.Truth.assertThat;
 
+import android.app.Flags;
+import android.platform.test.annotations.RequiresFlagsDisabled;
+import android.platform.test.annotations.RequiresFlagsEnabled;
+import android.platform.test.flag.junit.CheckFlagsRule;
+import android.platform.test.flag.junit.DeviceFlagsValueProvider;
+
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 
 import com.android.settings.backup.UserBackupSettingsActivity;
 import com.android.settings.connecteddevice.ConnectedDeviceDashboardFragment;
 import com.android.settings.connecteddevice.usb.UsbDetailsFragment;
-import com.android.settings.fuelgauge.PowerUsageAdvanced;
-import com.android.settings.fuelgauge.PowerUsageSummary;
+import com.android.settings.fuelgauge.batteryusage.PowerUsageAdvanced;
+import com.android.settings.fuelgauge.batteryusage.PowerUsageSummary;
 import com.android.settings.gestures.GestureNavigationSettingsFragment;
 import com.android.settings.gestures.SystemNavigationGestureSettings;
 import com.android.settings.location.LocationSettings;
 import com.android.settings.location.RecentLocationAccessSeeAllFragment;
-import com.android.settings.network.NetworkDashboardFragment;
 import com.android.settings.notification.zen.ZenModeBlockedEffectsSettings;
 import com.android.settings.notification.zen.ZenModeRestrictNotificationsSettings;
 import com.android.settings.security.SecuritySettings;
 import com.android.settings.security.screenlock.ScreenLockSettings;
 import com.android.settings.system.SystemDashboardFragment;
-import com.android.settings.wifi.WifiSettings;
 
+import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
 @RunWith(AndroidJUnit4.class)
 public class CustomSiteMapRegistryTest {
 
+    @Rule
+    public final CheckFlagsRule mCheckFlagsRule = DeviceFlagsValueProvider.createCheckFlagsRule();
+
     @Test
     public void shouldContainScreenLockSettingsPairs() {
         assertThat(CustomSiteMapRegistry.CUSTOM_SITE_MAP.get(ScreenLockSettings.class.getName()))
                 .isEqualTo(SecuritySettings.class.getName());
-    }
-
-    @Test
-    public void shouldContainWifiSettingsPairs() {
-        assertThat(CustomSiteMapRegistry.CUSTOM_SITE_MAP.get(WifiSettings.class.getName()))
-                .isEqualTo(NetworkDashboardFragment.class.getName());
     }
 
     @Test
@@ -83,10 +85,18 @@ public class CustomSiteMapRegistryTest {
     }
 
     @Test
+    @RequiresFlagsDisabled(Flags.FLAG_MODES_UI)
     public void shouldContainZenModeBlockedEffectsSettingsPairs() {
-        assertThat(CustomSiteMapRegistry.CUSTOM_SITE_MAP.get(
-                ZenModeBlockedEffectsSettings.class.getName())).isEqualTo(
+        assertThat(CustomSiteMapRegistry.CUSTOM_SITE_MAP).containsEntry(
+                ZenModeBlockedEffectsSettings.class.getName(),
                 ZenModeRestrictNotificationsSettings.class.getName());
+    }
+
+    @Test
+    @RequiresFlagsEnabled(Flags.FLAG_MODES_UI)
+    public void shouldNotContainZenModeBlockedEffectsSettingsPairs() {
+        assertThat(CustomSiteMapRegistry.CUSTOM_SITE_MAP)
+                .doesNotContainKey(ZenModeBlockedEffectsSettings.class.getName());
     }
 
     @Test

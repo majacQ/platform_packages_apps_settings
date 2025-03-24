@@ -17,6 +17,7 @@ package com.android.settings.applications;
 
 import static android.app.AppOpsManager.OP_GET_USAGE_STATS;
 import static android.app.AppOpsManager.OP_LOADER_USAGE_STATS;
+import static android.app.admin.DevicePolicyResources.Strings.Settings.WORK_PROFILE_DISABLE_USAGE_ACCESS_WARNING;
 
 import android.Manifest;
 import android.app.AppOpsManager;
@@ -29,22 +30,25 @@ import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.os.Bundle;
 import android.provider.Settings;
+import android.text.TextUtils;
+import android.util.Log;
 
 import androidx.annotation.VisibleForTesting;
 import androidx.appcompat.app.AlertDialog;
 import androidx.preference.Preference;
 import androidx.preference.Preference.OnPreferenceChangeListener;
 import androidx.preference.Preference.OnPreferenceClickListener;
-import androidx.preference.SwitchPreference;
 
 import com.android.settings.R;
 import com.android.settings.applications.AppStateUsageBridge.UsageState;
 import com.android.settings.overlay.FeatureFactory;
+import com.android.settingslib.RestrictedSwitchPreference;
 import com.android.settingslib.core.instrumentation.MetricsFeatureProvider;
 
 public class UsageAccessDetails extends AppInfoWithHeader implements OnPreferenceChangeListener,
         OnPreferenceClickListener {
 
+    private static final String TAG = UsageAccessDetails.class.getSimpleName();
     private static final String KEY_APP_OPS_PREFERENCE_SCREEN = "app_ops_preference_screen";
     private static final String KEY_APP_OPS_SETTINGS_SWITCH = "app_ops_settings_switch";
     private static final String KEY_APP_OPS_SETTINGS_DESC = "app_ops_settings_description";
@@ -53,7 +57,7 @@ public class UsageAccessDetails extends AppInfoWithHeader implements OnPreferenc
     // TODO: Break out this functionality into its own class.
     private AppStateUsageBridge mUsageBridge;
     private AppOpsManager mAppOpsManager;
-    private SwitchPreference mSwitchPref;
+    private RestrictedSwitchPreference mSwitchPref;
     private Preference mUsageDesc;
     private Intent mSettingsIntent;
     private UsageState mUsageState;
@@ -64,12 +68,17 @@ public class UsageAccessDetails extends AppInfoWithHeader implements OnPreferenc
         super.onCreate(savedInstanceState);
 
         Context context = getActivity();
+        if (TextUtils.equals(mPackageName, context.getPackageName())) {
+            Log.w(TAG, "Unsupported app package.");
+            finish();
+        }
+
         mUsageBridge = new AppStateUsageBridge(context, mState, null);
         mAppOpsManager = (AppOpsManager) context.getSystemService(Context.APP_OPS_SERVICE);
         mDpm = context.getSystemService(DevicePolicyManager.class);
 
         addPreferencesFromResource(R.xml.app_ops_permissions_details);
-        mSwitchPref = (SwitchPreference) findPreference(KEY_APP_OPS_SETTINGS_SWITCH);
+        mSwitchPref = (RestrictedSwitchPreference) findPreference(KEY_APP_OPS_SETTINGS_SWITCH);
         mUsageDesc = findPreference(KEY_APP_OPS_SETTINGS_DESC);
 
         getPreferenceScreen().setTitle(R.string.usage_access);
@@ -96,7 +105,9 @@ public class UsageAccessDetails extends AppInfoWithHeader implements OnPreferenc
                     new AlertDialog.Builder(getContext())
                             .setIcon(com.android.internal.R.drawable.ic_dialog_alert_material)
                             .setTitle(android.R.string.dialog_alert_title)
-                            .setMessage(R.string.work_profile_usage_access_warning)
+                            .setMessage(mDpm.getResources().getString(
+                                    WORK_PROFILE_DISABLE_USAGE_ACCESS_WARNING,
+                                    () -> getString(R.string.work_profile_usage_access_warning)))
                             .setPositiveButton(R.string.okay, null)
                             .show();
                 }
@@ -137,7 +148,7 @@ public class UsageAccessDetails extends AppInfoWithHeader implements OnPreferenc
         int logCategory = newState ? SettingsEnums.APP_SPECIAL_PERMISSION_USAGE_VIEW_ALLOW
                 : SettingsEnums.APP_SPECIAL_PERMISSION_USAGE_VIEW_DENY;
         final MetricsFeatureProvider metricsFeatureProvider =
-                FeatureFactory.getFactory(getContext()).getMetricsFeatureProvider();
+                FeatureFactory.getFeatureFactory().getMetricsFeatureProvider();
         metricsFeatureProvider.action(
                 metricsFeatureProvider.getAttribution(getActivity()),
                 logCategory,
@@ -159,8 +170,16 @@ public class UsageAccessDetails extends AppInfoWithHeader implements OnPreferenc
                 mPackageInfo.applicationInfo.uid);
 
         boolean hasAccess = mUsageState.isPermissible();
+        boolean shouldEnable = mUsageState.permissionDeclared;
+
+        if (shouldEnable && !hasAccess) {
+            mSwitchPref.checkEcmRestrictionAndSetDisabled(AppOpsManager.OPSTR_GET_USAGE_STATS,
+                    mPackageName);
+            shouldEnable = !mSwitchPref.isDisabledByEcm();
+        }
+
         mSwitchPref.setChecked(hasAccess);
-        mSwitchPref.setEnabled(mUsageState.permissionDeclared);
+        mSwitchPref.setEnabled(shouldEnable);
 
         ResolveInfo resolveInfo = mPm.resolveActivityAsUser(mSettingsIntent,
                 PackageManager.GET_META_DATA, mUserId);

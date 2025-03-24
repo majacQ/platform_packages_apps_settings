@@ -40,7 +40,10 @@ public abstract class AbstractBluetoothDialogPreferenceController extends
 
     private static final String TAG = "AbstractBtDlgCtr";
 
-    protected static final int[] CODEC_TYPES = {BluetoothCodecConfig.SOURCE_CODEC_TYPE_LDAC,
+    protected static final int[] CODEC_TYPES = {
+            BluetoothCodecConfig.SOURCE_CODEC_TYPE_OPUS,
+            BluetoothCodecConfig.SOURCE_CODEC_TYPE_LC3,
+            BluetoothCodecConfig.SOURCE_CODEC_TYPE_LDAC,
             BluetoothCodecConfig.SOURCE_CODEC_TYPE_APTX_HD,
             BluetoothCodecConfig.SOURCE_CODEC_TYPE_APTX,
             BluetoothCodecConfig.SOURCE_CODEC_TYPE_AAC,
@@ -82,9 +85,11 @@ public abstract class AbstractBluetoothDialogPreferenceController extends
         if (bluetoothA2dp == null) {
             return;
         }
+        // update the cache of a2dp config(mBluetoothA2dpConfigStore) before writing config.
+        initConfigStore();
         writeConfigurationValues(index);
         final BluetoothCodecConfig codecConfig = mBluetoothA2dpConfigStore.createCodecConfig();
-        BluetoothDevice activeDevice = mBluetoothA2dp.getActiveDevice();
+        BluetoothDevice activeDevice = getA2dpActiveDevice();
         if (activeDevice != null) {
             bluetoothA2dp.setCodecConfigPreference(activeDevice, codecConfig);
         }
@@ -113,7 +118,7 @@ public abstract class AbstractBluetoothDialogPreferenceController extends
         if (config == null) {
             return;
         }
-        mBluetoothA2dpConfigStore.setCodecType(config.getCodecType());
+        mBluetoothA2dpConfigStore.setCodecType(config.getExtendedCodecType());
         mBluetoothA2dpConfigStore.setSampleRate(config.getSampleRate());
         mBluetoothA2dpConfigStore.setBitsPerSample(config.getBitsPerSample());
         mBluetoothA2dpConfigStore.setChannelMode(config.getChannelMode());
@@ -153,7 +158,7 @@ public abstract class AbstractBluetoothDialogPreferenceController extends
         if (bluetoothA2dp == null) {
             return null;
         }
-        BluetoothDevice activeDevice = bluetoothA2dp.getActiveDevice();
+        BluetoothDevice activeDevice = getA2dpActiveDevice();
         if (activeDevice == null) {
             Log.d(TAG, "Unable to get current codec config. No active device.");
             return null;
@@ -178,7 +183,7 @@ public abstract class AbstractBluetoothDialogPreferenceController extends
             return null;
         }
         BluetoothDevice bluetoothDevice =
-                (device != null) ? device : bluetoothA2dp.getActiveDevice();
+                (device != null) ? device : getA2dpActiveDevice();
         if (bluetoothDevice == null) {
             return null;
         }
@@ -195,7 +200,7 @@ public abstract class AbstractBluetoothDialogPreferenceController extends
      * @return {@link BluetoothCodecConfig}.
      */
     protected BluetoothCodecConfig getSelectableByCodecType(int codecTypeValue) {
-        BluetoothDevice activeDevice = mBluetoothA2dp.getActiveDevice();
+        BluetoothDevice activeDevice = getA2dpActiveDevice();
         if (activeDevice == null) {
             Log.d(TAG, "Unable to get selectable config. No active device.");
             return null;

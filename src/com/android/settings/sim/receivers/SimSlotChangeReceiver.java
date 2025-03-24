@@ -29,16 +29,18 @@ import android.util.Log;
 import androidx.annotation.Nullable;
 
 import com.android.settings.R;
-import com.android.settingslib.utils.ThreadUtils;
+import com.android.settings.network.SatelliteRepository;
+
+import com.google.common.util.concurrent.ListenableFuture;
 
 import java.util.List;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executor;
+import java.util.concurrent.Executors;
 
 /** The receiver when the slot status changes. */
 public class SimSlotChangeReceiver extends BroadcastReceiver {
     private static final String TAG = "SlotChangeReceiver";
-
-    private final SimSlotChangeHandler mSlotChangeHandler = SimSlotChangeHandler.get();
-    private final Object mLock = new Object();
 
     @Override
     public void onReceive(Context context, Intent intent) {
@@ -49,20 +51,36 @@ public class SimSlotChangeReceiver extends BroadcastReceiver {
             return;
         }
 
-        final PendingResult pendingResult = goAsync();
-        ThreadUtils.postOnBackgroundThread(
-                () -> {
-                    synchronized (mLock) {
-                        if (shouldHandleSlotChange(context)) {
-                            mSlotChangeHandler.onSlotsStatusChange(context.getApplicationContext());
-                        }
-                    }
-                    ThreadUtils.postOnMainThread(pendingResult::finish);
-                });
+        SimSlotChangeService.scheduleSimSlotChange(context);
+    }
+
+    public static void runOnBackgroundThread(Context context) {
+        if (shouldHandleSlotChange(context)) {
+            Log.d(TAG, "Checking satellite session status");
+            Executor executor = Executors.newSingleThreadExecutor();
+            ListenableFuture<Boolean> isSatelliteSessionStartedFuture =
+                    new SatelliteRepository(context).requestIsSessionStarted(executor);
+            isSatelliteSessionStartedFuture.addListener(() -> {
+                boolean isSatelliteSessionStarted = false;
+                try {
+                    isSatelliteSessionStarted = isSatelliteSessionStartedFuture.get();
+                } catch (ExecutionException | InterruptedException e) {
+                    Log.w(TAG, "Can't get satellite session status", e);
+                }
+
+                if (isSatelliteSessionStarted) {
+                    Log.i(TAG, "Device is in a satellite session. Unable to handle SIM slot"
+                            + " changes");
+                } else {
+                    Log.i(TAG, "Not in a satellite session. Handle slot changes");
+                    SimSlotChangeHandler.get().onSlotsStatusChange(context.getApplicationContext());
+                }
+            }, executor);
+        }
     }
 
     // Checks whether the slot event should be handled.
-    private boolean shouldHandleSlotChange(Context context) {
+    private static boolean shouldHandleSlotChange(Context context) {
         if (!context.getResources().getBoolean(R.bool.config_handle_sim_slot_change)) {
             Log.i(TAG, "The flag is off. Ignore slot changes.");
             return false;
@@ -88,7 +106,7 @@ public class SimSlotChangeReceiver extends BroadcastReceiver {
     }
 
     // Checks whether the SIM slot state is valid for slot change event.
-    private boolean isSimSlotStateValid(Context context) {
+    private static boolean isSimSlotStateValid(Context context) {
         final TelephonyManager telMgr = context.getSystemService(TelephonyManager.class);
         UiccSlotInfo[] slotInfos = telMgr.getUiccSlotsInfo();
         if (slotInfos == null) {
@@ -136,7 +154,8 @@ public class SimSlotChangeReceiver extends BroadcastReceiver {
     }
 
     @Nullable
-    private UiccCardInfo findUiccCardInfoBySlot(TelephonyManager telMgr, int physicalSlotIndex) {
+    private static UiccCardInfo findUiccCardInfoBySlot(TelephonyManager telMgr,
+            int physicalSlotIndex) {
         List<UiccCardInfo> cardInfos = telMgr.getUiccCardsInfo();
         if (cardInfos == null) {
             return null;

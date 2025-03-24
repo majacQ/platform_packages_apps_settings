@@ -18,10 +18,13 @@ package com.android.settings.wifi;
 
 import static com.android.settings.wifi.WifiConfigController.PRIVACY_SPINNER_INDEX_DEVICE_MAC;
 import static com.android.settings.wifi.WifiConfigController.PRIVACY_SPINNER_INDEX_RANDOMIZED_MAC;
+import static com.android.settings.wifi.WifiConfigController.DHCP_SPINNER_INDEX_SEND_DHCP_HOST_NAME_ENABLE;
+import static com.android.settings.wifi.WifiConfigController.DHCP_SPINNER_INDEX_SEND_DHCP_HOST_NAME_DISABLE;
 
 import static com.google.common.truth.Truth.assertThat;
 
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.when;
 import static org.robolectric.Shadows.shadowOf;
 
@@ -45,6 +48,8 @@ import android.widget.LinearLayout;
 import android.widget.Spinner;
 import android.widget.TextView;
 
+import androidx.test.core.app.ApplicationProvider;
+
 import com.android.settings.R;
 import com.android.settings.network.SubscriptionUtil;
 import com.android.settings.testutils.shadow.ShadowConnectivityManager;
@@ -56,7 +61,6 @@ import org.junit.runner.RunWith;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 import org.robolectric.RobolectricTestRunner;
-import org.robolectric.RuntimeEnvironment;
 import org.robolectric.Shadows;
 import org.robolectric.annotation.Config;
 import org.robolectric.shadows.ShadowInputMethodManager;
@@ -94,7 +98,8 @@ public class WifiConfigControllerTest {
     @Before
     public void setUp() {
         MockitoAnnotations.initMocks(this);
-        mContext = RuntimeEnvironment.application;
+        mContext = spy(ApplicationProvider.getApplicationContext());
+        when(mContext.getSystemService(Context.WIFI_SERVICE)).thenReturn(mock(WifiManager.class));
         when(mConfigUiBase.getContext()).thenReturn(mContext);
         when(mAccessPoint.getSecurity()).thenReturn(AccessPoint.SECURITY_PSK);
         mView = LayoutInflater.from(mContext).inflate(R.layout.wifi_dialog, null);
@@ -348,15 +353,18 @@ public class WifiConfigControllerTest {
         for (int i = 0; i < adapter.getCount(); i++) {
             String val = adapter.getItem(i);
 
-            if (val.compareTo(mContext.getString(R.string.wifi_security_sae)) == 0) {
+            if (val.compareTo(mContext.getString(
+                    com.android.settingslib.R.string.wifi_security_sae)) == 0) {
                 saeFound = true;
             }
 
-            if (val.compareTo(mContext.getString(R.string.wifi_security_eap_suiteb)) == 0) {
+            if (val.compareTo(mContext.getString(
+                    com.android.settingslib.R.string.wifi_security_eap_suiteb)) == 0) {
                 suitebFound = true;
             }
 
-            if (val.compareTo(mContext.getString(R.string.wifi_security_owe)) == 0) {
+            if (val.compareTo(mContext.getString(
+                    com.android.settingslib.R.string.wifi_security_owe)) == 0) {
                 oweFound = true;
             }
         }
@@ -442,6 +450,41 @@ public class WifiConfigControllerTest {
 
         WifiConfiguration config = mController.getConfig();
         assertThat(config.macRandomizationSetting).isEqualTo(WifiConfiguration.RANDOMIZATION_NONE);
+    }
+
+    @Test
+    public void loadSavedDhcpValue_true() {
+        checkSavedDhcpValue(true);
+    }
+
+    @Test
+    public void loadSavedDhcpValue_false() {
+        checkSavedDhcpValue(false);
+    }
+
+    private void checkSavedDhcpValue(boolean dhcpValue) {
+        when(mAccessPoint.isSaved()).thenReturn(true);
+        final WifiConfiguration mockWifiConfig = mock(WifiConfiguration.class);
+        when(mockWifiConfig.getIpConfiguration()).thenReturn(mock(IpConfiguration.class));
+        when(mockWifiConfig.isSendDhcpHostnameEnabled()).thenReturn(dhcpValue);
+        when(mAccessPoint.getConfig()).thenReturn(mockWifiConfig);
+        mController = new TestWifiConfigController(mConfigUiBase, mView, mAccessPoint,
+                WifiConfigUiBase.MODE_CONNECT);
+        final Spinner dhcpSetting = mView.findViewById(R.id.dhcp_settings);
+
+        assertThat(dhcpSetting.getVisibility()).isEqualTo(View.VISIBLE);
+        assertThat(dhcpSetting.getSelectedItemPosition()).isEqualTo(
+                dhcpValue ? DHCP_SPINNER_INDEX_SEND_DHCP_HOST_NAME_ENABLE :
+                        DHCP_SPINNER_INDEX_SEND_DHCP_HOST_NAME_DISABLE);
+    }
+
+    @Test
+    public void saveDhcpValue_changedToFalse() {
+        final Spinner privacySetting = mView.findViewById(R.id.dhcp_settings);
+        privacySetting.setSelection(DHCP_SPINNER_INDEX_SEND_DHCP_HOST_NAME_DISABLE);
+
+        WifiConfiguration config = mController.getConfig();
+        assertThat(config.isSendDhcpHostnameEnabled()).isEqualTo(false);
     }
 
     @Test

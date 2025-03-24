@@ -24,7 +24,9 @@ import static org.mockito.Mockito.verify;
 import android.content.Context;
 import android.net.Uri;
 
+import androidx.annotation.NonNull;
 import androidx.lifecycle.LiveData;
+import androidx.lifecycle.Observer;
 import androidx.slice.Slice;
 
 import org.junit.Before;
@@ -43,10 +45,10 @@ public class SlicePreferenceControllerTest {
     private LiveData<Slice> mLiveData;
     @Mock
     private SlicePreference mSlicePreference;
+
     private Context mContext;
     private SlicePreferenceController mController;
     private Uri mUri;
-
 
     @Before
     public void setUp() {
@@ -78,8 +80,25 @@ public class SlicePreferenceControllerTest {
 
     @Test
     public void onStop_unregisterObserver() {
+        mController.onStart();
+
         mController.onStop();
         verify(mLiveData).removeObserver(mController);
+    }
+
+    @Test
+    public void onStop_unregisterObserverAndHasSecurityException_noCrash() {
+        LiveData<Slice> liveData = new LiveData<Slice>() {
+            @Override
+            public void removeObserver(@NonNull Observer<? super Slice> observer) {
+                super.removeObserver(observer);
+                throw new SecurityException("SecurityException Test");
+            }
+        };
+        mController.mLiveData = liveData;
+        mController.onStart();
+
+        mController.onStop();
     }
 
     @Test

@@ -16,20 +16,27 @@
 
 package com.android.settings.wifi.dpp;
 
+import static android.os.UserManager.DISALLOW_ADD_WIFI_CONFIG;
+
 import android.app.settings.SettingsEnums;
+import android.content.Context;
 import android.content.Intent;
 import android.net.Uri;
 import android.net.wifi.WifiConfiguration;
 import android.net.wifi.WifiInfo;
 import android.net.wifi.WifiManager;
 import android.os.Bundle;
+import android.os.UserManager;
 import android.provider.Settings;
+import android.util.EventLog;
 import android.util.Log;
 
 import androidx.annotation.VisibleForTesting;
 import androidx.fragment.app.FragmentTransaction;
 
 import com.android.settings.R;
+import com.android.settings.flags.Flags;
+import com.android.settings.overlay.FeatureFactory;
 
 import java.util.List;
 
@@ -96,6 +103,10 @@ public class WifiDppConfiguratorActivity extends WifiDppBaseActivity implements
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        if (!isAddWifiConfigAllowed(getApplicationContext())) {
+            finish();
+            return;
+        }
 
         if (savedInstanceState != null) {
             String qrCode = savedInstanceState.getString(KEY_QR_CODE);
@@ -116,6 +127,17 @@ public class WifiDppConfiguratorActivity extends WifiDppBaseActivity implements
 
     @Override
     protected void handleIntent(Intent intent) {
+        if (!isAddWifiConfigAllowed(getApplicationContext())) {
+            finish();
+            return;
+        }
+        if (isGuestUser(getApplicationContext())) {
+            Log.e(TAG, "Guest user is not allowed to configure Wi-Fi!");
+            EventLog.writeEvent(0x534e4554, "224772890", -1 /* UID */, "User is a guest");
+            finish();
+            return;
+        }
+
         String action = intent != null ? intent.getAction() : null;
         if (action == null) {
             finish();
@@ -185,7 +207,8 @@ public class WifiDppConfiguratorActivity extends WifiDppBaseActivity implements
         }
     }
 
-    private void showQrCodeScannerFragment() {
+    @VisibleForTesting
+    void showQrCodeScannerFragment() {
         WifiDppQrCodeScannerFragment fragment =
                 (WifiDppQrCodeScannerFragment) mFragmentManager.findFragmentByTag(
                         WifiDppUtils.TAG_FRAGMENT_QR_CODE_SCANNER);
@@ -215,7 +238,12 @@ public class WifiDppConfiguratorActivity extends WifiDppBaseActivity implements
                         WifiDppUtils.TAG_FRAGMENT_QR_CODE_GENERATOR);
 
         if (fragment == null) {
-            fragment = new WifiDppQrCodeGeneratorFragment();
+            if (Flags.enableWifiSharingRuntimeFragment()) {
+                fragment = FeatureFactory.getFeatureFactory().getWifiFeatureProvider()
+                    .getWifiDppQrCodeGeneratorFragment();
+            } else {
+                fragment = new WifiDppQrCodeGeneratorFragment();
+            }
         } else {
             if (fragment.isVisible()) {
                 return;
@@ -383,5 +411,22 @@ public class WifiDppConfiguratorActivity extends WifiDppBaseActivity implements
         }
 
         return null;
+    }
+
+    private static boolean isGuestUser(Context context) {
+        if (context == null) return false;
+        final UserManager userManager = context.getSystemService(UserManager.class);
+        if (userManager == null) return false;
+        return userManager.isGuestUser();
+    }
+
+    @VisibleForTesting
+    static boolean isAddWifiConfigAllowed(Context context) {
+        UserManager userManager = context.getSystemService(UserManager.class);
+        if (userManager != null && userManager.hasUserRestriction(DISALLOW_ADD_WIFI_CONFIG)) {
+            Log.e(TAG, "The user is not allowed to add Wi-Fi configuration.");
+            return false;
+        }
+        return true;
     }
 }

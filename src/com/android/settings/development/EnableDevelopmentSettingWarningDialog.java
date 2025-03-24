@@ -24,8 +24,8 @@ import android.os.Bundle;
 import androidx.appcompat.app.AlertDialog;
 import androidx.fragment.app.FragmentManager;
 
-import com.android.settings.R;
 import com.android.settings.core.instrumentation.InstrumentedDialogFragment;
+import com.android.settingslib.R;
 
 public class EnableDevelopmentSettingWarningDialog extends InstrumentedDialogFragment
         implements DialogInterface.OnClickListener {
@@ -53,8 +53,8 @@ public class EnableDevelopmentSettingWarningDialog extends InstrumentedDialogFra
         return new AlertDialog.Builder(getActivity())
                 .setMessage(R.string.dev_settings_warning_message)
                 .setTitle(R.string.dev_settings_warning_title)
-                .setPositiveButton(android.R.string.yes, this)
-                .setNegativeButton(android.R.string.no, this)
+                .setPositiveButton(android.R.string.ok, this)
+                .setNegativeButton(android.R.string.cancel, this)
                 .create();
     }
 

@@ -16,8 +16,12 @@
 
 <PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android"
                   xmlns:settings="http://schemas.android.com/apk/res-auto"
-                  android:key="wifi_calling_settings"
+                  android:key="wifi_calling"
                   android:title="@string/wifi_calling_settings_title">
+
+    <com.android.settings.widget.SettingsMainSwitchPreference
+            android:key="wifi_calling_switch_bar"
+            android:title="@string/wifi_calling_main_switch_title" />
 
     <com.android.settings.wifi.calling.ListWithEntrySummaryPreference
             android:key="wifi_calling_mode"

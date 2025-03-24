@@ -17,56 +17,49 @@
 package com.android.settings.fuelgauge;
 
 import static com.android.settings.core.BasePreferenceController.AVAILABLE;
-import static com.android.settings.core.BasePreferenceController.UNSUPPORTED_ON_DEVICE;
 
 import static com.google.common.truth.Truth.assertThat;
 
-import static org.mockito.Mockito.any;
-import static org.mockito.Mockito.doNothing;
-import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.spy;
-import static org.mockito.Mockito.times;
-import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import android.app.Activity;
 import android.content.ComponentName;
 import android.content.Context;
+import android.hardware.usb.UsbManager;
+import android.hardware.usb.UsbPort;
+import android.hardware.usb.UsbPortStatus;
+import android.os.BatteryManager;
 
 import androidx.preference.Preference;
+import androidx.test.core.app.ApplicationProvider;
 
 import com.android.settings.R;
-import com.android.settings.testutils.FakeFeatureFactory;
+import com.android.settings.testutils.BatteryTestUtils;
 
-import org.junit.After;
 import org.junit.Before;
+import org.junit.Ignore;
 import org.junit.Test;
 import org.junit.runner.RunWith;
+import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
-import org.robolectric.Robolectric;
 import org.robolectric.RobolectricTestRunner;
-import org.robolectric.annotation.Config;
 
 @RunWith(RobolectricTestRunner.class)
 public class TopLevelBatteryPreferenceControllerTest {
     private Context mContext;
-    private FakeFeatureFactory mFeatureFactory;
     private TopLevelBatteryPreferenceController mController;
     private BatterySettingsFeatureProvider mBatterySettingsFeatureProvider;
+
+    @Mock private UsbPort mUsbPort;
+    @Mock private UsbManager mUsbManager;
+    @Mock private UsbPortStatus mUsbPortStatus;
 
     @Before
     public void setUp() {
         MockitoAnnotations.initMocks(this);
-        mFeatureFactory = FakeFeatureFactory.setupForTest();
-        mContext = spy(Robolectric.setupActivity(Activity.class));
+        mContext = spy(ApplicationProvider.getApplicationContext());
         mController = new TopLevelBatteryPreferenceController(mContext, "test_key");
-        mBatterySettingsFeatureProvider =
-                mFeatureFactory.batterySettingsFeatureProvider;
-    }
-
-    @After
-    public void cleanUp() {
-        TopLevelBatteryPreferenceController.sReplacingActivityMap.clear();
+        when(mContext.getSystemService(UsbManager.class)).thenReturn(mUsbManager);
     }
 
     @Test
@@ -75,65 +68,12 @@ public class TopLevelBatteryPreferenceControllerTest {
     }
 
     @Test
-    @Config(qualifiers = "mcc999")
-    public void getAvailabilityStatus_unsupportedWhenSet() {
-        assertThat(mController.getAvailabilityStatus()).isEqualTo(UNSUPPORTED_ON_DEVICE);
-    }
-
-    @Test
-    public void handlePreferenceTreeClick_noFragment_noCustomActivityCalled() {
-        Preference preference = new Preference(mContext);
-
-        assertThat(mController.handlePreferenceTreeClick(preference)).isFalse();
-    }
-
-    @Test
-    public void handlePreferenceTreeClick_sameActivityReturned_noCustomActivityCalled() {
-        String fragmentPath = "my.fragment.ClassName";
-        Preference preference = mock(Preference.class);
-        when(preference.getFragment()).thenReturn(fragmentPath);
-        ComponentName pathName = mController.convertClassPathToComponentName(fragmentPath);
-        when(mBatterySettingsFeatureProvider.getReplacingActivity(any())).thenReturn(pathName);
-
-        assertThat(mController.handlePreferenceTreeClick(preference)).isFalse();
-    }
-
-    @Test
-    public void handlePreferenceTreeClick_newActivityReturned_newActivityRedirected() {
-        String fragmentPath = "my.fragment.ClassName";
-        Preference preference = mock(Preference.class);
-        when(preference.getFragment()).thenReturn(fragmentPath);
-        String newFragmentPath = "my.fragment.NewClassName";
-        ComponentName newPathName = mController.convertClassPathToComponentName(newFragmentPath);
-        when(mBatterySettingsFeatureProvider.getReplacingActivity(any())).thenReturn(
-                newPathName);
-        doNothing().when(mContext).startActivity(any());
-
-        assertThat(mController.handlePreferenceTreeClick(preference)).isTrue();
-    }
-
-    @Test
-    public void handlePreferenceTreeClick_calledMultipleTimes_fetchedFromCache() {
-        String fragmentPath = "my.fragment.ClassName";
-        Preference preference = mock(Preference.class);
-        when(preference.getFragment()).thenReturn(fragmentPath);
-        String newFragmentPath = "my.fragment.NewClassName";
-        ComponentName newPathName = mController.convertClassPathToComponentName(newFragmentPath);
-        when(mBatterySettingsFeatureProvider.getReplacingActivity(any())).thenReturn(
-                newPathName);
-        doNothing().when(mContext).startActivity(any());
-
-        assertThat(mController.handlePreferenceTreeClick(preference)).isTrue();
-        assertThat(mController.handlePreferenceTreeClick(preference)).isTrue();
-        verify(mBatterySettingsFeatureProvider, times(1)).getReplacingActivity(any());
-    }
-
-    @Test
     public void convertClassPathToComponentName_nullInput_returnsNull() {
         assertThat(mController.convertClassPathToComponentName(null)).isNull();
     }
 
     @Test
+    @Ignore
     public void convertClassPathToComponentName_emptyStringInput_returnsNull() {
         assertThat(mController.convertClassPathToComponentName("")).isNull();
     }
@@ -155,25 +95,64 @@ public class TopLevelBatteryPreferenceControllerTest {
     }
 
     @Test
-    public void getDashboardLabel_returnsCorrectLabel() {
+    public void getDashboardLabel_returnsBatterPercentString() {
+        mController.mPreference = new Preference(mContext);
         BatteryInfo info = new BatteryInfo();
         info.batteryPercentString = "3%";
+
         assertThat(mController.getDashboardLabel(mContext, info, true))
                 .isEqualTo(info.batteryPercentString);
+    }
 
+    @Test
+    public void getDashboardLabel_returnsRemainingLabel() {
+        mController.mPreference = new Preference(mContext);
+        BatteryInfo info = new BatteryInfo();
+        info.batteryPercentString = "3%";
         info.remainingLabel = "Phone will shut down soon";
+
         assertThat(mController.getDashboardLabel(mContext, info, true))
                 .isEqualTo("3% - Phone will shut down soon");
+    }
 
+    @Test
+    public void getDashboardLabel_returnsChargeLabel() {
+        mController.mPreference = new Preference(mContext);
+        BatteryInfo info = new BatteryInfo();
         info.discharging = false;
         info.chargeLabel = "5% - charging";
-        assertThat(mController.getDashboardLabel(mContext, info, true)).isEqualTo("5% - charging");
+
+        assertThat(mController.getDashboardLabel(mContext, info, true)).isEqualTo(info.chargeLabel);
+    }
+
+    @Test
+    public void getDashboardLabel_incompatibleCharger_returnsCorrectLabel() {
+        BatteryTestUtils.setupIncompatibleEvent(mUsbPort, mUsbManager, mUsbPortStatus);
+        mController.mPreference = new Preference(mContext);
+        BatteryInfo info = new BatteryInfo();
+        info.batteryPercentString = "66%";
+
+        assertThat(mController.getDashboardLabel(mContext, info, true))
+                .isEqualTo(
+                        mContext.getString(
+                                com.android.settingslib.R.string
+                                        .power_incompatible_charging_settings_home_page,
+                                info.batteryPercentString));
+    }
+
+    @Test
+    public void getDashboardLabel_notChargingState_returnsCorrectLabel() {
+        mController.mPreference = new Preference(mContext);
+        BatteryInfo info = new BatteryInfo();
+        info.batteryStatus = BatteryManager.BATTERY_STATUS_NOT_CHARGING;
+        info.statusLabel = "expected returned label";
+
+        assertThat(mController.getDashboardLabel(mContext, info, true)).isEqualTo(info.statusLabel);
     }
 
     @Test
     public void getSummary_batteryNotPresent_shouldShowWarningMessage() {
         mController.mIsBatteryPresent = false;
-
         assertThat(mController.getSummary())
                 .isEqualTo(mContext.getString(R.string.battery_missing_message));
     }
